@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+array_contains(){
+	local seeking=$1; shift
+	local retvar=0
+	
+	for element;
+	do
+		if [ $element == $seeking ];
+		then
+			retvar=1
+			break
+		fi
+	done
+	echo $retvar
+}

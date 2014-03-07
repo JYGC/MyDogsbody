@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+BIN=$HOME/bin
+
+LIB=$HOME/lib
+PHPLIB=$LIB/php
+PERLLIB=$LIB/perl
+SHLIB=$LIB/shell
+
+MODULES=$HOME/modules
+PHPMODULES=$MODULES/php
+PERLMODULES=$MODULES/perl
+SHMODULES=$MODULES/shell

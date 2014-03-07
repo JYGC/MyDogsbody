@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+HOME=$(dirname $0)/..
+
+. $HOME/lib/shell/global_variables
+. $SHMODULES/prerun_check
+. $SHLIB/auxillary_functions
+
+page_geturls(){
+	urls=$(
+		echo $1 |
+		$PHP $PHPMODULES/resrc_curl.php |
+		$PERLMODULES/extractlink_urlfind.pl)
+	
+	for url in $urls
+	do
+		if [ $(array_contains $url "${arr[@]}") == 0 ] &&
+			[ "$(echo $url | $PERLMODULES/getdomain.pl)" == "$2" ];
+		then
+			echo $url;
+			visited_urls+=($url);
+			page_geturls $url;
+		fi
+	done
+}
+
+if [ -f $0 ];
+then
+	check_dependency;
+	
+	visited_urls=();
+	
+	page_geturls $1 $2;
+fi

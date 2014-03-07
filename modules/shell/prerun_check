@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+check_perl(){
+	PERL_DEPS="perl perl5"
+	
+	for cmd in $PERL_DEPS
+	do
+		if [ $(command -v $cmd) ];
+		then
+			PERL=$cmd
+		fi
+	done
+}
+
+check_php(){
+	PHP_DEPS="php php5"
+	
+	for cmd in $PHP_DEPS
+	do
+		if [ $(command -v $cmd) ];
+		then
+			PHP=$cmd
+		fi
+	done	
+}
+
+check_curl(){
+	CURL_DEPS="curl"
+	
+	for cmd in $CURL_DEPS
+	do
+		if [ $(command -v $cmd) ];
+		then
+			CURL=$cmd
+		fi
+	done
+}
+
+check_dependency(){
+	
+	check_perl;
+	check_php;
+	check_curl;
+	
+	if [ -z $PERL ] && [ -z $PHP ] && [ -z $CURL ];
+	then
+		
+		if [ -z $PERL ];
+		then
+			echo "Missing Dependency: Perl5 cannot be found. Terminating.";
+		fi
+		
+		if [ -z $PHP ];
+		then
+			echo "Missing Dependency: PHP5 cannot be found. Terminating.";
+		fi
+		
+		if [ -z $CURL ];
+		then
+			echo "Missing Dependency: cURL cannot be found. Terminating."
+		fi
+		
+		exit;
+	fi
+}
