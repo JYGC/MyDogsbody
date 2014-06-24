@@ -1,6 +1,6 @@
-#!/usr/bin/perl
+#!/usr/bin/env ruby
 
-# Copyright (c) 2013, 2014, Junying Chen <casperchen91@hotmail.com>
+# Copyright (c) 2014, Junying Chen <casperchen91@hotmail.com>
 #
 # Permission to use, copy, modify, and/or distribute this
 # software for any purpose with or without fee is hereby
@@ -17,9 +17,17 @@
 # TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE
 # USE OR PERFORMANCE OF THIS SOFTWARE.
 
-use URI;
+require_relative 'website'
 
-my $url		= URI->new( <STDIN> );
-my $domain	= $url->host;
-
-print $domain;
+if __FILE__ == $0
+  scope  = ARGV[0]
+  tovisit = Array.new
+  visited = Array.new
+  
+  tovisit.unshift(Website.new(scope))
+  
+  while 0 != tovisit.length do
+    cursite = tovisit.pop
+    cursite.crawlSite
+  end
+end
