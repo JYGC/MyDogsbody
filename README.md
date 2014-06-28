@@ -14,7 +14,7 @@ Dependencies:
 - rubygem-nokogiri
 
 ############ Change Log: 28/06/14 ###############
-Message: Re-organising code
+Message: Re-organising some code
 
 Rewritten some code, seperate code accourding to
 their function.
