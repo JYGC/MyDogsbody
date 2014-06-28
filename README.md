@@ -10,8 +10,14 @@ problems that have to be ironed out first.
 Contributions, forks and derivatives are welcome.
 
 Dependencies:
-	- ruby 1.9
-	- rubygem-nokogiri
+- ruby 1.9
+- rubygem-nokogiri
+
+############ Change Log: 28/06/14 ###############
+Message: Re-organising code
+
+Rewritten some code, seperate code accourding to
+their function.
 
 ############ Change Log: 24/06/14 ###############
 Message: Rewritten in Ruby

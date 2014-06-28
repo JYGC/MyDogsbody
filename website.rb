@@ -22,7 +22,7 @@ require 'rubygems'
 require 'nokogiri'
 require 'open-uri'
 
-#require_relative 'page_handlers'
+require_relative 'auxillary'
 
 class Website
   
@@ -37,6 +37,8 @@ class Website
     @@webSiteName = websitename
     @@tovisit.unshift({
       'pageurl'  => @@webSiteName,
+      'urlscheme'=> nil,
+      'header'   => nil,
       'document' => nil})
   end
   
@@ -64,30 +66,16 @@ class Website
   def openLinks(page)
     puts "#{page['pageurl']}" #####
     url = URI.parse(URI.encode(page['pageurl'].strip))
-    http = Net::HTTP.new(url.host,url.port)
     
-    if /^http:/.match(page['pageurl'])
-      http.use_ssl = false
-    elsif /^https:/.match(page['pageurl'])
-      http.use_ssl = true
-    end
-    
-    urlscheme = url.class
-    puts "#{urlscheme}"
-    
-    #urlscheme, http = pageSchemeHandler(url,http)
-    
-    #puts "#{urlscheme} and #{http}"
+    urlscheme, http = URLHandling.urlSchemeParse(url)
+    page['urlscheme'] = urlscheme
     
     if url.respond_to?(:request_uri)
-      request = Net::HTTP::Get.new(url.request_uri)
-      response = http.request(request)
-      #html = open(page['pageurl'])
-      addPageToList(response.header[
-        'location']) if response.header['location']
+      response = ConnHandling.requestResponse(url, http)
+      page['header'] = response.header
+      addPageToList(page['header'][
+        'location']) if page['header']['location']
       page['document'] = Nokogiri::HTML(response.body)
-      #page['document'] = response.body
-      #puts "#{page['document']}" #####
       links = page['document'].css('a').map{ |link|
         link['href']}
       links.each { |link|
@@ -101,21 +89,11 @@ class Website
     if !@@tovisit.any? {|page| page['pageurl'] == pageurl} &&
         !@@visited.any? {|page| page['pageurl'] == pageurl}
       @@tovisit.unshift({
-        'pageurl' => pageurl, 'document' => nil})
+        'pageurl' => pageurl,
+      'urlscheme'=> nil,
+      'header'   => nil,
+      'document' => nil})
     end
-  end
-  
-  def pageSchemeHandler(url, http)
-    urlscheme = url.class
-    if urlscheme.instance_of?(URI::HTTP)
-      http.use_ssl = false
-    elsif urlscheme.instance_of?(URI::HTTPS)
-      http.use_ssl = true
-    end
-    
-    puts "#{urlscheme}"
-    
-    return urlscheme, http
   end
   
 end
