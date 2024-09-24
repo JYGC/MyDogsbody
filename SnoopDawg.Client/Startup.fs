@@ -1,4 +1,4 @@
-namespace SnoopDawg.UI.Client
+namespace SnoopDawg.Client
 
 open Microsoft.AspNetCore.Components.WebAssembly.Hosting
 open Bolero.Remoting.Client

@@ -1,4 +1,4 @@
-namespace SnoopDawg.UI.Server
+namespace SnoopDawg.Server
 
 open System
 open System.IO
@@ -8,7 +8,7 @@ open Microsoft.AspNetCore.Hosting
 open Bolero
 open Bolero.Remoting
 open Bolero.Remoting.Server
-open SnoopDawg.UI
+open SnoopDawg
 
 type BookService(ctx: IRemoteContext, env: IWebHostEnvironment) =
     inherit RemoteHandler<Client.Main.BookService>()

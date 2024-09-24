@@ -1,4 +1,4 @@
-module SnoopDawg.UI.Client.Main
+module SnoopDawg.Client.Main
 
 open System
 open Elmish

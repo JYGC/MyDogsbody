@@ -3,8 +3,8 @@
     "windowsAuthentication": false,
     "anonymousAuthentication": true,
     "iisExpress": {
-      "applicationUrl": "http://localhost:7801/",
-      "sslPort": 49271
+      "applicationUrl": "http://localhost:5085/",
+      "sslPort": 44395
     }
   },
   "profiles": {
@@ -16,11 +16,11 @@
         "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
-    "SnoopDawg.UI.Client": {
+    "SnoopDawg.Client": {
       "commandName": "Project",
       "launchBrowser": true,
       "inspectUri": "{wsProtocol}://{url.hostname}:{url.port}/_framework/debug/ws-proxy?browser={browserInspectUri}",
-      "applicationUrl": "http://localhost:7801/",
+      "applicationUrl": "http://localhost:5085/",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }

@@ -1,9 +1,9 @@
-module SnoopDawg.UI.Server.Index
+module SnoopDawg.Server.Index
 
 open Bolero
 open Bolero.Html
 open Bolero.Server.Html
-open SnoopDawg.UI
+open SnoopDawg
 
 let page = doctypeHtml {
     head {
@@ -13,7 +13,9 @@ let page = doctypeHtml {
         ``base`` { attr.href "/" }
         link { attr.rel "stylesheet"; attr.href "https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.4/css/bulma.min.css" }
         link { attr.rel "stylesheet"; attr.href "css/index.css" }
-        link { attr.rel "stylesheet"; attr.href "SnoopDawg.UI.Client.styles.css" }
+        link { attr.rel "stylesheet"; attr.href "SnoopDawg.Client.styles.css" }
+        link { attr.rel "manifest"; attr.href "manifest.json" }
+        link { attr.rel "apple-touch-icon"; attr.sizes "512x512"; attr.href "icon-512.png" }
     }
     body {
         nav {
@@ -32,5 +34,6 @@ let page = doctypeHtml {
         }
         div { attr.id "main"; comp<Client.Main.MyApp> }
         boleroScript
+        script { rawHtml "navigator.serviceWorker.register('service-worker.js');" }
     }
 }
