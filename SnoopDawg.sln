@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26124.0
 MinimumVisualStudioVersion = 15.0.26124.0
-Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "SnoopDawg.Server", "SnoopDawg.Server\SnoopDawg.Server.fsproj", "{4E2AA925-4694-4593-ADBC-F349D269587A}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "SnoopDawg.UI.Server", "SnoopDawg.UI.Server\SnoopDawg.UI.Server.fsproj", "{4E2AA925-4694-4593-ADBC-F349D269587A}"
 EndProject
-Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "SnoopDawg.Client", "SnoopDawg.Client\SnoopDawg.Client.fsproj", "{1481BBD6-A6DA-4912-A03A-134880D14701}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "SnoopDawg.UI.Client", "SnoopDawg.UI.Client\SnoopDawg.UI.Client.fsproj", "{1481BBD6-A6DA-4912-A03A-134880D14701}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WebCrawler", "WebCrawler\WebCrawler.fsproj", "{57251252-9155-44F5-971F-A60C543FD0EF}"
 EndProject

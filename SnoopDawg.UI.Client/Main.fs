@@ -1,4 +1,4 @@
-module SnoopDawg.Client.Main
+module SnoopDawg.UI.Client.Main
 
 open Elmish
 open Bolero

@@ -1,4 +1,4 @@
-namespace SnoopDawg.Server
+namespace SnoopDawg.UI.Server
 
 open Microsoft.AspNetCore
 open Microsoft.AspNetCore.Authentication.Cookies
@@ -22,7 +22,7 @@ type Startup() =
         services
             .AddBoleroHost()
 #if DEBUG
-            .AddHotReload(templateDir = __SOURCE_DIRECTORY__ + "/../SnoopDawg.Client")
+            .AddHotReload(templateDir = __SOURCE_DIRECTORY__ + "/../SnoopDawg.UI.Client")
 #endif
         |> ignore
 
