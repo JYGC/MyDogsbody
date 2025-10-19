@@ -1,0 +1,1 @@
+﻿printfn "I DONT WANT TO PAY FOR AZURE"
