@@ -2,6 +2,15 @@
 open UglyToad.PdfPig
 open UglyToad.PdfPig.Content
 
+// Explanation: 
+// page.GetWords() returns each word with its bounding box.//We group words by their vertical position (BoundingBox.Bottom) rounded with a small tolerance (epsilon) to detect which words are on the same line.
+// Then we sort:
+// Lines from top to bottom (sortByDescending).
+// Words within each line from left to right.
+// Finally, print each reconstructed line separately.
+// You can adjust epsilon (for example, 1.5 or 3.0) if lines are merging or splitting incorrectly depending on the PDF’s font metrics.
+
+
 let epsilon = 2.0 // tolerance for Y-coordinate differences (line separation)
 
 let extractLines (page: Page) =
