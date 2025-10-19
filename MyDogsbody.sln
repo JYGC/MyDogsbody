@@ -7,6 +7,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "TestMsGraphToEmails", "Test
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "PdfProcessing", "PdfProcessing\PdfProcessing.fsproj", "{5BC975B3-E15D-4DAC-BF84-5FE872DA4CDA}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "GNUCashAccess", "GNUCashAccess\GNUCashAccess.fsproj", "{D10E0B08-B983-4C2D-BF10-C06885EBC0C0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{5BC975B3-E15D-4DAC-BF84-5FE872DA4CDA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5BC975B3-E15D-4DAC-BF84-5FE872DA4CDA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5BC975B3-E15D-4DAC-BF84-5FE872DA4CDA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D10E0B08-B983-4C2D-BF10-C06885EBC0C0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D10E0B08-B983-4C2D-BF10-C06885EBC0C0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D10E0B08-B983-4C2D-BF10-C06885EBC0C0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D10E0B08-B983-4C2D-BF10-C06885EBC0C0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
