@@ -1,6 +1,8 @@
 ﻿open System
 open UglyToad.PdfPig
 open UglyToad.PdfPig.Content
+open MyDogsbody.Builders
+open MyDogsbody.Infrastructure
 
 // Explanation: 
 // page.GetWords() returns each word with its bounding box.//We group words by their vertical position (BoundingBox.Bottom) rounded with a small tolerance (epsilon) to detect which words are on the same line.
@@ -26,22 +28,33 @@ let extractLines (page: Page) =
 
 [<EntryPoint>]
 let main argv =
-  if argv.Length = 0 then
-    printfn "Usage: dotnet run <path-to-pdf>"
-    1
-  else
-    let pdfPath = argv[0]
-    try
-      use document = PdfDocument.Open(pdfPath)
-      for page in document.GetPages() do
-        printfn "--- Page %d ---" page.Number
-        for line in extractLines page do
-          printfn "%s" line
-      0
-    with
-    | :? System.IO.FileNotFoundException ->
-        eprintfn "File not found: %s" pdfPath
+    if argv.Length = 0 then
+        printfn "Usage: dotnet run <path-to-pdf>"
         1
-    | ex ->
-        eprintfn "Error: %s" ex.Message
-        1
+    else
+        argv[0]
+        |> Documents.getPdfObject
+        |> Documents.getContentSplitByLines (HandleErrorBuilder (fun ex -> ex.ToString() |> System.Console.WriteLine))
+        |> (function
+            | Ok lines ->
+                for line in lines do
+                    printfn "%s" line
+            | Error ex ->
+                eprintfn "Error: %s" ex.Message
+        )
+        |> ignore
+        0
+    //try
+    //  use document = PdfDocument.Open(pdfPath)
+    //  for page in document.GetPages() do
+    //    printfn "--- Page %d ---" page.Number
+    //    for line in extractLines page do
+    //      printfn "%s" line
+    //  0
+    //with
+    //| :? System.IO.FileNotFoundException ->
+    //    eprintfn "File not found: %s" pdfPath
+    //    1
+    //| ex ->
+    //    eprintfn "Error: %s" ex.Message
+    //    1
