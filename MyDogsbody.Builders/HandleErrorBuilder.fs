@@ -1,8 +1,7 @@
 ﻿namespace MyDogsbody.Builders
 
-open System
 open MyDogsbody.Exceptions
-open MyDogsbody.ExceptionTypes
+open MyDogsbody.Exceptions.Types
 
 type HandleErrorBuilder(writeLog) =
     member _.Bind(m, f): Result<_,MyDogsbodyException> =

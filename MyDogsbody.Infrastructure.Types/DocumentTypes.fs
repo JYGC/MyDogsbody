@@ -1,4 +1,4 @@
-﻿namespace MyDogsbody.InfrastructureTypes.DocumentTypes
+﻿namespace MyDogsbody.Infrastructure.Types.DocumentTypes
 
 type DocumentWord =
     {
@@ -9,5 +9,5 @@ type DocumentWord =
 
 type DocumentObject =
     {
-        getWords: unit -> DocumentWord list
+        GetWords: unit -> DocumentWord list
     }

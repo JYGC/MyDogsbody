@@ -1,4 +1,4 @@
-﻿module MyDogsbody.ExceptionTypes.ActionNames
+﻿module MyDogsbody.Exceptions.Types.ActionNames
 
 module MyDogsbody =
     let private myDogsbody = "MyDogsbody"

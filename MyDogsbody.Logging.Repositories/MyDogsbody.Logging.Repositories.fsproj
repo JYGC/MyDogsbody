@@ -6,11 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="ExceptionHelpers.fs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Logging.Types\MyDogsbody.Logging.Types.fsproj" />
   </ItemGroup>
 
 </Project>

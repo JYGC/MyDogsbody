@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Documents.fs" />
+    <Compile Include="DocumentInfrastructure.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -15,8 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.ExceptionTypes\MyDogsbody.ExceptionTypes.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.InfrastructureTypes\MyDogsbody.InfrastructureTypes.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Infrastructure.Types\MyDogsbody.Infrastructure.Types.fsproj" />
   </ItemGroup>
 
 </Project>
