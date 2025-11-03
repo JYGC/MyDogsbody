@@ -6,5 +6,5 @@ module MyDogsbody =
     module Infrastructure =
         let private infrastructure = $"{myDogsbody}.Infrastructure"
 
-        let getContentSplitByLines = $"{infrastructure}.getPdfObject"
+        let getContentSplitByLines = $"{infrastructure}.getContentSplitByLines"
         let getPdfObject = $"{infrastructure}.getPdfObject"

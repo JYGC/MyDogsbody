@@ -13,7 +13,7 @@ let insertLog
     exceptionLog.Message <- ex.Message
     exceptionLog.ActionName <- ex.ActionName
     exceptionLog.CreatedDate <- DateTime.UtcNow
-    exceptionLog.ExceptionDetails <- ex
+    exceptionLog.ExceptionDetails <- ex.ToString()
     databaseContext.GetExceptionCollection().Insert(exceptionLog)
     |> ignore
 

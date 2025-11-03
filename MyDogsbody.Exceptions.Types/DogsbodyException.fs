@@ -9,6 +9,4 @@ type MyDogsbodyException(
 ) =
     inherit Exception(message, innerException)
 
-    let createdDate = DateTime.UtcNow
-
     member _.ActionName with get() = actionName
