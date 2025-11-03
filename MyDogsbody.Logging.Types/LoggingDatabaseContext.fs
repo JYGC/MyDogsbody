@@ -1,9 +1,9 @@
 ﻿namespace MyDogsbody.Logging.Types
 
 open LiteDB
-open MyDogsbody.Exceptions.Types
+open MyDogsbody.Logging.Models
 
 type LoggingDatabaseContext =
     {
-        GetExceptionCollection: unit -> ILiteCollection<MyDogsbodyException>
+        GetExceptionCollection: unit -> ILiteCollection<ExceptionLog>
     }

@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Logging.Models\MyDogsbody.Logging.Models.csproj" />
     <ProjectReference Include="..\MyDogsbody.Logging.Types\MyDogsbody.Logging.Types.fsproj" />
   </ItemGroup>
 

@@ -3,7 +3,7 @@
 open System
 
 type MyDogsbodyException(
-  businessOperation: string,
+  actionName: string,
   message: string,
   innerException: exn
 ) =
@@ -11,6 +11,4 @@ type MyDogsbodyException(
 
     let createdDate = DateTime.UtcNow
 
-    member _.BusinessOperation with get() = businessOperation
-
-    member _.CreatedDate with get() = createdDate
+    member _.ActionName with get() = actionName

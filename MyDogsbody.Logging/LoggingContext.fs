@@ -1,7 +1,7 @@
 ﻿module MyDogsbody.Logging.LoggingContext
 
+open MyDogsbody.Logging.Models
 open MyDogsbody.Logging.Types
-open MyDogsbody.Exceptions.Types
 open LiteDB
 
 let getLoggingDatabaseContext databasePath connectionType: LoggingDatabaseContext =
@@ -10,7 +10,7 @@ let getLoggingDatabaseContext databasePath connectionType: LoggingDatabaseContex
         let dbConnection =
             new LiteDatabase($"Filename={databasePath};connection={connectionType}")
         let getExceptionCollection() =
-            dbConnection.GetCollection<MyDogsbodyException>(exceptionCollectionName)
+            dbConnection.GetCollection<ExceptionLog>(exceptionCollectionName)
         {
             GetExceptionCollection = getExceptionCollection
         }
