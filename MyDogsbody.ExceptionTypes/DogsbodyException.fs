@@ -3,10 +3,10 @@
 open System
 
 type MyDogsbodyException(
-  businessOperation: BusinessOperation,
+  businessOperation: string,
   message: string,
   innerException: exn
 ) =
     inherit Exception(message, innerException)
 
-    member _.BusinessOperation = businessOperation
+    member _.BusinessOperation with get() = businessOperation

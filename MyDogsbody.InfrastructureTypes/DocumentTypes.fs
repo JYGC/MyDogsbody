@@ -1,4 +1,4 @@
-﻿module MyDogsbody.InfrastructureTypes.DocumentTypes
+﻿namespace MyDogsbody.InfrastructureTypes.DocumentTypes
 
 type DocumentWord =
     {

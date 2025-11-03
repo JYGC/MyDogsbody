@@ -9,6 +9,7 @@ open MyDogsbody.Builders
 let getPdfObject
   (pdfPath: string)
   : DocumentObject =
+    let action = ActionNames.MyDogsbody.Infrastructure.getPdfObject
     let document = PdfDocument.Open(pdfPath)
     let getWords() =
         [
@@ -29,9 +30,11 @@ let getContentSplitByLines
   (documentObject: DocumentObject)
   : Result<string list, MyDogsbodyException> =
     let epsilon = 2.0 // tolerance for Y-coordinate differences (line separation)
-    let action = BusinessOperation.Infrastructure (Documents (GetContentSplitByLines))
+    let action = ActionNames.MyDogsbody.Infrastructure.getContentSplitByLines
     handleError {
         try
+            let w = 2 / 0
+            printfn "%i" w
             return
                 documentObject.getWords()
                 |> Seq.groupBy (fun w -> Math.Round(w.Bottom / epsilon))
