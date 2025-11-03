@@ -9,4 +9,8 @@
     <Compile Include="HandleErrorBuilder.fs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.Exceptions\MyDogsbody.Exceptions.fsproj" />
+  </ItemGroup>
+
 </Project>

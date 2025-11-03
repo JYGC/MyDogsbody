@@ -6,7 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="ApplicationException.fs" />
+    <Compile Include="BusinessOperation.fs" />
+    <Compile Include="DogsbodyException.fs" />
   </ItemGroup>
 
 </Project>

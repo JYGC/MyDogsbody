@@ -17,6 +17,10 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.InfrastructureTy
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Builders", "MyDogsbody.Builders\MyDogsbody.Builders.fsproj", "{01BF0BC6-5FAF-4D30-9272-EDCBE954F89B}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Exceptions", "MyDogsbody.Exceptions\MyDogsbody.Exceptions.fsproj", "{A490F06E-C71E-43ED-B235-193427873987}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.ExceptionTypes", "MyDogsbody.ExceptionTypes\MyDogsbody.ExceptionTypes.fsproj", "{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -51,6 +55,14 @@ Global
 		{01BF0BC6-5FAF-4D30-9272-EDCBE954F89B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{01BF0BC6-5FAF-4D30-9272-EDCBE954F89B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{01BF0BC6-5FAF-4D30-9272-EDCBE954F89B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A490F06E-C71E-43ED-B235-193427873987}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A490F06E-C71E-43ED-B235-193427873987}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A490F06E-C71E-43ED-B235-193427873987}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A490F06E-C71E-43ED-B235-193427873987}.Release|Any CPU.Build.0 = Release|Any CPU
+		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

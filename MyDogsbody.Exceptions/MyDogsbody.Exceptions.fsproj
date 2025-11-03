@@ -6,17 +6,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Documents.fs" />
+    <Compile Include="ExceptionHelpers.fs" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="PdfPig" Version="0.1.11" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
     <ProjectReference Include="..\MyDogsbody.ExceptionTypes\MyDogsbody.ExceptionTypes.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.InfrastructureTypes\MyDogsbody.InfrastructureTypes.fsproj" />
   </ItemGroup>
 
 </Project>

@@ -44,17 +44,3 @@ let main argv =
         )
         |> ignore
         0
-    //try
-    //  use document = PdfDocument.Open(pdfPath)
-    //  for page in document.GetPages() do
-    //    printfn "--- Page %d ---" page.Number
-    //    for line in extractLines page do
-    //      printfn "%s" line
-    //  0
-    //with
-    //| :? System.IO.FileNotFoundException ->
-    //    eprintfn "File not found: %s" pdfPath
-    //    1
-    //| ex ->
-    //    eprintfn "Error: %s" ex.Message
-    //    1
