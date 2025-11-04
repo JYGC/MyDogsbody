@@ -8,8 +8,7 @@ let getLoggingDatabaseContext databasePath connectionType: LoggingDatabaseContex
     let exceptionCollectionName = "Exceptions"
     let dbConnection =
         new LiteDatabase($"Filename={databasePath};connection={connectionType}")
-    let getExceptionCollection() =
-        dbConnection.GetCollection<ExceptionLog>(exceptionCollectionName)
     {
-        GetExceptionCollection = getExceptionCollection
+        GetExceptionCollection = fun () ->
+            dbConnection.GetCollection<ExceptionLog>(exceptionCollectionName)
     }

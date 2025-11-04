@@ -25,18 +25,17 @@ let getPdfObject
                         message,
                         ApplicationException(message)
                     ) |> Error
-            let getWords() =
-                [
-                    for page in document.GetPages() do
-                        for word in page.GetWords() do
-                            yield {
-                                Text = word.Text
-                                Bottom = word.BoundingBox.Bottom
-                                Left = word.BoundingBox.Left
-                            }
-                ]
             return {
-                GetWords = getWords
+                GetWords = fun () ->
+                    [
+                        for page in document.GetPages() do
+                            for word in page.GetWords() do
+                                yield {
+                                    Text = word.Text
+                                    Bottom = word.BoundingBox.Bottom
+                                    Left = word.BoundingBox.Left
+                                }
+                    ]
             }
         with ex ->
             return! new MyDogsbodyException(

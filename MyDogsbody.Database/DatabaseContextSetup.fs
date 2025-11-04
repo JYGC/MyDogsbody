@@ -13,12 +13,8 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let blogsTable = table'<Blog> blogsTableName
     let commentsTable = table'<Comment> commentsTableName
 
-    let getDatabaseConnection() = databaseConnection
-    let getBlogsTable() = blogsTable
-    let getCommentsTable() = commentsTable
-
     {
-        GetDatabaseConnection = getDatabaseConnection;
-        GetBlogs = getBlogsTable;
-        GetComments = getCommentsTable;
+        GetDatabaseConnection = fun () -> databaseConnection;
+        GetBlogs = fun () -> blogsTable;
+        GetComments = fun () -> commentsTable;
     }
