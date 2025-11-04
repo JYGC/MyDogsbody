@@ -13,7 +13,7 @@ let main argv =
         let exeDirPath = Assembly.GetExecutingAssembly().Location |> Path.GetDirectoryName
         let logDbPath = Path.Combine(exeDirPath, "logging.db")
         let logDbConnectionType = "shared"
-        let loggingContext = MyDogsbody.Logging.LoggingContext.getLoggingDatabaseContext logDbPath logDbConnectionType
+        let loggingContext = MyDogsbody.Logging.SetupLoggingContext.getLoggingDatabaseContext logDbPath logDbConnectionType
         let handleError = HandleErrorBuilder (fun ex -> ExceptionsRepository.insertLog loggingContext ex)
         argv[0]
         |> DocumentInfrastructure.getPdfObject handleError

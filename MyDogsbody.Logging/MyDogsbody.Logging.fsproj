@@ -8,7 +8,7 @@
   <ItemGroup>
     <Compile Include="Types\LoggingDatabaseContext.fs" />
     <Compile Include="Repositories\ExceptionsRepository.fs" />
-    <Compile Include="LoggingContext.fs" />
+    <Compile Include="SetupLoggingContext.fs" />
   </ItemGroup>
 
   <ItemGroup>

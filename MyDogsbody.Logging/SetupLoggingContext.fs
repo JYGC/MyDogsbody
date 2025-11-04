@@ -1,4 +1,4 @@
-﻿module MyDogsbody.Logging.LoggingContext
+﻿module MyDogsbody.Logging.SetupLoggingContext
 
 open MyDogsbody.Logging.Models
 open MyDogsbody.Logging.Types
