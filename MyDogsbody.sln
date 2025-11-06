@@ -31,6 +31,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Database.Migrati
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Database.Models", "MyDogsbody.Database.Models\MyDogsbody.Database.Models.fsproj", "{7049C743-F2B9-48AF-800B-3FBAE327A3D6}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Tests", "MyDogsbody.Tests\MyDogsbody.Tests.fsproj", "{CAB46565-EE7D-409C-84D1-02859323C71B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -93,6 +95,10 @@ Global
 		{7049C743-F2B9-48AF-800B-3FBAE327A3D6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7049C743-F2B9-48AF-800B-3FBAE327A3D6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7049C743-F2B9-48AF-800B-3FBAE327A3D6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CAB46565-EE7D-409C-84D1-02859323C71B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CAB46565-EE7D-409C-84D1-02859323C71B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CAB46565-EE7D-409C-84D1-02859323C71B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CAB46565-EE7D-409C-84D1-02859323C71B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
