@@ -1,10 +1,10 @@
-﻿module MyDogsbody.Logging.SetupLoggingContext
+﻿module MyDogsbody.Infrastructure.Database.InfrastructureDatabaseContext
 
-open MyDogsbody.Logging.Models
-open MyDogsbody.Logging.Types
 open LiteDB
+open MyDogsbody.Infrastructure.Database.Models
+open MyDogsbody.Infrastructure.Database.Types
 
-let getLoggingDatabaseContext databasePath connectionType: LoggingDatabaseContext =
+let getInfrastructureDatabaseContext databasePath connectionType: InfrastructureDatabaseContext =
     let exceptionCollectionName = "Exceptions"
     let dbConnection =
         new LiteDatabase($"Filename={databasePath};connection={connectionType}")

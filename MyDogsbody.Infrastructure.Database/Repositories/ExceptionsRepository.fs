@@ -1,12 +1,12 @@
-﻿module MyDogsbody.Logging.Repositories.ExceptionsRepository
+﻿module MyDogsbody.Infrastructure.Database.Repositories.ExceptionsRepository
 
 open System
 open MyDogsbody.Exceptions.Types
-open MyDogsbody.Logging.Models
-open MyDogsbody.Logging.Types
+open MyDogsbody.Infrastructure.Database.Models
+open MyDogsbody.Infrastructure.Database.Types
 
 let insertLog
-  (databaseContext: LoggingDatabaseContext)
+  (databaseContext: InfrastructureDatabaseContext)
   (ex: MyDogsbodyException)
   : unit =
     let exceptionLog = ExceptionLog()
@@ -18,7 +18,7 @@ let insertLog
     |> ignore
 
 let getLogs
-  (databaseContext: LoggingDatabaseContext)
+  (databaseContext: InfrastructureDatabaseContext)
   (startDateTime: DateTime)
   (endDateTime: DateTime)
   : ExceptionLog list =

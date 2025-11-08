@@ -2,7 +2,8 @@
 open MyDogsbody.Builders
 open MyDogsbody.Domains
 open MyDogsbody.Infrastructure.PdfDocuments
-open MyDogsbody.Logging.Repositories
+open MyDogsbody.Infrastructure.Database.Repositories
+open MyDogsbody.Infrastructure.Database
 open System.IO
 
 [<EntryPoint>]
@@ -14,7 +15,7 @@ let main argv =
         let exeDirPath = Assembly.GetExecutingAssembly().Location |> Path.GetDirectoryName
         let logDbPath = Path.Combine(exeDirPath, "logging.db")
         let logDbConnectionType = "shared"
-        let loggingContext = MyDogsbody.Logging.SetupLoggingContext.getLoggingDatabaseContext logDbPath logDbConnectionType
+        let loggingContext = InfrastructureDatabaseContext.getInfrastructureDatabaseContext logDbPath logDbConnectionType
         let handleError = HandleErrorBuilder (fun ex -> ExceptionsRepository.insertLog loggingContext ex)
         argv[0]
         |> ReadPdfDocuments.getPdfDocumentHandler handleError

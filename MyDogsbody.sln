@@ -19,10 +19,6 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Exceptions", "My
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Exceptions.Types", "MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj", "{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Logging", "MyDogsbody.Logging\MyDogsbody.Logging.fsproj", "{BA16B808-74D2-49E9-8D3A-66D81B7E9266}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody.Logging.Models", "MyDogsbody.Logging.Models\MyDogsbody.Logging.Models.csproj", "{C804C740-301E-412C-926F-2DB197CEA546}"
-EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Database", "MyDogsbody.Database\MyDogsbody.Database.fsproj", "{DE281637-C03B-4BEE-A094-6474F409EBB0}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Database.Migrations", "MyDogsbody.Database.Migrations\MyDogsbody.Database.Migrations.fsproj", "{E3FCCCBC-280C-4992-BF1B-25C3FA6E37AC}"
@@ -36,6 +32,10 @@ EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Domains", "MyDogsbody.Domains\MyDogsbody.Domains.fsproj", "{BE6DADCA-F10E-4DA4-AB8C-E08BABE04B95}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure.Google", "MyDogsbody.Infrastructure.Google\MyDogsbody.Infrastructure.Google.fsproj", "{689A0C9B-817D-461C-A272-4B5AAC3029CE}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure.Database", "MyDogsbody.Infrastructure.Database\MyDogsbody.Infrastructure.Database.fsproj", "{63343621-A205-48B3-B4C2-4599979DA806}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody.Infrastructure.Database.Models", "MyDogsbody.Infrastructure.Database.Models\MyDogsbody.Infrastructure.Database.Models.csproj", "{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -75,14 +75,6 @@ Global
 		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{348EB147-EDB4-B7D0-0CA2-D1F85F13D937}.Release|Any CPU.Build.0 = Release|Any CPU
-		{BA16B808-74D2-49E9-8D3A-66D81B7E9266}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{BA16B808-74D2-49E9-8D3A-66D81B7E9266}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{BA16B808-74D2-49E9-8D3A-66D81B7E9266}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{BA16B808-74D2-49E9-8D3A-66D81B7E9266}.Release|Any CPU.Build.0 = Release|Any CPU
-		{C804C740-301E-412C-926F-2DB197CEA546}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C804C740-301E-412C-926F-2DB197CEA546}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C804C740-301E-412C-926F-2DB197CEA546}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C804C740-301E-412C-926F-2DB197CEA546}.Release|Any CPU.Build.0 = Release|Any CPU
 		{DE281637-C03B-4BEE-A094-6474F409EBB0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{DE281637-C03B-4BEE-A094-6474F409EBB0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DE281637-C03B-4BEE-A094-6474F409EBB0}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -111,6 +103,14 @@ Global
 		{689A0C9B-817D-461C-A272-4B5AAC3029CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{689A0C9B-817D-461C-A272-4B5AAC3029CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{689A0C9B-817D-461C-A272-4B5AAC3029CE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{63343621-A205-48B3-B4C2-4599979DA806}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{63343621-A205-48B3-B4C2-4599979DA806}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{63343621-A205-48B3-B4C2-4599979DA806}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{63343621-A205-48B3-B4C2-4599979DA806}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

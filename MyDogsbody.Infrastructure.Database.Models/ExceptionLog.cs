@@ -1,4 +1,4 @@
-﻿namespace MyDogsbody.Logging.Models
+﻿namespace MyDogsbody.Infrastructure.Database.Models
 {
     public class ExceptionLog
     {
