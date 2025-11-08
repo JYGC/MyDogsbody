@@ -7,7 +7,8 @@
 
   <ItemGroup>
     <Compile Include="Types\LoggingDatabaseContext.fs" />
-    <Compile Include="Repositories\ExceptionsRepository.fs" />
+    <Compile Include="Repositories\InfrastructureCredentialRepository.fs" />
+    <Compile Include="Repositories\ExceptionRepository.fs" />
     <Compile Include="InfrastructureDatabaseContext.fs" />
   </ItemGroup>
 
@@ -16,6 +17,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\MyDogsBody.Dtos\MyDogsBody.Dtos.fsproj" />
       <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
       <ProjectReference Include="..\MyDogsbody.Infrastructure.Database.Models\MyDogsbody.Infrastructure.Database.Models.csproj" />
     </ItemGroup>

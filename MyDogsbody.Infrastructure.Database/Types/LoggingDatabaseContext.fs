@@ -6,4 +6,5 @@ open MyDogsbody.Infrastructure.Database.Models
 type InfrastructureDatabaseContext =
     {
         GetExceptionCollection: unit -> ILiteCollection<ExceptionLog>
+        GetInfrastructureCredentialCollection: unit -> ILiteCollection<InfrastructureCredential>
     }

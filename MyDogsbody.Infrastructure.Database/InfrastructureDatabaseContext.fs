@@ -6,9 +6,14 @@ open MyDogsbody.Infrastructure.Database.Types
 
 let getInfrastructureDatabaseContext databasePath connectionType: InfrastructureDatabaseContext =
     let exceptionCollectionName = "Exceptions"
-    let dbConnection =
-        new LiteDatabase($"Filename={databasePath};connection={connectionType}")
+    let infrastructureCredentialCollectionName = "InfrastructureCredentials";
+
+    let liteDatabaseConnectionString = $"Filename={databasePath};connection={connectionType}"
+    let dbConnection = new LiteDatabase(liteDatabaseConnectionString)
+    
     {
         GetExceptionCollection = fun () ->
-            dbConnection.GetCollection<ExceptionLog>(exceptionCollectionName)
+            dbConnection.GetCollection<ExceptionLog>(exceptionCollectionName);
+        GetInfrastructureCredentialCollection = fun () ->
+            dbConnection.GetCollection<InfrastructureCredential>(infrastructureCredentialCollectionName)
     }

@@ -16,7 +16,7 @@ let main argv =
         let logDbPath = Path.Combine(exeDirPath, "logging.db")
         let logDbConnectionType = "shared"
         let loggingContext = InfrastructureDatabaseContext.getInfrastructureDatabaseContext logDbPath logDbConnectionType
-        let handleError = HandleErrorBuilder (fun ex -> ExceptionsRepository.insertLog loggingContext ex)
+        let handleError = HandleErrorBuilder (fun ex -> ExceptionRepository.insertOne loggingContext.GetExceptionCollection ex)
         argv[0]
         |> ReadPdfDocuments.getPdfDocumentHandler handleError
         |> Result.bind (DocumentDomain.getContentSplitByLines handleError)
