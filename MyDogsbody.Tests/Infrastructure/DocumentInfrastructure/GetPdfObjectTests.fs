@@ -3,10 +3,10 @@
 open System
 open System.IO
 open Xunit
-open MyDogsbody.Infrastructure.DocumentInfrastructure
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Infrastructure.Types.DocumentTypes
 open MyDogsbody.Builders
+open MyDogsbody.Infrastructure.PdfDocuments.ReadPdfDocuments
 
 let handleError = HandleErrorBuilder (fun _ -> ())
 

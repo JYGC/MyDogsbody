@@ -6,12 +6,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="DocumentInfrastructure.fs" />
+    <Compile Include="ReadPdf.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PdfPig" Version="0.1.11" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Infrastructure.Types\MyDogsbody.Infrastructure.Types.fsproj" />
   </ItemGroup>
 

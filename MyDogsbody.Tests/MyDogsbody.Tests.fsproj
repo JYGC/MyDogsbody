@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Infrastructure.PdfDocuments\MyDogsbody.Infrastructure.PdfDocuments.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Infrastructure.Types\MyDogsbody.Infrastructure.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Infrastructure\MyDogsbody.Infrastructure.fsproj" />
   </ItemGroup>
