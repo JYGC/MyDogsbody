@@ -8,28 +8,21 @@ let view (body: NodeRenderFragment) =
         MudAppBar''{
             Color Color.Primary
             Fixed false
-            MudMenu''{
-                Dense true
-                Variant Variant.Text
-                Size Size.Medium
+            MudButton'' {
                 Color Color.Inherit
-                Icon Icons.Material.TwoTone.MoreVert
-
-                MudMenuItem''{
-                    Href "/credentials"
-                    Icon Icons.Material.TwoTone.LockPerson
-                    Label "Credentials"
-                }
-
-                MudMenuItem''{
-                    Href "/home"
-                    Icon Icons.Material.TwoTone.Home
-                    Label "Hacker News"
-                }
+                EndIcon Icons.Material.Filled.Home
+                Href "/home"
+                "Home"
+            }
+            MudButton''{
+                Color Color.Inherit
+                EndIcon Icons.Material.Filled.Settings
+                Href "/settings"
+                "Settings"
             }
         }
         MudMainContent''{
-            class' "pt-2 pr-2 pb-2 pl-2"
+            class' "pt-0 pr-0 pb-0 pl-0"
             body
         }
     }

@@ -2,6 +2,7 @@
 
 open Fun.Blazor
 open MyDogsbody.UI.Portal.Pages
+open MyDogsbody.UI.Portal.Pages.Settings
 open MyDogsbody.UI.Portal.Layout
 open Microsoft.AspNetCore.Components.Web
 open MudBlazor
@@ -29,7 +30,9 @@ type Shell() =
         html.route [
             HomePage.getDefaultRoute()
             HomePage.getRoute()
+            SettingsPage.getRoute()
             CredentialsPage.getRoute()
+            ExceptionLogsPage.getRoute()
         ]
         |> MainLayout.view
     })

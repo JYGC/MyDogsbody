@@ -6,7 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Pages\CredentialsPage.fs" />
+    <Compile Include="Components\SubLayouts.fs" />
+    <Compile Include="Pages\Settings\ExceptionLogsPage.fs" />
+    <Compile Include="Pages\Settings\CredentialsPage.fs" />
+    <Compile Include="Pages\SettingsPage.fs" />
     <Compile Include="Pages\HomePage.fs" />
     <Compile Include="Layout\MainLayout.fs" />
     <Compile Include="Shell.fs" />
