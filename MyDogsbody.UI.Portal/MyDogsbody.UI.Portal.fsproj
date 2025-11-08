@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Pages\CredentialsPage.fs" />
+    <Compile Include="Pages\HomePage.fs" />
+    <Compile Include="Layout\MainLayout.fs" />
+    <Compile Include="Shell.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FSharp.Control.Reactive" Version="6.1.2" />
+    <PackageReference Include="Fun.Blazor" Version="4.1.7" />
+    <PackageReference Include="Fun.Blazor.Microsoft.Web" Version="9.0.9" />
+    <PackageReference Include="Fun.Blazor.MudBlazor" Version="8.13.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Components" Version="9.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.10" />
+  </ItemGroup>
+
+</Project>

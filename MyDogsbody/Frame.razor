@@ -1,0 +1,47 @@
+<MudThemeProvider Theme="@Grey90CarbonTheme" IsDarkMode="@true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<Shell />
+
+@code {
+    private MudTheme Grey90CarbonTheme = new MudTheme()
+    {
+        PaletteDark = new PaletteDark()
+        {
+            Primary = "#0f62fe",            // IBM Primary Blue
+            Secondary = "#6f6f6f",          // IBM Gray 60
+            Background = "#262626",         // Grey 90
+            Surface = "#393939",            // UI Shell background
+            DrawerBackground = "#393939",
+            DrawerText = "#f4f4f4",
+            AppbarBackground = "#393939",
+            AppbarText = "#ffffff",
+            TextPrimary = "#ffffff",
+            TextSecondary = "#f4f4f4",
+            ActionDefault = "#f4f4f4",
+            Divider = "#525252",
+            TableLines = "#525252",
+            LinesDefault = "#525252",
+            LinesInputs = "#6f6f6f",
+            OverlayDark = "#000000aa",
+        },
+        LayoutProperties = new LayoutProperties()
+        {
+            DefaultBorderRadius = "0px"   // Carbon uses square corners
+        },
+        Typography = new Typography()
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = new[] { "IBM Plex Sans", "Segoe UI", "sans-serif" }
+            }
+        },
+        ZIndex = new ZIndex()
+        {
+            Drawer = 1200,
+            AppBar = 1100
+        }
+    };
+}
