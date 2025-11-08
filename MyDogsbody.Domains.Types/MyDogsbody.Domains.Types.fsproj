@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="DocumentTypes.fs" />
+    <Compile Include="DocumentHandler.fs" />
   </ItemGroup>
 
 </Project>

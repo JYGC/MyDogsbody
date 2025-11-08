@@ -17,7 +17,7 @@ let main argv =
         let loggingContext = MyDogsbody.Logging.SetupLoggingContext.getLoggingDatabaseContext logDbPath logDbConnectionType
         let handleError = HandleErrorBuilder (fun ex -> ExceptionsRepository.insertLog loggingContext ex)
         argv[0]
-        |> ReadPdfDocuments.getPdfObject handleError
+        |> ReadPdfDocuments.getPdfDocumentHandler handleError
         |> Result.bind (DocumentDomain.getContentSplitByLines handleError)
         |> (function
             | Ok lines ->

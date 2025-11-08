@@ -7,10 +7,10 @@ open MyDogsbody.Exceptions.Types
 open UglyToad.PdfPig
 open System
 
-let getPdfObject
+let getPdfDocumentHandler
   (handleError: HandleErrorBuilder)
   (pdfPath: string)
-  : Result<DocumentObject, MyDogsbodyException> =
+  : Result<DocumentHandler, MyDogsbodyException> =
     let action = ActionNames.MyDogsbody.Infrastructure.getPdfObject
     handleError {
         try

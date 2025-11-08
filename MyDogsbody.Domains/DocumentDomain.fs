@@ -7,7 +7,7 @@ open MyDogsbody.Builders
 
 let getContentSplitByLines
   (handleError: HandleErrorBuilder)
-  (documentObject: DocumentObject)
+  (documentObject: DocumentHandler)
   : Result<string list, MyDogsbodyException> =
     let epsilon = 2.0 // tolerance for Y-coordinate differences (line separation)
     let action = ActionNames.MyDogsbody.Infrastructure.getContentSplitByLines

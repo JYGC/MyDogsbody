@@ -7,7 +7,7 @@ type DocumentWord =
         Left: float
     }
 
-type DocumentObject =
+type DocumentHandler =
     {
         GetWords: unit -> DocumentWord list
     }

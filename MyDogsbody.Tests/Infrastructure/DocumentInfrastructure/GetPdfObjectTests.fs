@@ -16,7 +16,7 @@ let ``getPdfObject returns Error when PDF does not exist`` () =
   let fakePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".pdf")
 
   // Act
-  let result = getPdfObject handleError fakePath
+  let result = getPdfDocumentHandler handleError fakePath
 
   // Assert
   match result with
@@ -58,7 +58,7 @@ startxref
 """)
 
   // Act
-  let result = getPdfObject handleError tempPdfPath
+  let result = getPdfDocumentHandler handleError tempPdfPath
 
   // Assert
   match result with
