@@ -21,7 +21,7 @@ let ``getPdfObject returns Error when PDF does not exist`` () =
   // Assert
   match result with
   | Error ex ->
-      Assert.IsType<MyDogsbodyException>(ex)
+      Assert.IsType<MyDogsbodyException>(ex) |> ignore
       Assert.Contains("PDF file does not exist", ex.Message)
   | Ok _ ->
       Assert.Fail("Expected Error, but got Ok")
