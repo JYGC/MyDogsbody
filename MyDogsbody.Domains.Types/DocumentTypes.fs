@@ -1,4 +1,4 @@
-﻿namespace MyDogsbody.Infrastructure.Types.DocumentTypes
+﻿namespace MyDogsbody.Domains.Types.DocumentTypes
 
 type DocumentWord =
     {

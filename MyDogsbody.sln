@@ -13,7 +13,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "GoogleCalendarCRUD", "Googl
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure", "MyDogsbody.Infrastructure\MyDogsbody.Infrastructure.fsproj", "{F2E85B92-B806-4018-8F59-3D7BC218FECC}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure.Types", "MyDogsbody.Infrastructure.Types\MyDogsbody.Infrastructure.Types.fsproj", "{B4845C05-C7FF-485B-9696-F89A8EDEEEE3}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Domains.Types", "MyDogsbody.Domains.Types\MyDogsbody.Domains.Types.fsproj", "{B4845C05-C7FF-485B-9696-F89A8EDEEEE3}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Builders", "MyDogsbody.Builders\MyDogsbody.Builders.fsproj", "{01BF0BC6-5FAF-4D30-9272-EDCBE954F89B}"
 EndProject
@@ -34,6 +34,8 @@ EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Tests", "MyDogsbody.Tests\MyDogsbody.Tests.fsproj", "{CAB46565-EE7D-409C-84D1-02859323C71B}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure.PdfDocuments", "MyDogsbody.Infrastructure.PdfDocuments\MyDogsbody.Infrastructure.PdfDocuments.fsproj", "{D02138EF-AF4B-4F0F-AEA8-E01791C07FC9}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Domains", "MyDogsbody.Domains\MyDogsbody.Domains.fsproj", "{BE6DADCA-F10E-4DA4-AB8C-E08BABE04B95}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -105,6 +107,10 @@ Global
 		{D02138EF-AF4B-4F0F-AEA8-E01791C07FC9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D02138EF-AF4B-4F0F-AEA8-E01791C07FC9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D02138EF-AF4B-4F0F-AEA8-E01791C07FC9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BE6DADCA-F10E-4DA4-AB8C-E08BABE04B95}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BE6DADCA-F10E-4DA4-AB8C-E08BABE04B95}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BE6DADCA-F10E-4DA4-AB8C-E08BABE04B95}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BE6DADCA-F10E-4DA4-AB8C-E08BABE04B95}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

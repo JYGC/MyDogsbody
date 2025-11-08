@@ -2,9 +2,9 @@
 
 open System
 open Xunit
-open MyDogsbody.Infrastructure.DocumentInfrastructure
+open MyDogsbody.Domains.DocumentDomain
 open MyDogsbody.Exceptions.Types
-open MyDogsbody.Infrastructure.Types.DocumentTypes
+open MyDogsbody.Domains.Types.DocumentTypes
 open MyDogsbody.Builders
 
 // Minimal stub for HandleErrorBuilder

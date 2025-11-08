@@ -1,8 +1,8 @@
-﻿module MyDogsbody.Infrastructure.DocumentInfrastructure
+﻿module MyDogsbody.Domains.DocumentDomain
 
 open System
 open MyDogsbody.Exceptions.Types
-open MyDogsbody.Infrastructure.Types.DocumentTypes
+open MyDogsbody.Domains.Types.DocumentTypes
 open MyDogsbody.Builders
 
 let getContentSplitByLines
@@ -13,8 +13,6 @@ let getContentSplitByLines
     let action = ActionNames.MyDogsbody.Infrastructure.getContentSplitByLines
     handleError {
         try
-            let w = 2 / 0
-            printfn "%i" w
             return
                 documentObject.GetWords()
                 |> Seq.groupBy (fun w -> Math.Round(w.Bottom / epsilon))

@@ -1,6 +1,6 @@
 ﻿open System.Reflection
 open MyDogsbody.Builders
-open MyDogsbody.Infrastructure
+open MyDogsbody.Domains
 open MyDogsbody.Infrastructure.PdfDocuments
 open MyDogsbody.Logging.Repositories
 open System.IO
@@ -18,7 +18,7 @@ let main argv =
         let handleError = HandleErrorBuilder (fun ex -> ExceptionsRepository.insertLog loggingContext ex)
         argv[0]
         |> ReadPdfDocuments.getPdfObject handleError
-        |> Result.bind (DocumentInfrastructure.getContentSplitByLines handleError)
+        |> Result.bind (DocumentDomain.getContentSplitByLines handleError)
         |> (function
             | Ok lines ->
                 for line in lines do

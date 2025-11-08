@@ -2,7 +2,7 @@
 
 open System.IO
 open MyDogsbody.Builders
-open MyDogsbody.Infrastructure.Types.DocumentTypes
+open MyDogsbody.Domains.Types.DocumentTypes
 open MyDogsbody.Exceptions.Types
 open UglyToad.PdfPig
 open System

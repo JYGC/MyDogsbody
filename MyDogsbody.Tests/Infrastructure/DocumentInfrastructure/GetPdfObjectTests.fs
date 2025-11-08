@@ -4,7 +4,7 @@ open System
 open System.IO
 open Xunit
 open MyDogsbody.Exceptions.Types
-open MyDogsbody.Infrastructure.Types.DocumentTypes
+open MyDogsbody.Domains.Types.DocumentTypes
 open MyDogsbody.Builders
 open MyDogsbody.Infrastructure.PdfDocuments.ReadPdfDocuments
 
