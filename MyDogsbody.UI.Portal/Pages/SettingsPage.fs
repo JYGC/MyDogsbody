@@ -10,7 +10,7 @@ let getView () =
         h3 { "Credentials Management" }
         p { "This page will allow you to manage your infrastructure credentials." }
     }
-    |> SubLayouts.settingsNavMenu
+    |> SettingsComponents.settingsNavMenu
 
 let getRoute () =
     getView () |> routeCi "/settings"

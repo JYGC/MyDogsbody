@@ -1,4 +1,4 @@
-﻿module MyDogsbody.UI.Portal.Components.SubLayouts
+﻿module MyDogsbody.UI.Portal.Components.SettingsComponents
 
 open MudBlazor
 open Fun.Blazor

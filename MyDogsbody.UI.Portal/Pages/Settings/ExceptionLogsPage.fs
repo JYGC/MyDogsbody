@@ -10,7 +10,7 @@ let getView () =
         h3 { "Settings Page" }
         p { "This page will allow you to ste stuff" }
     }
-    |> SubLayouts.settingsNavMenu
+    |> SettingsComponents.settingsNavMenu
 
 let getRoute () =
     getView () |> routeCi "/settings/exceptionlogs"
