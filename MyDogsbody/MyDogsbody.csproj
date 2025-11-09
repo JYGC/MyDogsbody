@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.UseCases.Interfaces\MyDogsbody.UseCases.Interfaces.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.UseCases\MyDogsbody.UseCases.fsproj" />
   </ItemGroup>
 
 </Project>

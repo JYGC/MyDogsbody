@@ -9,11 +9,12 @@ let insertOne
   (getExceptionCollection: unit -> ILiteCollection<ExceptionLog>)
   (dex: MyDogsbodyException)
   : unit =
-    let exceptionLog = ExceptionLog()
-    exceptionLog.Message <- dex.Message
-    exceptionLog.ActionName <- dex.ActionName
-    exceptionLog.CreatedDate <- DateTime.UtcNow
-    exceptionLog.ExceptionDetails <- dex.ToString()
+    let exceptionLog = new ExceptionLog(
+        Message = dex.Message,
+        ActionName = dex.ActionName,
+        CreatedDate = DateTime.UtcNow,
+        ExceptionDetails = dex.ToString()
+    )
     getExceptionCollection().Insert(exceptionLog)
     |> ignore
 

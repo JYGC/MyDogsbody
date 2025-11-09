@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Components\CredentialsComponents.fs" />
     <Compile Include="Components\SettingsComponents.fs" />
     <Compile Include="Pages\Settings\ExceptionLogsPage.fs" />
     <Compile Include="Pages\Settings\CredentialsPage.fs" />
@@ -22,6 +23,10 @@
     <PackageReference Include="Fun.Blazor.MudBlazor" Version="8.13.0" />
     <PackageReference Include="Microsoft.AspNetCore.Components" Version="9.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.UseCases.Interfaces\MyDogsbody.UseCases.Interfaces.fsproj" />
   </ItemGroup>
 
 </Project>

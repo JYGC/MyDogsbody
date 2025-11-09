@@ -2,6 +2,7 @@
 {
     public enum InfrastructureType
     {
-        Google
+        Google,
+        Microsoft
     }
 }

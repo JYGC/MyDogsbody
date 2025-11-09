@@ -8,10 +8,11 @@ let insertOne
   (getInfrastructureCredentialCollection: unit -> ILiteCollection<InfrastructureCredential>)
   (credential: InfrustructureCredentialDto)
   : unit =
-    let infrastructureCredential = InfrastructureCredential()
-    infrastructureCredential.InfrastructureType <- credential.InfrastructureType
-    infrastructureCredential.Credentials <- credential.Credentials
-    infrastructureCredential.ExternalUsername <- credential.Username
+    let infrastructureCredential = InfrastructureCredential(
+        InfrastructureType = credential.InfrastructureType,
+        Credentials = credential.Credentials,
+        ExternalUsername = credential.Username
+    )
     getInfrastructureCredentialCollection().Insert infrastructureCredential |> ignore
 
 let getAll

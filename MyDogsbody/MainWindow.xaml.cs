@@ -2,6 +2,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
+using MyDogsbody.UseCases;
+using MyDogsbody.UseCases.Interfaces;
 
 namespace MyDogsbody
 {
@@ -26,6 +28,7 @@ namespace MyDogsbody
                 config.SnackbarConfiguration.ShowTransitionDuration = 500;
                 config.SnackbarConfiguration.SnackbarVariant = Variant.Filled;
             });
+            serviceCollection.AddScoped<ICredentialUseCases, CredentialUseCases>();
 
             Resources.Add("services", serviceCollection.BuildServiceProvider());
         }

@@ -1,6 +1,5 @@
 ﻿namespace MyDogsBody.Dtos
 
-open MyDogsbody.Infrastructure.Database.Models
 open MyDogsbody.Enums
 
 type InfrustructureCredentialDto(

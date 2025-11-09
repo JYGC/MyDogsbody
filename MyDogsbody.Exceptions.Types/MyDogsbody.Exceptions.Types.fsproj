@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <Compile Include="ActionNames.fs" />
-    <Compile Include="DogsbodyException.fs" />
+    <Compile Include="MyDogsbodyException.fs" />
   </ItemGroup>
 
 </Project>
