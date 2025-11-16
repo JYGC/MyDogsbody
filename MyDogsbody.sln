@@ -49,6 +49,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.UseCases", "MyDo
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.UseCases.Interfaces", "MyDogsbody.UseCases.Interfaces\MyDogsbody.UseCases.Interfaces.fsproj", "{9DF3A1FF-5B42-48C5-B4C7-00C29B46328B}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.UI.Types", "MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj", "{787363AE-7C9E-4A0D-8C2B-18DF048843F3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -147,6 +149,10 @@ Global
 		{9DF3A1FF-5B42-48C5-B4C7-00C29B46328B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9DF3A1FF-5B42-48C5-B4C7-00C29B46328B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9DF3A1FF-5B42-48C5-B4C7-00C29B46328B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{787363AE-7C9E-4A0D-8C2B-18DF048843F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{787363AE-7C9E-4A0D-8C2B-18DF048843F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{787363AE-7C9E-4A0D-8C2B-18DF048843F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{787363AE-7C9E-4A0D-8C2B-18DF048843F3}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -5,24 +5,41 @@ open Fun.Blazor
 open Fun.Blazor.Router
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UseCases.Interfaces
-open MyDogsBody.Dtos
+open MyDogsbody.UI.Types
+open MyDogsbody.Enums
 
 let getView () =
     html.inject(fun (credentialUseCases: ICredentialUseCases) ->
         let isLoadingCval = cval false
-        let credentialsCval = cval<InfrustructureCredentialDto list> []
+        let credentialsListCval = cval<InfrustructureCredential list> []
         let showModelCval = cval false
 
         let getCredentials() =
             isLoadingCval.Value <- true
             async {
-                let credentialsList = credentialUseCases.GetAllCredentials()
+                let credentialsDtos = credentialUseCases.GetAllCredentials()
                 transact(fun _ ->
-                    credentialsCval.Value <- credentialsList
+                    credentialsListCval.Value <-
+                        credentialsDtos
+                        |> List.map(fun dto ->
+                            {
+                                InfrastructureType = dto.InfrastructureType
+                                Credentials = dto.Credentials
+                                Username = dto.Username
+                            }
+                        )
                     isLoadingCval.Value <- false
                 )
             }
             |> Async.Start
+
+        let getDefaultSelectedCredentials() =
+            {
+                InfrastructureType = InfrastructureType.Google;
+                Credentials = "";
+                Username = "";
+            }
+        let selectedCredentialsCval = getDefaultSelectedCredentials() |> cval
 
         let showAddCredentialsModal() =
             transact(fun _ ->
@@ -43,12 +60,13 @@ let getView () =
         
         fragment {
             CredentialsComponents.credentialsBrowser
-                credentialsCval
+                credentialsListCval
                 isLoadingCval
                 showAddCredentialsModal
             CredentialsComponents.credentialsEditor
                 showModelCval
-                "New Credential"
+                "New Credentials"
+                selectedCredentialsCval
                 modelCancelButton
                 modelSubmitButton
         }
