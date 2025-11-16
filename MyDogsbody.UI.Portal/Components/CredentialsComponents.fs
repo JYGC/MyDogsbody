@@ -57,11 +57,11 @@ let credentialsBrowser
     }
 
 let credentialsEditor
-  (showModelAval: aval<bool>)
   (title: string)
-  (infrustructureCredentialAval: aval<InfrustructureCredential>)
-  (cancel: MouseEventArgs -> unit)
-  (submit: MouseEventArgs -> unit) =
+  (cancel: _ -> unit)
+  (submit: InfrustructureCredential -> unit)
+  (showModelAval: aval<bool>)
+  (infrustructureCredentialAval: aval<InfrustructureCredential>) =
     let infrastructureTypes =
         Enum.GetValues(typeof<InfrastructureType>)
         |> Seq.cast<InfrastructureType>
@@ -123,6 +123,7 @@ let credentialsEditor
                                 Label "Username"
                                 Variant Variant.Text
                                 Value username
+                                Immediate true
                                 ValueChanged setUsername
                             }
                         }
@@ -140,6 +141,7 @@ let credentialsEditor
                                 Variant Variant.Text
                                 Lines 5
                                 Value credentials
+                                Immediate true
                                 ValueChanged setCredentials
                             }
                         }
@@ -151,10 +153,25 @@ let credentialsEditor
                     OnClick cancel
                     "Cancel"
                 }
-                MudButton'' {
-                    Color Color.Primary
-                    OnClick submit
-                    $"Ok"
+                adapt {
+                    let! infrastructureType = infrastructureTypeCval
+                    let! username = usernameCval
+                    let! credentials = credentialsCval
+                    let disableOkButton =
+                        String.IsNullOrWhiteSpace(username) ||
+                        String.IsNullOrWhiteSpace(credentials)
+                    MudButton'' {
+                        Disabled disableOkButton
+                        Color Color.Primary
+                        OnClick (fun _ ->
+                            submit {
+                                InfrastructureType = infrastructureType
+                                Username = username
+                                Credentials = credentials
+                            }
+                        )
+                        "Ok"
+                    }
                 }
             })
         }

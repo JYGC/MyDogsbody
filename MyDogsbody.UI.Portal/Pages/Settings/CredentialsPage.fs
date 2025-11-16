@@ -39,6 +39,7 @@ let getView () =
                 Credentials = "";
                 Username = "";
             }
+
         let selectedCredentialsCval = getDefaultSelectedCredentials() |> cval
 
         let showAddCredentialsModal() =
@@ -64,11 +65,11 @@ let getView () =
                 isLoadingCval
                 showAddCredentialsModal
             CredentialsComponents.credentialsEditor
-                showModelCval
                 "New Credentials"
-                selectedCredentialsCval
                 modelCancelButton
                 modelSubmitButton
+                showModelCval
+                selectedCredentialsCval
         }
     )
     |> SettingsComponents.settingsNavMenu
