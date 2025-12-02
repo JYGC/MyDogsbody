@@ -4,18 +4,16 @@ open System
 open Fun.Blazor
 open MudBlazor
 open FSharp.Data.Adaptive
-open Microsoft.AspNetCore.Components.Web
 open MyDogsbody.Enums
 open MyDogsbody.UI.Types
+open MyDogsbody.UI.Types.Module
 
 let credentialsBrowser
-  (credentialsAval: aval<InfrustructureCredential list>)
-  (isLoadingAval: aval<bool>)
-  (showAddCredentialsModal: unit -> unit) =
+  (credentialsBrowserModule: CredentialsBrowserModule) =
     fragment {
         adapt {
-            let! credentials = credentialsAval
-            let! isLoading = isLoadingAval
+            let! credentials = credentialsBrowserModule.CredentialsListAval
+            let! isLoading = credentialsBrowserModule.IsLoadingAval
             MudTable''{
                 Items credentials
                 Breakpoint Breakpoint.Sm
@@ -34,7 +32,7 @@ let credentialsBrowser
                         Variant Variant.Filled
                         Color Color.Primary
                         EndIcon Icons.Material.Filled.Add
-                        OnClick (fun _ -> showAddCredentialsModal())
+                        OnClick (fun _ -> credentialsBrowserModule.ShowAddCredentialsModal ())
                         "New Credential"
                     }
                 })
@@ -57,11 +55,7 @@ let credentialsBrowser
     }
 
 let credentialsEditor
-  (title: string)
-  (cancel: _ -> unit)
-  (submit: InfrustructureCredential -> unit)
-  (showModelAval: aval<bool>)
-  (infrustructureCredentialAval: aval<InfrustructureCredential>) =
+  (credentialEditorModule: CredentialEditorModule) =
     let infrastructureTypes =
         Enum.GetValues(typeof<InfrastructureType>)
         |> Seq.cast<InfrastructureType>
@@ -72,8 +66,8 @@ let credentialsEditor
         FullWidth = true
     )
     adapt {
-        let! showModel = showModelAval
-        let! infrustructureCredential = infrustructureCredentialAval
+        let! showModel = credentialEditorModule.IsModelVisibleCval
+        let! infrustructureCredential = credentialEditorModule.InfrustructureCredentialCval
 
         let infrastructureTypeCval = cval infrustructureCredential.InfrastructureType
         let usernameCval = cval infrustructureCredential.Username
@@ -150,7 +144,7 @@ let credentialsEditor
             })
             DialogActions (fragment {
                 MudButton'' {
-                    OnClick cancel
+                    OnClick (fun _ -> credentialEditorModule.Cancel ())
                     "Cancel"
                 }
                 adapt {
@@ -164,11 +158,12 @@ let credentialsEditor
                         Disabled disableOkButton
                         Color Color.Primary
                         OnClick (fun _ ->
-                            submit {
-                                InfrastructureType = infrastructureType
-                                Username = username
-                                Credentials = credentials
-                            }
+                            credentialEditorModule.Submit
+                                {
+                                    InfrastructureType = infrastructureType
+                                    Username = username
+                                    Credentials = credentials
+                                }
                         )
                         "Ok"
                     }

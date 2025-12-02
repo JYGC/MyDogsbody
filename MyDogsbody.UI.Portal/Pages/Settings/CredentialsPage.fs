@@ -1,75 +1,27 @@
 ﻿module MyDogsbody.UI.Portal.Pages.Settings.CredentialsPage
 
-open FSharp.Data.Adaptive
 open Fun.Blazor
 open Fun.Blazor.Router
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UseCases.Interfaces
-open MyDogsbody.UI.Types
-open MyDogsbody.Enums
+open MyDogsbody.UI.Types.Module
+open MyDogsbody.UI.Portal.ModuleCreators
 
 let getView () =
     html.inject(fun (credentialUseCases: ICredentialUseCases) ->
-        let isLoadingCval = cval false
-        let credentialsListCval = cval<InfrustructureCredential list> []
-        let showModelCval = cval false
+        let newCredentialEditorModule =
+            CredentialEditorModuleCreators.getNewCredentialEditorModule ()
 
-        let getCredentials() =
-            isLoadingCval.Value <- true
-            async {
-                let credentialsDtos = credentialUseCases.GetAllCredentials()
-                transact(fun _ ->
-                    credentialsListCval.Value <-
-                        credentialsDtos
-                        |> List.map(fun dto ->
-                            {
-                                InfrastructureType = dto.InfrastructureType
-                                Credentials = dto.Credentials
-                                Username = dto.Username
-                            }
-                        )
-                    isLoadingCval.Value <- false
-                )
-            }
-            |> Async.Start
-
-        let getDefaultSelectedCredentials() =
-            {
-                InfrastructureType = InfrastructureType.Google;
-                Credentials = "";
-                Username = "";
-            }
-
-        let selectedCredentialsCval = getDefaultSelectedCredentials() |> cval
-
-        let showAddCredentialsModal() =
-            transact(fun _ ->
-                showModelCval.Value <- true
-            )
-
-        let modelCancelButton _ =
-            transact(fun _ ->
-                showModelCval.Value <- false
-            )
-
-        let modelSubmitButton _ =
-            transact(fun _ ->
-                showModelCval.Value <- false
-            )
-
-        getCredentials()
+        let credentialsBrowserModule =
+            CredentialsBrowserModuleCreators.getCredentialsBrowserModule
+                newCredentialEditorModule.ShowCredentialsModal
+                credentialUseCases.GetAllCredentials
         
         fragment {
             CredentialsComponents.credentialsBrowser
-                credentialsListCval
-                isLoadingCval
-                showAddCredentialsModal
+                credentialsBrowserModule
             CredentialsComponents.credentialsEditor
-                "New Credentials"
-                modelCancelButton
-                modelSubmitButton
-                showModelCval
-                selectedCredentialsCval
+                newCredentialEditorModule
         }
     )
     |> SettingsComponents.settingsNavMenu
