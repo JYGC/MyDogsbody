@@ -11,12 +11,10 @@ let getView () =
     html.inject(fun (credentialUseCases: ICredentialUseCases) ->
         let newCredentialEditorModule =
             CredentialEditorModuleCreators.getNewCredentialEditorModule ()
-
         let credentialsBrowserModule =
             CredentialsBrowserModuleCreators.getCredentialsBrowserModule
                 newCredentialEditorModule.ShowCredentialsModal
                 credentialUseCases.GetAllCredentials
-        
         fragment {
             CredentialsComponents.credentialsBrowser
                 credentialsBrowserModule
