@@ -5,30 +5,18 @@ open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 open MyDogsbody.Enums
 
-let getNewCredentialEditorModule (): CredentialEditorModule = 
-    let getDefaultSelectedCredentials() =
+let getCredentialEditorModule (title: string): CredentialEditorModule = 
+    let showModelCval = cval false
+    let credentialsCval: cval<InfrustructureCredentialUiType> =
         {
             InfrastructureType = InfrastructureType.Google
             Credentials = ""
             Username = ""
         }
-    let showModelCval = cval false
-    let selectedCredentialsCval = cval (getDefaultSelectedCredentials())
-            
+        |> cval
+    
     {
-        Title = "New Credentials"
-        Cancel = fun _ ->
-            transact(fun _ ->
-                showModelCval.Value <- false
-            )
-        Submit = fun _ ->
-            transact(fun _ ->
-                showModelCval.Value <- false
-            )
-        ShowCredentialsModal = fun _ ->
-            transact(fun _ ->
-                showModelCval.Value <- true
-            )
+        Title = title
         IsModelVisibleCval = showModelCval
-        InfrustructureCredentialCval = selectedCredentialsCval
+        InfrustructureCredentialCval = credentialsCval
     }

@@ -9,7 +9,9 @@ open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 
 let credentialsBrowser
-  (credentialsBrowserModule: CredentialsBrowserModule) =
+  (credentialsBrowserModule: CredentialsBrowserModule)
+  (showAddCredentialsModal: _ -> unit)
+  (showEditCredentialsModal: InfrustructureCredentialUiType -> unit) =
     fragment {
         adapt {
             let! credentials = credentialsBrowserModule.CredentialsListAval
@@ -28,12 +30,17 @@ let credentialsBrowser
                         "Credentials"
                     }
                     MudSpacer''{}
-                    MudButton''{
-                        Variant Variant.Filled
-                        Color Color.Primary
-                        EndIcon Icons.Material.Filled.Add
-                        OnClick (fun _ -> credentialsBrowserModule.ShowAddCredentialsModal ())
-                        "New Credential"
+                    adapt {
+
+                        MudButton''{
+                            Variant Variant.Filled
+                            Color Color.Primary
+                            EndIcon Icons.Material.Filled.Add
+                            OnClick (fun _ ->
+                                showAddCredentialsModal ()
+                            )
+                            "New Credential"
+                        }
                     }
                 })
                 HeaderContent (
@@ -41,13 +48,24 @@ let credentialsBrowser
                         MudTh''{ "Infrastructure Type" }
                         MudTh''{ "Credentials" }
                         MudTh''{ "Username" }
+                        MudTh''{ }
                     }
                 )
-                RowTemplate (fun (credential: InfrustructureCredential) ->
+                RowTemplate (fun (credential: InfrustructureCredentialUiType) ->
                     fragment {
                         MudTd''{ $"{credential.InfrastructureType}" }
                         MudTd''{ $"{credential.Credentials}" }
                         MudTd''{ $"{credential.Username}" }
+                        MudTd''{
+                            MudButton''{
+                                Variant Variant.Outlined
+                                Color Color.Primary
+                                OnClick (fun _ ->
+                                    showEditCredentialsModal credential
+                                )
+                                "Edit"
+                            }
+                        }
                     }
                 )
             }
@@ -55,7 +73,8 @@ let credentialsBrowser
     }
 
 let credentialsEditor
-  (credentialEditorModule: CredentialEditorModule) =
+  (credentialEditorModule: CredentialEditorModule)
+  (submitInfrustructureCredential: InfrustructureCredentialUiType -> unit) =
     let infrastructureTypes =
         Enum.GetValues(typeof<InfrastructureType>)
         |> Seq.cast<InfrastructureType>
@@ -66,7 +85,7 @@ let credentialsEditor
         FullWidth = true
     )
     adapt {
-        let! showModel = credentialEditorModule.IsModelVisibleCval
+        let! showModel, setShowModel = credentialEditorModule.IsModelVisibleCval.WithSetter()
         let! infrustructureCredential = credentialEditorModule.InfrustructureCredentialCval
 
         let infrastructureTypeCval = cval infrustructureCredential.InfrastructureType
@@ -144,7 +163,9 @@ let credentialsEditor
             })
             DialogActions (fragment {
                 MudButton'' {
-                    OnClick (fun _ -> credentialEditorModule.Cancel ())
+                    OnClick (fun _ ->
+                        setShowModel false
+                    )
                     "Cancel"
                 }
                 adapt {
@@ -158,12 +179,13 @@ let credentialsEditor
                         Disabled disableOkButton
                         Color Color.Primary
                         OnClick (fun _ ->
-                            credentialEditorModule.Submit
-                                {
-                                    InfrastructureType = infrastructureType
-                                    Username = username
-                                    Credentials = credentials
-                                }
+                            setShowModel false
+                            {
+                                InfrastructureType = infrastructureType
+                                Username = username
+                                Credentials = credentials
+                            }
+                            |> submitInfrustructureCredential
                         )
                         "Ok"
                     }

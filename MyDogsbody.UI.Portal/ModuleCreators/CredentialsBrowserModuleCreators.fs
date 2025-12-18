@@ -6,11 +6,10 @@ open MyDogsbody.UI.Types.Module
 open MyDogsBody.Dtos
 
 let getCredentialsBrowserModule
-  (showAddCredentialsModal: unit -> unit)
   (getAllCredentials: unit -> InfrustructureCredentialDto list)
   : CredentialsBrowserModule =
     let isLoadingCval = cval false
-    let credentialsListCval = cval<InfrustructureCredential list> []
+    let credentialsListCval = cval<InfrustructureCredentialUiType list> []
 
     let getCredentials() =
         isLoadingCval.Value <- true
@@ -36,5 +35,5 @@ let getCredentialsBrowserModule
     {
         CredentialsListAval = credentialsListCval
         IsLoadingAval = isLoadingCval
-        ShowAddCredentialsModal = showAddCredentialsModal
+        LoadCredentials = getCredentials
     }
