@@ -25,7 +25,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Database.Models"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Tests", "MyDogsbody.Tests\MyDogsbody.Tests.fsproj", "{CAB46565-EE7D-409C-84D1-02859323C71B}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure.Google", "MyDogsbody.Infrastructure.Google\MyDogsbody.Infrastructure.Google.fsproj", "{689A0C9B-817D-461C-A272-4B5AAC3029CE}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Integrations.Google", "MyDogsbody.Integrations.Google\MyDogsbody.Integrations.Google.fsproj", "{689A0C9B-817D-461C-A272-4B5AAC3029CE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody.Enums", "MyDogsbody.Enums\MyDogsbody.Enums.csproj", "{3D1290AB-4D3C-4239-914D-088F0F72FE09}"
 EndProject
