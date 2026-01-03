@@ -9,14 +9,14 @@ let insertOne
   (exceptionRepositoryTypeDto: ExceptionRepositoryTypeDto)
   : unit =
     let exceptionCollection = getExceptionCollection()
-    exceptionCollection.Insert(
-        ExceptionLog(
-            Message = exceptionRepositoryTypeDto.Message,
-            ActionName = exceptionRepositoryTypeDto.ActionName,
-            ExceptionDetails = exceptionRepositoryTypeDto.ExceptionDetails,
-            CreatedDate = exceptionRepositoryTypeDto.CreatedDate
-        )
-    ) |> ignore
+    ExceptionLog(
+        Message = exceptionRepositoryTypeDto.Message,
+        ActionName = exceptionRepositoryTypeDto.ActionName,
+        ExceptionDetails = exceptionRepositoryTypeDto.ExceptionDetails,
+        CreatedDate = exceptionRepositoryTypeDto.CreatedDate
+    )
+    |> exceptionCollection.Insert
+    |> ignore
 
 let getAll
   (getExceptionCollection: unit -> ExceptionCollection)

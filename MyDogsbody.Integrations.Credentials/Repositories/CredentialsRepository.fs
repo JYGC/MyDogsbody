@@ -1,6 +1,5 @@
 module MyDogsbody.Integrations.Credentials.Repositories.CredentialsRepository
 
-open LiteDB
 open MyDogsbody.Integrations.Credentials.Database.Models
 open MyDogsbody.Integrations.Credentials.Database.Types
 open MyDogsbody.Integrations.Credentials.Repositories.Types
