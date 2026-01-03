@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="ICredentialCompositions.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.Spine\MyDogsbody.Spine.fsproj" />
+  </ItemGroup>
+
+</Project>

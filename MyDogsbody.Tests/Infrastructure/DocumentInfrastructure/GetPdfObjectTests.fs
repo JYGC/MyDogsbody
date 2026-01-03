@@ -63,7 +63,7 @@ startxref
   // Assert
   match result with
   | Ok doc ->
-      let words = doc.GetWords()
+      let words = doc.Words
       Assert.NotNull(words)
   | Error ex ->
       Assert.Fail($"Expected Ok, but got Error: {ex.Message}")

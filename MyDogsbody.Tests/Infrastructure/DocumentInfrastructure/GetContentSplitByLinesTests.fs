@@ -16,8 +16,8 @@ type TestHandleErrorBuilder() =
 let handleError = HandleErrorBuilder (fun _ -> ())
 
 // Stub DocumentObject with a simple word list
-let fakeDocumentObject : DocumentHandler =
-  { GetWords = fun () ->
+let fakeDocumentObject : DocumentContentDomianTypeDto =
+  { Words =
       [ { Text = "Hello"; Left = 10.0; Bottom = 100.0 }
         { Text = "World"; Left = 50.0; Bottom = 100.0 } ] }
 

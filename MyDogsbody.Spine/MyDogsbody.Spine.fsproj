@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Domains\Types\AddCredentialDomainTypeDto.fs" />
+    <Compile Include="Domains\Types\CredentialDomainTypeDto.fs" />
+    <Compile Include="Domains\Types\DocumentContentDomainTypeDto.fs" />
+    <Compile Include="Domains\DomianTypeMappers.fs" />
+    <Compile Include="Domains\CredentialsDomain.fs" />
+    <Compile Include="Domains\DocumentDomian.fs" />
+    <Compile Include="UseCases\Types\AddCredentialUseCaseTypeDto.fs" />
+    <Compile Include="UseCases\Types\CredentialUseCaseTypeDto.fs" />
+    <Compile Include="UseCases\UseCaseTypeMappers.fs" />
+    <Compile Include="UseCases\CredentialUseCases.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
+    <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj" />
+  </ItemGroup>
+
+</Project>

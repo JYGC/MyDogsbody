@@ -6,13 +6,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="DocumentDomain.fs" />
+    <Compile Include="DomianTypeMappers.fs" />
+    <Compile Include="CredentialsDomain.fs" />
+    <Compile Include="DocumentDomian.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Domains.Types\MyDogsbody.Domains.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj" />
   </ItemGroup>
 
 </Project>

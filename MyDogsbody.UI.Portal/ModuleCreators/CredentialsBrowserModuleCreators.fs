@@ -3,10 +3,10 @@
 open FSharp.Data.Adaptive
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
-open MyDogsBody.Dtos
+open MyDogsbody.Spine.UseCases.Types
 
 let getCredentialsBrowserModule
-  (getAllCredentials: unit -> InfrustructureCredentialDto list)
+  (getAllCredentials: unit -> CredentialUseCaseTypeDto list)
   : CredentialsBrowserModule =
     let isLoadingCval = cval false
     let credentialsListCval = cval<InfrustructureCredentialUiType list> []

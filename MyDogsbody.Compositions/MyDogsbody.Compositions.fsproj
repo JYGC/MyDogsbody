@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="SetupDatabase.fs" />
+    <Compile Include="CredentialCompositions.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.Compositions.Interfaces\MyDogsbody.Compositions.Interfaces.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Logging\MyDogsbody.Integrations.Logging.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Spine\MyDogsbody.Spine.fsproj" />
+  </ItemGroup>
+
+</Project>

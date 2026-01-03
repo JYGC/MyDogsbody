@@ -6,7 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="DocumentHandler.fs" />
+    <Compile Include="DocumentContentDomainTypeDto.fs" />
+    <Compile Include="AddCredentialDomainTypeDto.fs" />
+    <Compile Include="CredentialDomainTypeDto.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
   </ItemGroup>
 
 </Project>

@@ -28,9 +28,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\MyDogsbody.Compositions.Interfaces\MyDogsbody.Compositions.Interfaces.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.UseCases.Interfaces\MyDogsbody.UseCases.Interfaces.fsproj" />
   </ItemGroup>
 
 </Project>
