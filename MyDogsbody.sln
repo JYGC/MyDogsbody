@@ -27,8 +27,6 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Tests", "MyDogsb
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Infrastructure.Google", "MyDogsbody.Infrastructure.Google\MyDogsbody.Infrastructure.Google.fsproj", "{689A0C9B-817D-461C-A272-4B5AAC3029CE}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody.Infrastructure.Database.Models", "MyDogsbody.Infrastructure.Database.Models\MyDogsbody.Infrastructure.Database.Models.csproj", "{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody.Enums", "MyDogsbody.Enums\MyDogsbody.Enums.csproj", "{3D1290AB-4D3C-4239-914D-088F0F72FE09}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody", "MyDogsbody\MyDogsbody.csproj", "{364BB024-24D6-4402-90F4-F6C0161D3B84}"
@@ -107,10 +105,6 @@ Global
 		{689A0C9B-817D-461C-A272-4B5AAC3029CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{689A0C9B-817D-461C-A272-4B5AAC3029CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{689A0C9B-817D-461C-A272-4B5AAC3029CE}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B10FAAE1-D468-44AC-B71B-52BB903ED2C4}.Release|Any CPU.Build.0 = Release|Any CPU
 		{3D1290AB-4D3C-4239-914D-088F0F72FE09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{3D1290AB-4D3C-4239-914D-088F0F72FE09}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3D1290AB-4D3C-4239-914D-088F0F72FE09}.Release|Any CPU.ActiveCfg = Release|Any CPU
