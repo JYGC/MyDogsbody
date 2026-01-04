@@ -10,14 +10,14 @@ open MyDogsbody.UI.Portal.ModuleCreators
 open MyDogsbody.Enums
 
 let getView () =
-    html.inject(fun (credentialUseCases: ICredentialCompositions) ->
+    html.inject(fun (credentialCompositions: ICredentialCompositions) ->
         let addCredentialEditorModule =
             CredentialEditorModuleCreators.getCredentialEditorModule "Add Credentials"
         let modifyCredentialEditorModule =
             CredentialEditorModuleCreators.getCredentialEditorModule "Edit Credentials"
         let credentialsBrowserModule =
             CredentialsBrowserModuleCreators.getCredentialsBrowserModule
-                credentialUseCases.GetAllCredentials
+                credentialCompositions.GetAllCredentials
         fragment {
             CredentialsComponents.credentialsBrowser
                 credentialsBrowserModule
