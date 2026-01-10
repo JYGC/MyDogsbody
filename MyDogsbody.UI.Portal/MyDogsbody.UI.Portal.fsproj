@@ -7,7 +7,6 @@
 
   <ItemGroup>
     <Compile Include="ModuleCreators\CredentialsBrowserModuleCreators.fs" />
-    <Compile Include="ModuleCreators\CredentialEditorModuleCreators.fs" />
     <Compile Include="components\HomeComponents.fs" />
     <Compile Include="Components\CredentialsComponents.fs" />
     <Compile Include="Components\SettingsComponents.fs" />

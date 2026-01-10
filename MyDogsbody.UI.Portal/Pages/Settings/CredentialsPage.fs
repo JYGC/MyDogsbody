@@ -1,20 +1,15 @@
 ﻿module MyDogsbody.UI.Portal.Pages.Settings.CredentialsPage
 
-open FSharp.Data.Adaptive
 open Fun.Blazor
 open Fun.Blazor.Router
 open MyDogsbody.Compositions.Interfaces
 open MyDogsbody.UI.Portal.Components
-open MyDogsbody.UI.Types.Module
 open MyDogsbody.UI.Portal.ModuleCreators
-open MyDogsbody.Enums
+open MudBlazor
+open MyDogsbody.UI.Types
 
 let getView () =
-    html.inject(fun (credentialCompositions: ICredentialCompositions) ->
-        let addCredentialEditorModule =
-            CredentialEditorModuleCreators.getCredentialEditorModule "Add Credentials"
-        let modifyCredentialEditorModule =
-            CredentialEditorModuleCreators.getCredentialEditorModule "Edit Credentials"
+    html.inject(fun (credentialCompositions: ICredentialCompositions, dialogService: IDialogService) ->
         let credentialsBrowserModule =
             CredentialsBrowserModuleCreators.getCredentialsBrowserModule
                 credentialCompositions.GetAllCredentials
@@ -22,29 +17,24 @@ let getView () =
             CredentialsComponents.credentialsBrowser
                 credentialsBrowserModule
                 (fun _ ->
-                    transact(fun _ ->
-                        addCredentialEditorModule.InfrustructureCredentialCval.Value <- 
-                            {
-                                InfrastructureType = InfrastructureType.Google
-                                Credentials = ""
-                                Username = ""
-                            }
-                        addCredentialEditorModule.IsModelVisibleCval.Value <- true
+                    let parameters = new DialogParameters<CredentialsComponents.CredentialsEditorDialog>()
+                    parameters.Add("GetInfrustructureCredentialCallback", (fun (tt: InfrustructureCredentialUiType) -> ()))
+                    dialogService.ShowAsync<CredentialsComponents.CredentialsEditorDialog>(
+                        "Add Credentials",
+                        parameters
                     )
+                    |> ignore
                 )
                 (fun credentials ->
-                    transact(fun _ ->
-                        modifyCredentialEditorModule.InfrustructureCredentialCval.Value <-
-                            credentials
-                        modifyCredentialEditorModule.IsModelVisibleCval.Value <- true
+                    let parameters = new DialogParameters<CredentialsComponents.CredentialsEditorDialog>()
+                    parameters.Add("CredentialUiType", credentials)
+                    parameters.Add("GetInfrustructureCredentialCallback", (fun (tt: InfrustructureCredentialUiType) -> ()))
+                    dialogService.ShowAsync<CredentialsComponents.CredentialsEditorDialog>(
+                        "Add Credentials",
+                        parameters
                     )
+                    |> ignore
                 )
-            CredentialsComponents.credentialsEditor
-                addCredentialEditorModule
-                (fun credentials -> ())
-            CredentialsComponents.credentialsEditor
-                modifyCredentialEditorModule
-                (fun credentials -> ())
         }
     )
     |> SettingsComponents.settingsNavMenu

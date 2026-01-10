@@ -7,6 +7,7 @@ open FSharp.Data.Adaptive
 open MyDogsbody.Enums
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
+open Microsoft.AspNetCore.Components
 
 let credentialsBrowser
   (credentialsBrowserModule: CredentialsBrowserModule)
@@ -72,124 +73,128 @@ let credentialsBrowser
         }
     }
 
-let credentialsEditor
-  (credentialEditorModule: CredentialEditorModule)
-  (submitInfrustructureCredential: InfrustructureCredentialUiType -> unit) =
-    let infrastructureTypes =
-        Enum.GetValues(typeof<InfrastructureType>)
-        |> Seq.cast<InfrastructureType>
+type CredentialsEditorDialog() =
+    inherit FunComponent()
+    
+    [<CascadingParameter>]
+    member val private __mudDialogInstance : IMudDialogInstance = null with get, set
 
-    let options = new DialogOptions(
-        CloseOnEscapeKey = false,
-        BackdropClick = false,
-        FullWidth = true
-    )
-    adapt {
-        let! showModel, setShowModel = credentialEditorModule.IsModelVisibleCval.WithSetter()
-        let! infrustructureCredential = credentialEditorModule.InfrustructureCredentialCval
+    [<Parameter>]
+    member val public Title : string = "Add Credential" with get, set
 
-        let infrastructureTypeCval = cval infrustructureCredential.InfrastructureType
-        let usernameCval = cval infrustructureCredential.Username
-        let credentialsCval = cval infrustructureCredential.Credentials
+    [<Parameter>]
+    member val public CredentialUiType : InfrustructureCredentialUiType = {
+        InfrastructureType = InfrastructureType.Google;
+        Credentials = "";
+        Username = "" } with get, set
 
-        MudDialog''{
-            Visible showModel
-            Options options
-            TitleContent (fragment {
-                MudText'' {
-                    Typo Typo.h6
-                    title
-                }
-            })
-            DialogContent (fragment {
-                MudGrid'' {
-                    MudItem'' {
-                        xs 12
-                        sm 12
-                        md 12
-                        adapt {
-                            let! infrastructureType, setinfrastructureType = infrastructureTypeCval.WithSetter()
-                            MudSelect'' {
-                                Label "Infrastructure Type"
-                                Variant Variant.Text
-                                Value infrastructureType
-                                ValueChanged setinfrastructureType
-                                fragment {
-                                    for infrastructureType in infrastructureTypes do
-                                        MudSelectItem'' {
-                                            Value infrastructureType
-                                            $"{(infrastructureType.ToString())}"
-                                        }
+    [<Parameter>]
+    member val public GetInfrustructureCredentialCallback : (InfrustructureCredentialUiType -> unit) = fun _ -> () with get, set
+
+    override this.Render() =
+        let infrastructureTypes =
+            Enum.GetValues(typeof<InfrastructureType>)
+            |> Seq.cast<InfrastructureType>
+
+        let infrastructureTypeCval = cval this.CredentialUiType.InfrastructureType
+        let usernameCval = cval this.CredentialUiType.Username
+        let credentialsCval = cval this.CredentialUiType.Credentials
+
+        fragment {
+            MudDialog''{
+                TitleContent (fragment {
+                    MudText'' {
+                        Typo Typo.h6
+                        this.Title
+                    }
+                })
+                DialogContent (fragment {
+                    MudGrid'' {
+                        MudItem'' {
+                            xs 12
+                            sm 12
+                            md 12
+                            adapt {
+                                let! infrastructureType, setinfrastructureType = infrastructureTypeCval.WithSetter()
+                                MudSelect'' {
+                                    Label "Infrastructure Type"
+                                    Variant Variant.Text
+                                    Value infrastructureType
+                                    ValueChanged setinfrastructureType
+                                    fragment {
+                                        for infrastructureType in infrastructureTypes do
+                                            MudSelectItem'' {
+                                                Value infrastructureType
+                                                $"{(infrastructureType.ToString())}"
+                                            }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                MudGrid'' {
-                    MudItem'' {
-                        xs 12
-                        sm 12
-                        md 12
-                        adapt {
-                            let! username, setUsername = usernameCval.WithSetter()
-                            MudTextField'' {
-                                Label "Username"
-                                Variant Variant.Text
-                                Value username
-                                Immediate true
-                                ValueChanged setUsername
+                    MudGrid'' {
+                        MudItem'' {
+                            xs 12
+                            sm 12
+                            md 12
+                            adapt {
+                                let! username, setUsername = usernameCval.WithSetter()
+                                MudTextField'' {
+                                    Label "Username"
+                                    Variant Variant.Text
+                                    Value username
+                                    Immediate true
+                                    ValueChanged setUsername
+                                }
                             }
                         }
                     }
-                }
-                MudGrid'' {
-                    MudItem'' {
-                        xs 12
-                        sm 12
-                        md 12
-                        adapt {
-                            let! credentials, setCredentials = credentialsCval.WithSetter()
-                            MudTextField'' {
-                                Label "Credentials"
-                                Variant Variant.Text
-                                Lines 5
-                                Value credentials
-                                Immediate true
-                                ValueChanged setCredentials
+                    MudGrid'' {
+                        MudItem'' {
+                            xs 12
+                            sm 12
+                            md 12
+                            adapt {
+                                let! credentials, setCredentials = credentialsCval.WithSetter()
+                                MudTextField'' {
+                                    Label "Credentials"
+                                    Variant Variant.Text
+                                    Lines 5
+                                    Value credentials
+                                    Immediate true
+                                    ValueChanged setCredentials
+                                }
                             }
                         }
                     }
-                }
-            })
-            DialogActions (fragment {
-                MudButton'' {
-                    OnClick (fun _ ->
-                        setShowModel false
-                    )
-                    "Cancel"
-                }
-                adapt {
-                    let! infrastructureType = infrastructureTypeCval
-                    let! username = usernameCval
-                    let! credentials = credentialsCval
-                    let disableOkButton =
-                        String.IsNullOrWhiteSpace(username) ||
-                        String.IsNullOrWhiteSpace(credentials)
+                })
+                DialogActions (fragment {
                     MudButton'' {
-                        Disabled disableOkButton
-                        Color Color.Primary
-                        OnClick (fun _ ->
-                            setShowModel false
-                            {
-                                InfrastructureType = infrastructureType
-                                Username = username
-                                Credentials = credentials
-                            }
-                            |> submitInfrustructureCredential
-                        )
-                        "Ok"
+                        OnClick (fun _ -> this.__mudDialogInstance.Cancel() |> ignore)
+                        "Cancel"
                     }
-                }
-            })
+                    adapt {
+                        let! infrastructureType = infrastructureTypeCval
+                        let! username = usernameCval
+                        let! credentials = credentialsCval
+                        let disableOkButton =
+                            String.IsNullOrWhiteSpace(username) ||
+                            String.IsNullOrWhiteSpace(credentials)
+                        MudButton'' {
+                            Disabled disableOkButton
+                            Color Color.Primary
+                            OnClick (fun _ ->
+                                this.GetInfrustructureCredentialCallback
+                                    {
+                                        InfrastructureType = infrastructureType
+                                        Username = username
+                                        Credentials = credentials
+                                    }
+                                this.__mudDialogInstance.Close() |> ignore
+                            )
+                            "Ok"
+                        }
+                    }
+                })
+            }
         }
-    }
