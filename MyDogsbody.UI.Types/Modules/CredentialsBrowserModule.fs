@@ -5,7 +5,7 @@ open MyDogsbody.UI.Types
 
 type CredentialsBrowserModule =
     {
-        CredentialsListAval: aval<InfrustructureCredentialUiType list>
+        CredentialsListAval: aval<IntegrationCredentialUiType list>
         IsLoadingAval: aval<bool>
         LoadCredentials: unit -> unit
     }

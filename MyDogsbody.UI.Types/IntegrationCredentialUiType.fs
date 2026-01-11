@@ -2,7 +2,7 @@
 
 open MyDogsbody.Enums
 
-type InfrustructureCredentialUiType =
+type IntegrationCredentialUiType =
     {
         InfrastructureType: InfrastructureType
         Credentials: string

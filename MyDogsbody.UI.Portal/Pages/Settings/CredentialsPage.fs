@@ -7,6 +7,7 @@ open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UI.Portal.ModuleCreators
 open MudBlazor
 open MyDogsbody.UI.Types
+open MyDogsbody.Spine.UseCases.Types
 
 let getView () =
     html.inject(fun (credentialCompositions: ICredentialCompositions, dialogService: IDialogService) ->
@@ -17,22 +18,30 @@ let getView () =
             CredentialsComponents.credentialsBrowser
                 credentialsBrowserModule
                 (fun _ ->
-                    let parameters = new DialogParameters<CredentialsComponents.CredentialsEditorDialog>()
-                    parameters.Add("GetInfrustructureCredentialCallback", (fun (tt: InfrustructureCredentialUiType) -> ()))
-                    dialogService.ShowAsync<CredentialsComponents.CredentialsEditorDialog>(
-                        "Add Credentials",
-                        parameters
-                    )
+                    CredentialsComponents.showCredentialsEditorDialog
+                        dialogService
+                        "Add Credentials"
+                        (fun (changedCredentials: IntegrationCredentialUiType) ->
+                            changedCredentials
+                            |> fun uiType ->
+                                let dto: AddCredentialUseCaseTypeDto =
+                                    {
+                                        InfrastructureType = uiType.InfrastructureType
+                                        Credentials = uiType.Credentials
+                                        Username = uiType.Username
+                                    }
+                                dto
+                            |> credentialCompositions.AddNewCredential
+                        )
+                        None
                     |> ignore
                 )
                 (fun credentials ->
-                    let parameters = new DialogParameters<CredentialsComponents.CredentialsEditorDialog>()
-                    parameters.Add("CredentialUiType", credentials)
-                    parameters.Add("GetInfrustructureCredentialCallback", (fun (tt: InfrustructureCredentialUiType) -> ()))
-                    dialogService.ShowAsync<CredentialsComponents.CredentialsEditorDialog>(
-                        "Add Credentials",
-                        parameters
-                    )
+                    CredentialsComponents.showCredentialsEditorDialog
+                        dialogService
+                        "Edit Credentials"
+                        (fun (tt: IntegrationCredentialUiType) -> ())
+                        (Some credentials)
                     |> ignore
                 )
         }

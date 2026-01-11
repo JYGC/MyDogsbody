@@ -12,7 +12,7 @@ open Microsoft.AspNetCore.Components
 let credentialsBrowser
   (credentialsBrowserModule: CredentialsBrowserModule)
   (showAddCredentialsModal: _ -> unit)
-  (showEditCredentialsModal: InfrustructureCredentialUiType -> unit) =
+  (showEditCredentialsModal: IntegrationCredentialUiType -> unit) =
     fragment {
         adapt {
             let! credentials = credentialsBrowserModule.CredentialsListAval
@@ -52,7 +52,7 @@ let credentialsBrowser
                         MudTh''{ }
                     }
                 )
-                RowTemplate (fun (credential: InfrustructureCredentialUiType) ->
+                RowTemplate (fun (credential: IntegrationCredentialUiType) ->
                     fragment {
                         MudTd''{ $"{credential.InfrastructureType}" }
                         MudTd''{ $"{credential.Credentials}" }
@@ -83,13 +83,13 @@ type CredentialsEditorDialog() =
     member val public Title : string = "Add Credential" with get, set
 
     [<Parameter>]
-    member val public CredentialUiType : InfrustructureCredentialUiType = {
+    member val public CredentialUiType : IntegrationCredentialUiType = {
         InfrastructureType = InfrastructureType.Google;
         Credentials = "";
         Username = "" } with get, set
 
     [<Parameter>]
-    member val public GetInfrustructureCredentialCallback : (InfrustructureCredentialUiType -> unit) = fun _ -> () with get, set
+    member val public GetInfrustructureCredentialCallback : (IntegrationCredentialUiType -> unit) = fun _ -> () with get, set
 
     override this.Render() =
         let infrastructureTypes =
@@ -198,3 +198,24 @@ type CredentialsEditorDialog() =
                 })
             }
         }
+
+let showCredentialsEditorDialog
+  (dialogService: IDialogService)
+  (dialogTitle: string)
+  (getInfrustructureCredentialCallback: IntegrationCredentialUiType -> unit)
+  (credentialsOption: IntegrationCredentialUiType option) =
+    let options = new DialogOptions(
+        CloseOnEscapeKey = false,
+        BackdropClick = false,
+        FullWidth = true
+    )
+    let parameters = new DialogParameters<CredentialsEditorDialog>()
+    parameters.Add("Title", dialogTitle)
+    parameters.Add("GetInfrustructureCredentialCallback", getInfrustructureCredentialCallback)
+    if credentialsOption.IsSome then
+        parameters.Add("CredentialUiType", credentialsOption.Value)
+    dialogService.ShowAsync<CredentialsEditorDialog>(
+        dialogTitle,
+        parameters,
+        options
+    )

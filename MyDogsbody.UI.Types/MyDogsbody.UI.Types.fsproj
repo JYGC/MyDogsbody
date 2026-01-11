@@ -6,7 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="InfrustructureCredentialUiType.fs" />
+    <Compile Include="IntegrationCredentialUiType.fs" />
     <Compile Include="Modules\CredentialsBrowserModule.fs" />
   </ItemGroup>
 

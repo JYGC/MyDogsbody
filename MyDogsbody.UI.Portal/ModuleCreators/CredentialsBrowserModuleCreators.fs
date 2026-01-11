@@ -9,7 +9,7 @@ let getCredentialsBrowserModule
   (getAllCredentials: unit -> CredentialUseCaseTypeDto list)
   : CredentialsBrowserModule =
     let isLoadingCval = cval false
-    let credentialsListCval = cval<InfrustructureCredentialUiType list> []
+    let credentialsListCval = cval<IntegrationCredentialUiType list> []
 
     let getCredentials() =
         isLoadingCval.Value <- true
