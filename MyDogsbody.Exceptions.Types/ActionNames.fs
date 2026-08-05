@@ -1,86 +1,59 @@
-﻿module MyDogsbody.Exceptions.Types.ActionNames
+/// Every action string an outer-ring function reports a failure under.
+///
+/// Nested modules mirror the real code path of the function that uses the string, so an entry
+/// reads as where the failure happened. They are $"..."-composed and compiler-unchecked, which is
+/// why Contracts/ActionNamesTests.fs asserts that each function reports the one it declares -
+/// before that test existed, two entries here were silently wrong: one truncated so it did not
+/// name its own function, and one naming the opposite mapping.
+///
+/// Domain workflows have no entry. Their errors are discriminated union cases, which need no
+/// string; the only credentials entries below the composition root belong to the store.
+module MyDogsbody.Exceptions.Types.ActionNames
 
 module MyDogsbody =
     let private myDogsbody = "MyDogsbody"
 
-    module Infrastructure =
-        let private infrastructure = $"{myDogsbody}.Infrastructure"
+    /// The composition root's own actions.
+    ///
+    /// A domain error still has to reach the UI as a MyDogsbodyException, and that carries an
+    /// action, so it names the API operation that failed rather than the workflow inside.
+    module Startup =
+        let private startup = $"{myDogsbody}.Startup"
 
-        let getContentSplitByLines = $"{infrastructure}.getContentSplitByLines"
-        let getPdfObject = $"{infrastructure}.getPdfObject"
+        module CredentialApi =
+            let private credentialApi = $"{startup}.CredentialApi"
+            let getAllCredentials = $"{credentialApi}.getAllCredentials"
+            let addCredential = $"{credentialApi}.addCredential"
+            let editCredential = $"{credentialApi}.editCredential"
 
-    module Domains =
-        let private domains = $"{myDogsbody}.Domains"
-        module TypeMappers =
-            let private typeMappers = $"{domains}.TypeMappers"
-            let mapPdfContentUseCaseTypeDtoToDocumentContentDomianTypeDto =
-                $"{typeMappers}.mapPdfContentUseCaseTypeDtoToDocumentContentDomianTypeDto"
-            let mapAddCredentialDomainTypeDtoToNewCredentialUseCaseTypeDto =
-                $"{typeMappers}.mapAddCredentialDomainTypeDtoToNewCredentialUseCaseTypeDto"
-            let mapCredentialDomainTypeDtoToExistingCredentialUseCaseTypeDto =
-                $"{typeMappers}.mapCredentialDomainTypeDtoToExistingCredentialUseCaseTypeDto"
-            let mapExistingCredentialUseCaseTypeDtoToCredentialDomainTypeDtos =
-                $"{typeMappers}.mapExistingCredentialUseCaseTypeDtoToCredentialDomainTypeDtos"
-
-    module Repositories =
-        let private repositories = $"{myDogsbody}.Repositories"
-
-        module CredentialRepository =
-            let private credentialRepository = $"{repositories}.CredentialRepository"
-            let insertOne = $"{credentialRepository}.insertOne"
-            let getAll = $"{credentialRepository}.getAll"
-            let getAllByType = $"{credentialRepository}.getAllByType"
-
-    module UseCases =
-        let private useCases = $"{myDogsbody}.UseCases"
-        module UseCaseTypeMappers =
-            let private useCaseTypeMappers = $"{useCases}.UseCaseTypeMappers"
-            let mapPdfContentDomainTypeDtoToPdfContentUseCaseTypeDto =
-                $"{useCaseTypeMappers}.mapPdfContentDomainTypeDtoToPdfContentUseCaseTypeDto"
-            let mapAddCredentialUseCaseTypeDtoToNewCredentialUseCaseTypeDto =
-                $"{useCaseTypeMappers}.mapAddCredentialUseCaseTypeDtoToNewCredentialUseCaseTypeDto"
-            let mapAddCredentialUseCaseTypeDtoToAddCredentialDomainTypeDto =
-                $"{useCaseTypeMappers}.mapAddCredentialUseCaseTypeDtoToAddCredentialDomain"
-            let mapCredentialUseCaseTypeDtoToCredentialDomainTypeDto =
-                $"{useCaseTypeMappers}.mapCredentialUseCaseTypeDtoToCredentialDomainTypeDto"
-            let mapExistingCredentialUseCaseTypeDtoToCredentialDomainTypeDtos =
-                $"{useCaseTypeMappers}.mapExistingCredentialUseCaseTypeDtoToCredentialDomainTypeDtos"
-        module CredentialUseCases =
-            let private credentialUseCases = $"{useCases}.CredentialUseCases"
-            let insertOne = $"{credentialUseCases}.insertOne"
-            let getAll = $"{credentialUseCases}.getAll"
-    
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
-        module Pdf =
-            let private pdf = $"{integrations}.Pdf"
-            module UseCases =
-                let private useCases = $"{pdf}.UseCases"
-                module Types =
-                    let private types = $"{useCases}.Types"
-                    module Mappers =
-                        let private mappers = $"{types}.Mappers"
-                        let mapPdfContentDomainTypeDtoToPdfContentUseCaseTypeDto =
-                            $"{mappers}.mapPdfContentDomainTypeDtoToPdfContentUseCaseTypeDto"
+
         module Credentials =
             let private credentials = $"{integrations}.Credentials"
-            module Repositories =
-                let private repositories = $"{credentials}.Repositories"
-                let insertOne = $"{repositories}.insertOne"
-                let updateOne = $"{repositories}.updateOne"
-                let getAll = $"{repositories}.getAll"
-            module UseCases =
-                let private useCases = $"{credentials}.UseCases"
-                let insertOne = $"{useCases}.insertOne"
-                let updateOne = $"{useCases}.updateOne"
-                let getAll = $"{useCases}.getAll"
-                module Types =
-                    let private types = $"{useCases}.Types"
-                    module Mappers =
-                        let private mappers = $"{types}.Mappers"
-                        let mapNewCredentialUseCaseTypeDtoToNewCredentialRepositoryTypeDto =
-                            $"{mappers}.mapNewCredentialUseCaseTypeDtoToNewCredentialRepositoryTypeDto"
-                        let mapExistingCredentialUseCaseTypeDtoToExistingCredentialRepositoryTypeDto =
-                            $"{mappers}.mapExistingCredentialUseCaseTypeDtoToExistingCredentialRepositoryTypeDto"
-                        let mapExistingCredentialRepositoryTypeDtoToExistingCredentialUseCaseTypeDto =
-                            $"{mappers}.mapExistingCredentialRepositoryTypeDtoToExistingCredentialUseCaseTypeDto"
+
+            module CredentialStore =
+                let private credentialStore = $"{credentials}.CredentialStore"
+                let getAll = $"{credentialStore}.getAll"
+                let insertOne = $"{credentialStore}.insertOne"
+                let updateOne = $"{credentialStore}.updateOne"
+
+        module Pdf =
+            let private pdf = $"{integrations}.Pdf"
+
+            module PdfDocumentReader =
+                let private pdfDocumentReader = $"{pdf}.PdfDocumentReader"
+                let readContent = $"{pdfDocumentReader}.readContent"
+
+    module Logging =
+        let private logging = $"{myDogsbody}.Logging"
+
+        module ExceptionRepository =
+            let private exceptionRepository = $"{logging}.ExceptionRepository"
+            let insertOne = $"{exceptionRepository}.insertOne"
+            let getAll = $"{exceptionRepository}.getAll"
+
+        module ExceptionUseCases =
+            let private exceptionUseCases = $"{logging}.ExceptionUseCases"
+            let addException = $"{exceptionUseCases}.addException"
+            let getAllExceptions = $"{exceptionUseCases}.getAllExceptions"

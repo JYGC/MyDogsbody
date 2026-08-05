@@ -18,11 +18,10 @@ One solution, `MyDogsbody.sln`. Every project targets `net9.0` except the WPF ho
 
 | Ring | Project | Holds |
 | --- | --- | --- |
-| **Centre** | `MyDogsbody.Domain` | **Not created yet** — see *Architecture → Status*. The pure domain: one folder per workflow area holding constrained types, domain error DUs, dependency function types, and the workflow pipelines. Plus `Result.fs`, its own generic `result` builder. References **no other project** |
-| Outer ring | `MyDogsbody.Integrations.Credentials` (+ `.Database.Models`, C#) | LiteDB context, `Repositories/`, `UseCases/`, `Credential` entity. Under this architecture an integration is an **adapter**: it implements the function types the domain declares |
-| Outer ring | `MyDogsbody.Integrations.Pdf` | PdfPig-backed `Domains/ReadPdfDomain.fs`, use cases |
-| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` (domain ⇄ UI, pure), `CredentialApiFactory.fs` (`createCredentialApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
-| Retiring | `MyDogsbody.Spine` | `Domains/` and `UseCases/` — the layered core this architecture replaces. **Add nothing to it**; see *Architecture → Status* |
+| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/` and `Documents/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
+| Outer ring | `MyDogsbody.Integrations.Credentials` (+ `.Database.Models`, C#) | LiteDB context, `CredentialEntityMappers.fs` (the bottom mapper), `CredentialStore.fs` (the adapter), `Credential` entity. An integration is an **adapter**: it implements the function types the domain declares |
+| Outer ring | `MyDogsbody.Integrations.Pdf` | `PdfDocumentReader.fs` — PdfPig behind the domain's `ReadDocumentContent` |
+| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` (`createCredentialApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
 | Host | `MyDogsbody` (C#) | WPF `MainWindow` + `BlazorWebView`, `Frame.razor` (MudBlazor providers + theme), the DI registration, `wwwroot/` |
 | UI | `MyDogsbody.UI.Portal` | `Shell.fs` (routes), `Pages/`, `Components/`, `ModuleCreators/`, `Layout/` |
 | UI | `MyDogsbody.UI.Types` | UI-facing records (`IntegrationCredentialUiType*`) and `Modules/` adaptive-state records |
@@ -37,15 +36,17 @@ One solution, `MyDogsbody.sln`. Every project targets `net9.0` except the WPF ho
 
 Reference direction, enforced by project references. **Dependencies point inward** — that is the whole rule, and the reference graph is what enforces it:
 
-- **`MyDogsbody.Domain` references nothing.** Not `Builders`, not `Exceptions.Types`, not LiteDB, not an integration. If a domain file needs something it cannot reach, the thing it needs is a dependency function type, not a project reference. This is the invariant the architecture is built on — breaking it costs the whole benefit.
+- **`MyDogsbody.Domain` references nothing.** Not `Builders`, not `Exceptions.Types`, not `Enums`, not LiteDB, not an integration. If a domain file needs something it cannot reach, the thing it needs is a dependency function type, not a project reference. This is the invariant the architecture is built on — breaking it costs the whole benefit. Enforced twice: the `AssertDomainReferencesNothing` target in `MyDogsbody.Domain.fsproj` fails the build, and `Contracts/DomainIsolationTests.fs` asserts the same thing from the suite. (`FSharp.Core` arrives implicitly from the SDK and is the language runtime, not a dependency in this sense.)
+- **Because it references nothing, the domain cannot use `MyDogsbody.Enums.InfrastructureType`** — it declares its own `Infrastructure` union instead, and the two edge mappers translate. Do not "fix" this by referencing `Enums`.
 - **Integrations reference `Domain`** and implement the function types it declares. They never reference each other, and they never reference `Startup` or the UI.
-- **`MyDogsbody.UI.Portal` references `UI.Types`, `Enums` and (transitively) `Exceptions.Types` — nothing else.** `Domain`, `Spine` and the integrations stay unreachable from the screen. Do not add a `Domain` reference to the UI to save a mapper; see *Architecture → The two mapping points*.
-- **`Startup` references everything it wires** — `Domain`, the integrations, `Builders`, `Logging`, `UI.Types` — and nothing references `Startup` except the C# host.
+- **`MyDogsbody.UI.Portal` references `UI.Types`, `Enums` and (transitively) `Exceptions.Types` — nothing else.** `Domain` and the integrations stay unreachable from the screen. Do not add a `Domain` reference to the UI to save a mapper; see *Architecture → The two mapping points*.
+- **`Startup` references everything it wires** — `Domain`, the integrations, `Builders`, `Logging`, `UI.Types` — and nothing references `Startup` except the C# host and a throwaway smoke harness.
 - The C# projects sit at the bottom (entities, enum) and reference nothing upward.
-- Nothing references `MyDogsbody.Database` yet, and the sole reference to `.Database.Migrations` is from the scratch project `TestMsGraphToEmails`, which never calls it. Don't read that as "unused" — it is the main database, just not wired in (see *Storage*).
-- **Legacy, until `Spine` is gone:** integrations never reference `Spine`; `Spine` is the only project that pulls integrations together; `Spine` does not reference the logging project.
+- Nothing references `MyDogsbody.Database` outside the test project, and the sole other reference to `.Database.Migrations` is from the scratch project `TestMsGraphToEmails`, which never calls it. Don't read that as "unused" — it is the main database, just not wired into the app yet (see *Storage*). `MyDogsbody.Tests` references both, because the migrations are tested.
 
 Watch the name collision: `MyDogsbody.Database.Models` is **F# records for the main SQLite database**, while `MyDogsbody.Integrations.*.Database.Models` are **C# classes for that integration's LiteDB store**. Same suffix, different tier, different language. `MyDogsbody.Logging.Database.Models` is a third thing again — the log store's entities, C# for the same LiteDB reason, but belonging to no integration.
+
+`MyDogsbody.Spine` is **gone**. The layered `Domains/` → `UseCases/` chain it held was replaced by workflow pipelines in `MyDogsbody.Domain` plus adapters in the integrations; nothing references it and no file should reintroduce that shape.
 
 ## Commands
 
@@ -93,7 +94,9 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green (28 tests: 18 Unit, 7 Integration, 3 Contract). The three previously non-compiling projects were repaired by the `startup-composition-root` change — if the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **204 tests — 72 Unit, 45 Integration, 80 Contract, 7 E2E**, zero skips. If the build breaks now, assume you broke it.
+
+The suite was run eight times consecutively while closing the `architecture-compliance` change to confirm it is not flaky. If you see an intermittent failure, do not re-run until it passes — see the note on LiteDB's global `BsonMapper` under *Per-integration databases*.
 
 ## Testing in this codebase
 
@@ -128,9 +131,9 @@ let handleError = HandleErrorBuilder (fun _ -> ())   // no-op logger, keeps the 
 
 - **Ok path** — assert every field, including the entity → domain mapping the store performs.
 - **Error path** — assert the `MyDogsbodyException` carries the exact `ActionNames.*` string the function declares, the expected message, and a preserved `InnerException`.
-- **Unlogged-failure path** — where the function builds a `MyDogsbodyException` wrapping an `ApplicationException` (the expected-failure idiom, e.g. `ReadPdfDomain.getPdfContent` on a missing file), pass a `HandleErrorBuilder` whose callback records invocations and assert nothing was logged.
+- **Unlogged-failure path** — where the function builds a `MyDogsbodyException` wrapping an `ApplicationException` (the expected-failure idiom, e.g. `PdfDocumentReader.readContent` on a missing file), pass a `HandleErrorBuilder` whose callback records invocations and assert nothing was logged.
 
-Know where the seams are. In `MyDogsbody.Domain` every dependency is substitutable by construction — that is what a function type buys. In the legacy layered code it is not: modules call each other **directly by name** (`CredentialsUseCases.insertOne` calls `CredentialsRepository.insertOne`), so the only substitutable dependency below the use-case layer is the collection getter, and anything bottoming out at `ILiteCollection<T>` is an integration test unless you hand-fake the collection. Cleanly unit-testable there: `*TypeMappers.fs`, pure logic (`DocumentDomain.getContentSplitByLines`), `ReadPdfDomain` (file-path seam), and `ModuleCreators` (takes `getAllCredentials` as a parameter).
+Know where the seams are. In `MyDogsbody.Domain` every dependency is substitutable by construction — that is what a function type buys, and it is why the domain suite needs no fixtures at all. In the outer ring the seam is the collection getter: anything bottoming out at `ILiteCollection<T>` is an **integration** test unless you hand-fake the collection, and a getter that raises is how "the store is unreachable" is simulated. Cleanly unit-testable outside the domain: `CredentialEntityMappers` and `CredentialApiMappers` (pure), `PdfDocumentReader`'s missing-file path (file-path seam), and `ModuleCreators` (takes the API record and `startWork` as parameters).
 
 ### Integration
 
@@ -145,11 +148,11 @@ Covers the outer ring against real storage: adapters/repositories, `*DatabaseCon
 
 **LiteDB stores (each integration's, and the log store):**
 
-- Fresh temp database per test — `Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")`, `connection=direct`, deleted in `try/finally` or an `IDisposable` fixture. `CredentialApiFactoryTests.withApi` demonstrates the temp-path + cleanup shape. Production uses `shared`; if a change touches concurrent access, pin that mode explicitly.
+- Fresh temp database per test — `Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")`, `connection=direct`, deleted in `try/finally`. `CredentialStoreTests.withStore` demonstrates the shape. Production uses `shared`; if a change touches concurrent access, pin that mode explicitly.
 - **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db` and `Credentials.db` in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways: test `CredentialApiMappers` and `CredentialApiFactory` — both are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
-- `CredentialsDatabaseContextModule.getDatabaseContext` closes over the `LiteDatabase` and never hands it back, so a test cannot dispose the handle and Windows may hold the file. Cleanup is best-effort (`try File.Delete path with _ -> ()`); see `CredentialApiFactoryTests.withApi`. Add a `Dispose` to the context record if a change needs deterministic cleanup.
+- **Both context records carry a `Dispose`**, so call it before deleting the temp file — Windows keeps a LiteDB file locked until the handle is released. `CredentialsDatabaseContextModuleTests` asserts the delete actually succeeds afterwards.
 - Required round-trips: insert → `getAll` returns the row with `ObjectId` surfaced as the `Id` string; update → re-read reflects the new values.
-- Characterization target: `CredentialsRepository.updateOne` matches on `InfrastructureType` and **ignores `credential.Id`**, so with two credentials of the same type it updates the first match, and with no match it silently returns `Ok ()`. Pin that before changing it.
+- `MyDogsbody.Tests` **does** reference `MyDogsbody.Logging`, because the log store's repository and use cases are tested against a temp file like any other LiteDB store. Nothing reaches the `Logging.db` in the working directory; a test that wants to prove *whether something was logged* passes a recording `HandleErrorBuilder` instead.
 
 ### Contract
 
@@ -158,22 +161,26 @@ Covers the outer ring against real storage: adapters/repositories, `*DatabaseCon
 - **The two boundary mappers** (see *Architecture → The two mapping points*), asserted field-for-field in both directions. There is no chain test to write — assert each one exhaustively instead, and assert that a constrained type survives the round trip through the store's `string` column unchanged.
 - **Error translation at the composition root**: assert each domain error DU case maps to the intended `MyDogsbodyException` (action, message), and that an adapter exception maps to the intended domain error case. This pair is the seam the UI's alerts are written from.
 - **`ActionNames`**: the strings are `$"..."`-composed and compiler-unchecked — assert each outer-ring function's error reports its declared action. A typo is otherwise invisible until someone reads the exception log.
-- **LiteDB entity shape**: LiteDB is schemaless, so renaming a property on `Credential`/`ExceptionLog` silently orphans stored data. Assert the persisted document's field names, not just the round-tripped object.
-- **Legacy**: while the layered credentials path survives, `Contracts/CredentialHopChainTests.fs` keeps covering its five hops. Delete a hop test in the same change that deletes the hop — not before, not after.
+- **LiteDB entity shape**: LiteDB is schemaless, so renaming a property on `Credential`/`ExceptionLog` silently orphans stored data. Assert the persisted document's field names, not just the round-tripped object — `Contracts/PersistedShapeTests.fs`.
+- **`ActionNames` is also asserted structurally**, not only per function: `Contracts/ActionNamesTests.fs` walks the nested modules by reflection and requires every string to end with the name of the binding that declares it, and no two bindings to declare the same string. Those two rules are what catch a truncated or copy-pasted entry — both existed in the file before the suite did.
 
 ### E2E
 
-Composition root down: component/page → API record → workflow → adapter → a real LiteDB file → back into the adaptive state the component renders. (For the credentials path, that middle is still `Spine` until it is migrated.)
+Composition root down: component/page → API record → workflow → adapter → a real LiteDB file → back into the adaptive state the component renders.
 
-- Fun.Blazor components are Blazor `ComponentBase`s, so bUnit can render `Shell`, pages, and `CredentialsEditorDialog`. That harness (bUnit + MudBlazor test services) **still does not exist** — the change that first needs it adds it. It is the one level the `startup-composition-root` change could not satisfy; everything below the rendered component is covered by the integration and contract suites.
-- Flows as they come into scope: add credential → row appears in `credentialsBrowser`; edit credential → persisted value changes and the table reflects it; failure → `ErrorBoundary'`/`MudAlert` surfaces the message *and* an `ExceptionLog` row lands in `Logging.db`.
-- Driving the real WPF `BlazorWebView` window is out of scope.
+- **The harness exists**: `E2E/BlazorTestHarness.fs`. It subclasses bUnit's `TestContext`, registers `AddMudServices()`, and sets `JSInterop.Mode <- JSRuntimeMode.Loose` — MudBlazor calls into JS for popovers and key interception during render, and none of that is under test. Use `withCredentialsHarness` for the happy paths and `withUnreachableStoreHarness` for failure paths.
+- **Fun.Blazor views are `NodeRenderFragment`, not Blazor `RenderFragment`.** They reach bUnit through `FunFragmentComponent` with the view passed as its `Fragment` parameter; `CredentialsFlowTests.renderBrowser` shows the three lines involved.
+- Module creators take `startWork`, so an E2E test passes `fun work -> work ()` and asserts against `rendered.Markup` without waiting on a thread. Use `rendered.WaitForAssertion` so the re-render after a write is awaited.
+- Covered flows: add credential → the row appears; edit credential → the table shows the new values; validation failure → `MudAlert` shows the message **and nothing is logged**; store failure → `MudAlert` shows the message **and exactly one entry is logged**; a success after a failure clears the alert.
+- **Assert "was it logged?" through a recording `HandleErrorBuilder`**, not by opening `Logging.db`. `writeLog` is a lambda, so the harness collects what it was handed — no log file, no logging reference needed in the flow test.
+- Driving the real WPF `BlazorWebView` window is out of scope for the suite. To exercise the real `Startup.fs` bindings by hand, build a throwaway console project that references `MyDogsbody.Startup` and calls `Startup.credentialApi`; that runs the genuine composition root against real `.db` files in its own working directory without putting `Startup` in the test suite's reach.
 
 ### Where tests go
 
 - `MyDogsbody.Tests` is the only test project. Add each new `.fs` to `MyDogsbody.Tests.fsproj` **above `Program.fs`** — it carries the `[<EntryPoint>]` (`GenerateProgramFile=false`) and must stay last in compile order.
-- Mirror the source layout: `Domain/<Area>/`, `Startup/`, `Integrations/Pdf/Domains/`, `UI/ModuleCreators/`, `Contracts/`, and `Spine/Domains/` while it lasts.
-- The test project references `Builders`, `Enums`, `Exceptions.Types`, `Integrations.Credentials`, `Integrations.Pdf`, `Spine`, `Startup`, `UI.Portal` and `UI.Types`. Add the `ProjectReference` for anything else you test in the same change — `MyDogsbody.Domain` when it exists.
+- Mirror the source layout: `Domain/<Area>/`, `Startup/`, `Integrations/Credentials/`, `Integrations/Pdf/`, `Logging/`, `Database/`, `UI/ModuleCreators/`, `Contracts/`, `E2E/`.
+- The test project references `Builders`, `Database`, `Database.Migrations`, `Domain`, `Enums`, `Exceptions.Types`, `Integrations.Credentials`, `Integrations.Pdf`, `Logging`, `Startup`, `UI.Portal` and `UI.Types`, plus the `bunit` and `MudBlazor` packages. Add the `ProjectReference` for anything else you test in the same change.
+- A shared contract suite is a `[<Theory>]` over `[<MemberData>]`, with the implementation chosen by name — see `Contracts/CredentialDependencyContractTests.fs`. **The `MemberData` source must be a public `let`**, not `let private`: xUnit resolves it by reflection on the compiled class and a private binding fails at run time, not compile time.
 
 ## Architecture
 
@@ -194,23 +201,19 @@ It was chosen to close the two defects in the *Status* table below — the DTO h
 
 ### Status — specified vs built
 
-This section describes the architecture **all new and changed code follows**. The repository is mid-migration, so what you open will not always match:
+The migration is **done**. The `architecture-compliance` change created `MyDogsbody.Domain`, moved both paths onto workflow pipelines, and deleted `MyDogsbody.Spine`:
 
 | | Specified | Built today |
 | --- | --- | --- |
-| `MyDogsbody.Domain` | The centre of everything | **Does not exist.** The first change under this architecture creates it |
-| `MyDogsbody.Spine` | Gone — pipeline moves to `Domain`, wiring to `Startup` | Still present, still the credentials path |
-| DTO hops per feature | 2 mappers, both at the edges | 5 mappers, one per layer |
-| Domain error type | A DU per workflow area | `MyDogsbodyException` everywhere |
-| Store in a core signature | Never | `Spine/Domains/CredentialsDomain.fs` takes `unit -> CredentialsCollection`, which is `ILiteCollection<Credential>` |
+| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/` and `Documents/` |
+| `MyDogsbody.Spine` | Gone — pipeline moves to `Domain`, wiring to `Startup` | ✅ deleted |
+| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 — `CredentialEntityMappers` and `CredentialApiMappers` |
+| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError` |
+| Store in a core signature | Never | ✅ never — the domain names no store type |
 
-So: **write new work in the shape below.** When you change existing credentials code, migrate the part you touch rather than extending the layer chain — and don't rewrite the whole path as a side effect of an unrelated change. Each migration step is a change folder under `docs/changes/` like any other.
+What is **not** built, and is a status rather than a violation: the main SQLite database is designed and migrated but not wired into the app (see *Storage*), and only the error log type exists in the log database (see *Log database*).
 
-The order it gets there:
-
-1. **Create `MyDogsbody.Domain`** — referencing nothing, with `Result.fs` in it. The first feature-bearing change fills it.
-2. **Migrate as you touch.** Existing credentials code moves a piece at a time, each piece its own change folder — not one rewrite.
-3. **Retire `MyDogsbody.Spine`** once nothing routes through it, deleting its hop tests in the same change that deletes the hops.
+So: **write new work in the shape below**, and don't reintroduce a layer chain to "match the existing code" — there is no longer any existing code in that shape to match.
 
 ### The rings
 
@@ -303,7 +306,7 @@ The layered design had five mappers, one per hop. This one has **two, both at th
 | Bottom | the integration's store | LiteDB entity (C#, `ObjectId`) ⇄ domain type |
 | Top | `Startup/*ApiMappers.fs` | domain type ⇄ `MyDogsbody.UI.Types` record |
 
-The top mapper is a deliberate choice, and the book does not require it: a workflow's read/summary type could be handed to the UI directly, saving a mapper, but that would put `MyDogsbody.Domain` in `UI.Portal`'s reference graph. Keeping the UI on its own records is what makes the domain *unreachable* from the screen rather than merely unused there — the same property the `startup-composition-root` change bought and the same reason `CredentialApi` was never widened to take a Spine type. One mapper is the price; pay it.
+The top mapper is a deliberate choice, and the book does not require it: a workflow's read/summary type could be handed to the UI directly, saving a mapper, but that would put `MyDogsbody.Domain` in `UI.Portal`'s reference graph. Keeping the UI on its own records is what makes the domain *unreachable* from the screen rather than merely unused there — the same property the `startup-composition-root` change bought, and the same reason `CredentialApi` was never widened to take a domain type. One mapper is the price; pay it.
 
 Everything between those two points is domain types. **Adding a workflow does not add a DTO hop.** If you find yourself writing a third record with the same fields, that is the defect this architecture exists to prevent.
 
@@ -334,7 +337,7 @@ let insertOne (handleError: HandleErrorBuilder) ... : Result<unit, MyDogsbodyExc
 The `with` branch *yields* the wrapped exception rather than raising it: the builder's `TryWith` takes it, calls `writeLog`, and returns `Error`. So the message + `ActionName` you supply are what gets persisted.
 
 - `action` always comes from `MyDogsbody.Exceptions.Types/ActionNames.fs` — nested modules mirroring the code path, built from `$"..."` string composition. Add an entry there when you add an outer-ring function; don't inline literals. **Domain workflows have no `ActionName`** — their errors are DU cases, which need no string.
-- `ExceptionHelpers.isApplicationException`: a `MyDogsbodyException` whose `InnerException` is an `ApplicationException` passes through **unlogged**. That's the idiom for expected/validation failures in the outer ring — see `ReadPdfDomain.getPdfContent` constructing one for a missing file. In the domain the same idea is free: an expected failure is just a DU case and was never an exception.
+- `ExceptionHelpers.isApplicationException`: a `MyDogsbodyException` whose `InnerException` is an `ApplicationException` passes through **unlogged**. That's the idiom for expected/validation failures in the outer ring — see `PdfDocumentReader.readContent` constructing one for a missing file. In the domain the same idea is free: an expected failure is just a DU case and was never an exception.
 - `writeLog` is wired in `Startup/Startup.fs` to `MyDogsbody.Logging`, which inserts an `ExceptionLog` into the `Exceptions` collection of `Logging.db` — the separate log database, never the main one (see *Storage → Log database*).
 - **Never raise as control flow, in either ring.** Exceptions are caught at the boundary and converted.
 - **Not every failure earns a DU case.** A domain error case is for a failure the domain *expects* and a person could name out loud — "that address is already linked". Bugs, violated invariants and infrastructure collapse are not that: they stay exceptions, get caught at the outer-ring boundary, and arrive as a `MyDogsbodyException` with a stack trace worth reading. A `*Error` DU that tries to enumerate everything that could go wrong becomes unreadable and stops being matchable.
@@ -347,7 +350,7 @@ What follows from that, and what to keep true:
 
 - **It is not a dependency function type.** No `WriteLog` appears in a `*Types.fs` next to `LoadAccounts` and `SaveAccount`. The domain does not log — it returns a `*Error` DU case and the composition root decides what that is worth recording. Adding a log type never adds a workflow parameter, a domain type, or a mapper.
 - **It is not passed as a parameter.** Every other store arrives as a leading getter (`getCredentialCollection`); the log store never does. Outer-ring functions receive `handleError` — already closed over `writeLog` at the composition root — and that is their entire access to logging. **Do not add a `getExceptionCollection` (or any log-collection) parameter to any function, in either ring.**
-- **`MyDogsbody.Domain` cannot reference it**, which the reference graph already guarantees, and neither does `Spine`. Its only non-scratch consumer is `MyDogsbody.Startup`. `MyDogsbody.Tests` does not reference it either — tests pass their own `HandleErrorBuilder` and never touch `Logging.db`.
+- **`MyDogsbody.Domain` cannot reference it**, which the reference graph already guarantees. Its only non-scratch consumers are `MyDogsbody.Startup`, which wires it into `writeLog`, and `MyDogsbody.Tests`, which exercises the log store itself against a temp file. No workflow, adapter or component reaches it — anything wanting to record a failure returns it and lets `handleError` decide.
 - **It holds no domain data** and nothing reads from it at runtime — see *Storage → Log database*.
 - **Its data never flows back to the user.** A future log viewer reads `Logging.db` through its own read path; it does not become a workflow dependency and it does not turn logging into an integration.
 
@@ -359,7 +362,7 @@ What follows from that, and what to keep true:
 
 | File | Holds | I/O at module init |
 | --- | --- | --- |
-| `CredentialApiMappers.fs` | domain type ⇄ UI record, total functions | none |
+| `CredentialApiMappers.fs` | domain type ⇄ UI record, plus `toMyDogsbodyException` / `toCredentialError`. Total functions | none |
 | `CredentialApiFactory.fs` | `createCredentialApi handleError getCredentialCollection` — adapters bound to dependency types, workflows partially applied, `Result.mapError` both ways | none |
 | `Startup.fs` | database paths, LiteDB contexts, `handleError`, `credentialApi`, `registerServices` | opens `Logging.db` and `Credentials.db` |
 
@@ -412,7 +415,11 @@ Status: the main database is **designed but not wired in**. Nothing references `
 
 Each integration owns its own database file, separate from the main database and from every other integration: a context record of `unit -> ILiteCollection<T>` getters (`CredentialsDatabaseContext`) built by a `*DatabaseContextModule.getDatabaseContext databasePath connectionType`. Entities are mutable **C# classes** in the `*.Database.Models` C# projects because LiteDB needs settable properties / `ObjectId`; F# adapters construct and mutate those instances.
 
-**The collection getter stops at the integration boundary.** `unit -> ILiteCollection<T>` is how a store function receives its handle, and it goes no further inward — it never appears in a `MyDogsbody.Domain` signature, and the domain never names `ILiteCollection`, `LiteDatabase`, `ObjectId` or `BsonValue`. What the domain declares is a function type (`LoadAccounts`, `SaveAccount`); the store's job is to satisfy one, mapping the C# entity to a domain type on the way out. That the layered code violates this in `Spine/Domains/CredentialsDomain.fs` is exactly the leak this architecture was chosen to close.
+**The collection getter stops at the integration boundary.** `unit -> ILiteCollection<T>` is how a store function receives its handle, and it goes no further inward — it never appears in a `MyDogsbody.Domain` signature, and the domain never names `ILiteCollection`, `LiteDatabase`, `ObjectId` or `BsonValue`. What the domain declares is a function type (`LoadCredentials`, `SaveCredential`, `UpdateCredential`); the store's job is to satisfy one, mapping the C# entity to a domain type on the way out. The layered code used to violate this by taking `unit -> CredentialsCollection` in a core signature — that leak is exactly what this architecture was chosen to close, and it is now closed.
+
+**Every `*DatabaseContextModule.getDatabaseContext` must warm LiteDB's entity mapping before it returns**, with `BsonMapper.Global.ToDocument(TheEntity()) |> ignore`. LiteDB caches the mapping on a global `BsonMapper` and builds it lazily on first use, so two threads mapping the same entity for the first time at once can observe a half-built mapping and silently drop a property — a row round-trips with a null where a value was written. The UI calls the API from `Async.Start` threads and `writeLog` runs on whichever thread failed, so this is reachable in production, not only in parallel tests. It was found as a 6-in-10 intermittent test failure while the `architecture-compliance` change was being written; the warm-up removed it. Do the same for any new context.
+
+Each context record also carries a `Dispose` that closes the underlying `LiteDatabase`. Production opens one per process and never disposes it; tests dispose every one they open, which is what lets them delete their temp file rather than leaving it locked.
 
 LiteDB is a per-integration choice, not a project-wide one — an integration may pick a different store, and shares nothing with the main database (no cross-store joins, no shared schema). Whatever it picks, keep the same context-record-of-getters seam so the adapter stays testable, and keep the store swappable: changing database should mean rewriting the store module and its entity project, and nothing inward of them.
 
@@ -446,19 +453,23 @@ The rule holds in both directions:
 Adding a log type is one change confined to the logging project, in the shape the rest of the codebase already uses, and touches nothing outside it:
 
 1. An entity class in `MyDogsbody.Logging.Database.Models` (C#, settable properties — LiteDB needs them). `ExceptionLog` is the shape to copy; carry only the fields that type genuinely has, rather than reusing `ExceptionDetails` for something that has no exception.
-2. A `unit -> ILiteCollection<T>` getter on `LoggingDatabaseContext`, bound in `LoggingDatabaseContextModule.getDatabaseContext` — the same context-record-of-getters seam everything else uses.
-3. A repository function and a use case, both returning `Result`, mirroring `ExceptionRepository` / `ExceptionUseCases`.
-4. Partial application in `Startup/Startup.fs`.
+2. One F# record in `MyDogsbody.Logging/Types/`, next to `ExceptionLogEntry` — **one per log type, not one per layer.** The repository and the use case share it.
+3. A `unit -> ILiteCollection<T>` getter on `LoggingDatabaseContext`, bound in `LoggingDatabaseContextModule.getDatabaseContext`, and a `BsonMapper.Global.ToDocument` warm-up for the new entity beside the existing one.
+4. A repository function and a use case, both taking `handleError` first and returning `Result<_, MyDogsbodyException>`, mirroring `ExceptionRepository` / `ExceptionUseCases`.
+5. An `ActionNames.MyDogsbody.Logging.*` entry per function.
+6. Partial application in `Startup/Startup.fs`.
 
-Status: **only errors are implemented.** `writeLog` is the sole writer and `ExceptionLog` has no severity field — correctly, under the rule above. Adding warnings or information means adding collections to this database; it does **not** mean a second log database, a severity column, or borrowing the main one.
+Status: **only errors are implemented.** `writeLog` is the sole writer and `ExceptionLog` has no severity field — correctly, under the rule above. Note that `Startup.fs` gives the log write a **separate no-op `handleError`**: handing a failed log write back to `writeLog` would recurse, so the cycle is broken there and the `Result` is discarded at that one call site, with a comment saying why. Adding warnings or information means adding collections to this database; it does **not** mean a second log database, a severity column, or borrowing the main one.
 
 ### Conventions
 
 - New `.fs` files must be added to the `.fsproj` `<Compile Include>` list **in dependency order** — F# compile order is significant and there is no glob.
 - **`MyDogsbody.Domain` folder shape: one folder per workflow area, named for the area, not the layer.** Inside it, `<Area>Types.fs` first (constrained types, stage types, the error DU, the dependency function types), then one `<Workflow>Workflow.fs` per workflow. `Result.fs` sits at the project root, compiled first.
-- **Do not create `Domains/Types`, `UseCases/Types` or `Repositories/Types` folders in new code.** That is the per-layer shape this architecture replaces; it survives only in `Spine` and the existing integrations. Inside an integration, new adapter code goes beside `Database/`, named for what it talks to (`GoogleAccountStore.fs`, `GoogleProfileApi.fs`).
+- **Do not create `Domains/Types`, `UseCases/Types` or `Repositories/Types` folders.** That is the per-layer shape this architecture replaced, and no project still has one. Inside an integration, adapter code goes beside `Database/`, named for what it talks to (`CredentialStore.fs`, `PdfDocumentReader.fs`, `GoogleAccountStore.fs`).
 - Migrations are `Migrations/Migration_<timestamp>_<Name>.fs` holding one `[<Migration(<same timestamp>L)>] type <Name>()` with `Up()` and `Down()` — e.g. `Migration_20251104000001_CreateBlogTable.fs` / `CreateBlogTable`. Add each to `MyDogsbody.Database.Migrations.fsproj` in timestamp order, above `MigrationSetup.fs`. Never edit a migration that has been applied; write a new one.
 
 ### Naming quirks (grep both spellings)
 
-`Domian` is load-bearing in real identifiers: `DomianTypeMappers`, `DocumentContentDomianTypeDto`, `mapPdfContentUseCaseTypeDtoToDocumentContentDomianTypeDto`, and `DocumentDomian.fs` (whose module is spelled `DocumentDomain`). Also `GetInfrustructureCredentialCallback`, and `MyDogsbody.Integrations.Google` whose module is declared `MyDogsbody.Infrastructure.Google.GoogleCalendar`.
+The `Domian` misspelling is **gone** — it lived only in `Spine` and the DTO hops, which no longer exist. `GetInfrustructureCredentialCallback` is gone too, renamed to `OnCredentialSubmitted`. Neither spelling needs grepping any more.
+
+One quirk survives: `MyDogsbody.Integrations.Google` declares its module as `MyDogsbody.Infrastructure.Google.GoogleCalendar`. It is a one-line stub in the scratch tier; leave it or fix it with whatever change first makes that project real.

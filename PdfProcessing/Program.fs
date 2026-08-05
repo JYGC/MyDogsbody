@@ -1,12 +1,23 @@
+// A scratch harness that prints a PDF's text, one line at a time.
+//
+// Also the composition root shape in miniature: it binds the PdfPig adapter to the
+// ReadDocumentContent dependency type, translates the adapter's exception into a domain error on
+// the way in, and lets the workflow do the deciding.
+
 open System
 open System.IO
 open System.Reflection
 open MyDogsbody.Builders
-open MyDogsbody.Spine.Domains
 open MyDogsbody.Logging.Database
+open MyDogsbody.Logging.Types
 open MyDogsbody.Logging.UseCases
-open MyDogsbody.Logging.UseCases.Types
-open MyDogsbody.Integrations.Pdf.UseCases
+open MyDogsbody.Domain.Documents
+open MyDogsbody.Integrations.Pdf
+
+let private describe (error: DocumentError) =
+    match error with
+    | DocumentPathInvalid reason -> reason
+    | DocumentUnreadable message -> message
 
 [<EntryPoint>]
 let main argv =
@@ -18,30 +29,45 @@ let main argv =
         let exeDirPath = Assembly.GetExecutingAssembly().Location |> Path.GetDirectoryName
         let logDbPath = Path.Combine(exeDirPath, "logging.db")
         let logDbConnectionType = "shared"
+
         let loggingContext =
             LoggingDatabaseContextModule.getDatabaseContext logDbPath logDbConnectionType
+
+        // The log write needs its own builder: handing writeLog's failure back to writeLog
+        // would recurse. See Startup.fs.
+        let logWriteHandleError = HandleErrorBuilder ignore
+
         let handleError =
             HandleErrorBuilder
                 (fun ex ->
-                    let logEntry: ExceptionUseCaseTypeDto =
+                    let logEntry: ExceptionLogEntry =
                         {
                             Message = ex.Message
                             ActionName = ex.ActionName
                             ExceptionDetails = ex.ToString()
                             CreatedDate = DateTime.Now
                         }
-                    ExceptionUseCases.addException loggingContext.GetExceptionCollection logEntry
+                    // A failed log write cannot itself be logged - see Startup.fs.
+                    ExceptionUseCases.addException
+                        logWriteHandleError
+                        loggingContext.GetExceptionCollection
+                        logEntry
+                    |> ignore
                 )
+
+        // The adapter becomes a dependency: exception in, domain error out.
+        let readDocumentContent: ReadDocumentContent =
+            fun path ->
+                PdfDocumentReader.readContent handleError path
+                |> Result.mapError (fun ex -> DocumentUnreadable ex.Message)
+
         argv[0]
-        |> DocumentUseCases.getPdfContent
-            handleError
-        |> Result.bind (DomianTypeMappers.mapPdfContentUseCaseTypeDtoToDocumentContentDomianTypeDto handleError)
-        |> Result.bind (DocumentDomain.getContentSplitByLines handleError)
+        |> ReadDocumentLinesWorkflow.readDocumentLines readDocumentContent
         |> (function
             | Ok lines ->
                 for line in lines do
                     printfn "%s" line
-            | Error ex ->
-                eprintfn "Error: %s" ex.Message
+            | Error error -> eprintfn "Error: %s" (describe error)
         )
+
         0

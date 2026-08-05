@@ -17,8 +17,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Logging\MyDogsbody.Logging.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.Spine\MyDogsbody.Spine.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
   </ItemGroup>
 
 </Project>

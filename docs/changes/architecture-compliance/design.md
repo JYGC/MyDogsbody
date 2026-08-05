@@ -61,9 +61,16 @@ here so the deviation is a decision rather than a drift, and each becomes a docu
 **1. The domain cannot use `InfrastructureType`.** The enum lives in `MyDogsbody.Enums`, and the
 domain may reference no project at all — the doc calls that "the invariant the architecture is
 built on". So the domain declares its own `Infrastructure` DU and the two edge mappers translate.
-This is a gain, not a tax: a DU matches the codebase's stated preference over an enum, and both
-mappers translate it with an exhaustive `match`, so adding a member to one and not the other is a
-compile error rather than a runtime surprise. *Rejected alternative:* letting `Unvalidated*` carry
+This is a gain, not a tax: a DU matches the codebase's stated preference over an enum.
+
+> **Corrected during implementation.** This section originally claimed *both* directions would be
+> exhaustive matches, so a member added to one side and not the other would be a compile error.
+> Only **domain → enum** is exhaustive. `InfrastructureType` is a C# enum and can hold any
+> integer, so **enum → domain** cannot be proved exhaustive by the compiler: it returns `Result`
+> and fails loudly on a value no build declared. The compile-time half is kept, and contract tests
+> walk every declared member in both directions to catch a mismatch before production does.
+
+*Rejected alternative:* letting `Unvalidated*` carry
 the infrastructure as a plain `string` and parsing it in the domain, per the doc's stage table. It
 would add a `CredentialError` case the UI can never trigger, since the value comes from a closed
 dropdown, and it loses the compile-time check.

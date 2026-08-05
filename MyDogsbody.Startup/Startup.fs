@@ -11,8 +11,8 @@ open Microsoft.Extensions.DependencyInjection
 open MyDogsbody.Builders
 open MyDogsbody.Integrations.Credentials.Database
 open MyDogsbody.Logging.Database
+open MyDogsbody.Logging.Types
 open MyDogsbody.Logging.UseCases
-open MyDogsbody.Logging.UseCases.Types
 open MyDogsbody.UI.Types
 
 let private loggingDatabasePath = "Logging.db"
@@ -23,21 +23,33 @@ let private loggingDatabaseContext =
         loggingDatabasePath
         loggingDatabaseConnectionType
 
-/// Writes a failure to Logging.db. Not called for expected failures — HandleErrorBuilder
-/// passes a MyDogsbodyException wrapping an ApplicationException straight through unlogged.
+/// The log write needs a builder of its own, and it must not be the one below: handing
+/// writeLog's own failure back to writeLog would recurse. A no-op breaks that cycle.
+let private logWriteHandleError = HandleErrorBuilder ignore
+
+/// Writes a failure to Logging.db. Not called for expected failures — HandleErrorBuilder passes
+/// a MyDogsbodyException wrapping an ApplicationException straight through unlogged, and a
+/// domain error is translated for the UI without ever entering a handleError block.
 let handleError =
     HandleErrorBuilder
         (fun ex ->
-            let logEntry: ExceptionUseCaseTypeDto =
+            let logEntry: ExceptionLogEntry =
                 {
                     Message = ex.Message
                     ActionName = ex.ActionName
                     ExceptionDetails = ex.ToString()
                     CreatedDate = DateTime.Now
                 }
+
             ExceptionUseCases.addException
+                logWriteHandleError
                 loggingDatabaseContext.GetExceptionCollection
                 logEntry
+            // The one sanctioned Result discard in the application. A failed log write cannot
+            // itself be logged, and must not displace the failure being recorded — the user is
+            // told about that one, not about the diagnostics that went missing. addException
+            // still returns Result so that it can be tested.
+            |> ignore
         )
 
 let private credentialDatabasePath = "Credentials.db"

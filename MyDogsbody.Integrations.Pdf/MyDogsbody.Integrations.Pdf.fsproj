@@ -6,11 +6,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Domains\Types\PdfContentDomainTypeDto.fs" />
-    <Compile Include="Domains\ReadPdfDomain.fs" />
-    <Compile Include="UseCases\Types\PdfContentUseCaseTypeDto.fs" />
-    <Compile Include="UseCases\PdfDocumentUseCaseTypeMappers.fs" />
-    <Compile Include="UseCases\DocumentUseCases.fs" />
+    <!--
+      An adapter for a capability the domain declares a need for. PdfDocumentReader satisfies
+      ReadDocumentContent; the line grouping it used to wrap is now a domain workflow.
+    -->
+    <Compile Include="PdfDocumentReader.fs" />
   </ItemGroup>
 
     <ItemGroup>
@@ -19,6 +19,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
+        <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
     </ItemGroup>
 
 </Project>

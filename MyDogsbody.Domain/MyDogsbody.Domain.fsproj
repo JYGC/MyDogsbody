@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    The centre of the onion. This project references NOTHING - no ProjectReference, no
+    PackageReference beyond the FSharp.Core the SDK adds implicitly - and that emptiness
+    is the architecture's load-bearing invariant: it is what makes the whole domain
+    testable with plain values and no fixtures.
+
+    If a domain file needs something it cannot reach, the thing it needs is a dependency
+    function type, not a reference. See CLAUDE-project.md -> Architecture.
+
+    Enforced twice: the target below fails the build, and Contracts/DomainIsolationTests.fs
+    asserts the same thing from the test suite.
+  -->
+  <ItemGroup>
+    <Compile Include="Result.fs" />
+    <Compile Include="Credentials\CredentialsTypes.fs" />
+    <Compile Include="Credentials\AddCredentialWorkflow.fs" />
+    <Compile Include="Credentials\EditCredentialWorkflow.fs" />
+    <Compile Include="Credentials\ListCredentialsWorkflow.fs" />
+    <Compile Include="Documents\DocumentsTypes.fs" />
+    <Compile Include="Documents\ReadDocumentLinesWorkflow.fs" />
+  </ItemGroup>
+
+  <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">
+    <ItemGroup>
+      <!--
+        FSharp.Core is added implicitly by the F# SDK and is the language runtime, not a
+        dependency in the architectural sense. Everything else is a violation.
+      -->
+      <_DomainForbiddenPackage
+        Include="@(PackageReference)"
+        Condition="'%(Identity)' != 'FSharp.Core'" />
+    </ItemGroup>
+    <Error
+      Condition="'@(ProjectReference)' != ''"
+      Text="MyDogsbody.Domain must reference no other project, but found: @(ProjectReference). Declare a dependency function type instead - see CLAUDE-project.md -&gt; Architecture." />
+    <Error
+      Condition="'@(_DomainForbiddenPackage)' != ''"
+      Text="MyDogsbody.Domain must reference no package, but found: @(_DomainForbiddenPackage). If a workflow genuinely needs asyncResult, that decision belongs in a change folder, not in a build." />
+  </Target>
+
+</Project>

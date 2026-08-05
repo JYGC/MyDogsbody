@@ -1,4 +1,4 @@
-﻿module MyDogsbody.UI.Portal.Components.CredentialsComponents
+module MyDogsbody.UI.Portal.Components.CredentialsComponents
 
 open System
 open Fun.Blazor
@@ -101,7 +101,7 @@ type CredentialsEditorDialog() =
         Username = "" } with get, set
 
     [<Parameter>]
-    member val public GetInfrustructureCredentialCallback : (IntegrationCredentialUiTypeWithoutId -> unit) = fun _ -> () with get, set
+    member val public OnCredentialSubmitted : (IntegrationCredentialUiTypeWithoutId -> unit) = fun _ -> () with get, set
 
     override this.Render() =
         let infrastructureTypes =
@@ -196,7 +196,7 @@ type CredentialsEditorDialog() =
                             Disabled disableOkButton
                             Color Color.Primary
                             OnClick (fun _ ->
-                                this.GetInfrustructureCredentialCallback
+                                this.OnCredentialSubmitted
                                     {
                                         InfrastructureType = infrastructureType
                                         Username = username
@@ -214,7 +214,7 @@ type CredentialsEditorDialog() =
 let showCredentialsEditorDialog
   (dialogService: IDialogService)
   (dialogTitle: string)
-  (getInfrustructureCredentialCallback: IntegrationCredentialUiTypeWithoutId -> unit)
+  (onCredentialSubmitted: IntegrationCredentialUiTypeWithoutId -> unit)
   (credentialsOption: IntegrationCredentialUiTypeWithoutId option) =
     let options = new DialogOptions(
         CloseOnEscapeKey = false,
@@ -223,7 +223,7 @@ let showCredentialsEditorDialog
     )
     let parameters = new DialogParameters<CredentialsEditorDialog>()
     parameters.Add("Title", dialogTitle)
-    parameters.Add("GetInfrustructureCredentialCallback", getInfrustructureCredentialCallback)
+    parameters.Add("OnCredentialSubmitted", onCredentialSubmitted)
     if credentialsOption.IsSome then
         parameters.Add("CredentialUiType", credentialsOption.Value)
     dialogService.ShowAsync<CredentialsEditorDialog>(
