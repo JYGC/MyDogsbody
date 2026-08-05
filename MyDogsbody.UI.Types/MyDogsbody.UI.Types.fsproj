@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <Compile Include="IntegrationCredentialUiType.fs" />
+    <Compile Include="CredentialApi.fs" />
     <Compile Include="Modules\CredentialsBrowserModule.fs" />
   </ItemGroup>
 
@@ -16,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
+    <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
   </ItemGroup>
 
 </Project>

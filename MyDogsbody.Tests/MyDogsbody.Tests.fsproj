@@ -7,13 +7,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Infrastructure\DocumentInfrastructure\GetContentSplitByLinesTests.fs" />
-    <Compile Include="Infrastructure\DocumentInfrastructure\GetPdfObjectTests.fs" />
+    <Compile Include="Spine\Domains\DocumentDomainTests.fs" />
+    <Compile Include="Integrations\Pdf\Domains\ReadPdfDomainTests.fs" />
+    <Compile Include="Startup\CredentialApiMappersTests.fs" />
+    <Compile Include="Startup\CredentialApiFactoryTests.fs" />
+    <Compile Include="Contracts\CredentialHopChainTests.fs" />
+    <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
@@ -22,6 +27,13 @@
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Spine\MyDogsbody.Spine.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Startup\MyDogsbody.Startup.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />
   </ItemGroup>
 
 </Project>

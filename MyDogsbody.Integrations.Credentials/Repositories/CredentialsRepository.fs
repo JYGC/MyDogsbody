@@ -67,7 +67,7 @@ let getAll
                 .ToEnumerable()
             |> Seq.map (fun ic ->
                 {
-                    Id = ic.Id;
+                    Id = ic.Id.ToString();
                     InfrastructureType = ic.InfrastructureType;
                     Credentials = ic.Credentials;
                     ExternalUsername = ic.ExternalUsername;

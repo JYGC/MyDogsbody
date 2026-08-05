@@ -1,19 +1,23 @@
-﻿module MyDogsbody.UI.Portal.Pages.Settings.CredentialsPage
+module MyDogsbody.UI.Portal.Pages.Settings.CredentialsPage
 
 open Fun.Blazor
 open Fun.Blazor.Router
-open MyDogsbody.Compositions.Interfaces
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UI.Portal.ModuleCreators
 open MudBlazor
 open MyDogsbody.UI.Types
-open MyDogsbody.Spine.UseCases.Types
+
+/// Keeps the credential load off the render thread. The module creator takes this as a
+/// parameter so tests can run the same code synchronously.
+let private startWork (work: unit -> unit) =
+    Async.Start(async { work () })
 
 let getView () =
-    html.inject(fun (credentialCompositions: ICredentialCompositions, dialogService: IDialogService) ->
+    html.inject(fun (credentialApi: CredentialApi, dialogService: IDialogService) ->
         let credentialsBrowserModule =
             CredentialsBrowserModuleCreators.getCredentialsBrowserModule
-                credentialCompositions.GetAllCredentials
+                startWork
+                credentialApi
         fragment {
             CredentialsComponents.credentialsBrowser
                 credentialsBrowserModule
@@ -21,27 +25,30 @@ let getView () =
                     CredentialsComponents.showCredentialsEditorDialog
                         dialogService
                         "Add Credentials"
-                        (fun (changedCredentials: IntegrationCredentialUiType) ->
-                            changedCredentials
-                            |> fun uiType ->
-                                let dto: AddCredentialUseCaseTypeDto =
-                                    {
-                                        InfrastructureType = uiType.InfrastructureType
-                                        Credentials = uiType.Credentials
-                                        Username = uiType.Username
-                                    }
-                                dto
-                            |> credentialCompositions.AddNewCredential
-                        )
+                        credentialsBrowserModule.AddCredential
                         None
                     |> ignore
                 )
-                (fun credentials ->
+                (fun (credential: IntegrationCredentialUiType) ->
                     CredentialsComponents.showCredentialsEditorDialog
                         dialogService
                         "Edit Credentials"
-                        (fun (tt: IntegrationCredentialUiType) -> ())
-                        (Some credentials)
+                        // The dialog edits the fields; the Id comes from the row being edited.
+                        (fun (changed: IntegrationCredentialUiTypeWithoutId) ->
+                            credentialsBrowserModule.EditCredential
+                                {
+                                    Id = credential.Id
+                                    InfrastructureType = changed.InfrastructureType
+                                    Credentials = changed.Credentials
+                                    Username = changed.Username
+                                }
+                        )
+                        (Some
+                            {
+                                InfrastructureType = credential.InfrastructureType
+                                Credentials = credential.Credentials
+                                Username = credential.Username
+                            })
                     |> ignore
                 )
         }

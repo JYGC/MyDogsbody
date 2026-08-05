@@ -1,11 +1,12 @@
-﻿open System.Reflection
-open MyDogsbody.Builders
-open MyDogsbody.Domains
-open MyDogsbody.Infrastructure.Database.Repositories
-open MyDogsbody.Infrastructure.Database
+open System
 open System.IO
+open System.Reflection
+open MyDogsbody.Builders
+open MyDogsbody.Spine.Domains
+open MyDogsbody.Logging.Database
+open MyDogsbody.Logging.UseCases
+open MyDogsbody.Logging.UseCases.Types
 open MyDogsbody.Integrations.Pdf.UseCases
-open MyDogsbody.Integrations.Pdf.Domains
 
 [<EntryPoint>]
 let main argv =
@@ -17,8 +18,20 @@ let main argv =
         let exeDirPath = Assembly.GetExecutingAssembly().Location |> Path.GetDirectoryName
         let logDbPath = Path.Combine(exeDirPath, "logging.db")
         let logDbConnectionType = "shared"
-        let loggingContext = InfrastructureDatabaseContext.getInfrastructureDatabaseContext logDbPath logDbConnectionType
-        let handleError = HandleErrorBuilder (fun ex -> ExceptionRepository.insertOne loggingContext.GetExceptionCollection ex)
+        let loggingContext =
+            LoggingDatabaseContextModule.getDatabaseContext logDbPath logDbConnectionType
+        let handleError =
+            HandleErrorBuilder
+                (fun ex ->
+                    let logEntry: ExceptionUseCaseTypeDto =
+                        {
+                            Message = ex.Message
+                            ActionName = ex.ActionName
+                            ExceptionDetails = ex.ToString()
+                            CreatedDate = DateTime.Now
+                        }
+                    ExceptionUseCases.addException loggingContext.GetExceptionCollection logEntry
+                )
         argv[0]
         |> DocumentUseCases.getPdfContent
             handleError
@@ -31,5 +44,4 @@ let main argv =
             | Error ex ->
                 eprintfn "Error: %s" ex.Message
         )
-        |> ignore
         0

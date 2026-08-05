@@ -2,8 +2,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor;
 using MudBlazor.Services;
-using MyDogsbody.Compositions;
-using MyDogsbody.Compositions.Interfaces;
 
 namespace MyDogsbody
 {
@@ -28,7 +26,9 @@ namespace MyDogsbody
                 config.SnackbarConfiguration.ShowTransitionDuration = 500;
                 config.SnackbarConfiguration.SnackbarVariant = Variant.Filled;
             });
-            serviceCollection.AddScoped<ICredentialCompositions, CredentialCompositions>();
+            // Every application service is registered by the F# composition root, so this
+            // file states that services exist without stating how they are built.
+            MyDogsbody.Startup.Startup.registerServices(serviceCollection);
 
             Resources.Add("services", serviceCollection.BuildServiceProvider());
         }

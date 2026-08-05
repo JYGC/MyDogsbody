@@ -15,6 +15,18 @@ let credentialsBrowser
   (showEditCredentialsModal: IntegrationCredentialUiType -> unit) =
     fragment {
         adapt {
+            let! error = credentialsBrowserModule.ErrorAval
+            match error with
+            | Some message ->
+                MudAlert''{
+                    Severity Severity.Error
+                    Variant Variant.Filled
+                    Dense true
+                    message
+                }
+            | None -> ()
+        }
+        adapt {
             let! credentials = credentialsBrowserModule.CredentialsListAval
             let! isLoading = credentialsBrowserModule.IsLoadingAval
             MudTable''{
@@ -59,7 +71,7 @@ let credentialsBrowser
                         MudTd''{ $"{credential.Username}" }
                         MudTd''{
                             MudButton''{
-                                Variant Variant.Outlined
+                                Variant Variant.Filled
                                 Color Color.Primary
                                 OnClick (fun _ ->
                                     showEditCredentialsModal credential
@@ -83,13 +95,13 @@ type CredentialsEditorDialog() =
     member val public Title : string = "Add Credential" with get, set
 
     [<Parameter>]
-    member val public CredentialUiType : IntegrationCredentialUiType = {
+    member val public CredentialUiType : IntegrationCredentialUiTypeWithoutId = {
         InfrastructureType = InfrastructureType.Google;
         Credentials = "";
         Username = "" } with get, set
 
     [<Parameter>]
-    member val public GetInfrustructureCredentialCallback : (IntegrationCredentialUiType -> unit) = fun _ -> () with get, set
+    member val public GetInfrustructureCredentialCallback : (IntegrationCredentialUiTypeWithoutId -> unit) = fun _ -> () with get, set
 
     override this.Render() =
         let infrastructureTypes =
@@ -202,8 +214,8 @@ type CredentialsEditorDialog() =
 let showCredentialsEditorDialog
   (dialogService: IDialogService)
   (dialogTitle: string)
-  (getInfrustructureCredentialCallback: IntegrationCredentialUiType -> unit)
-  (credentialsOption: IntegrationCredentialUiType option) =
+  (getInfrustructureCredentialCallback: IntegrationCredentialUiTypeWithoutId -> unit)
+  (credentialsOption: IntegrationCredentialUiTypeWithoutId option) =
     let options = new DialogOptions(
         CloseOnEscapeKey = false,
         BackdropClick = false,
