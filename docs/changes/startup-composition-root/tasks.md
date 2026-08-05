@@ -69,6 +69,7 @@ Unit tests land before the implementation they cover, per task.
 ## Phase 7 — Documentation (required)
 
 - [x] **7.1** `docs/architecture-options.md` — rework the three options' worked examples onto the Startup composition root.
+      *(That file has since been deleted; the option it settled on, and why the others lost, are now in `CLAUDE-project.md` → Architecture.)*
 - [x] **7.2** `CLAUDE-project.md` — it currently documents `Compositions/SetupDatabase.fs`, `CredentialCompositions`, the "UI.Portal references Compositions.Interfaces" rule, the layer chain and the known-broken build state. All stale after this change.
 
 ## Known gap
@@ -84,4 +85,4 @@ window has never been opened against this change. Recorded here rather than drop
 
 - `CredentialsRepository.updateOne` matches on `InfrastructureType` and ignores the `Id`, so editing one of two credentials sharing a type updates the wrong row, and editing a type with no rows silently succeeds. Pinned by two characterization tests in `CredentialApiFactoryTests`; **not fixed** — it is a defect in the integration, not in the composition root, and fixing it changes stored-data behaviour.
 - `CredentialsDatabaseContextModule.getDatabaseContext` gives no way to dispose the `LiteDatabase`, so integration tests delete their temp file on a best-effort basis.
-- The five DTO hops between `Startup` and LiteDB are untouched. See `docs/architecture-options.md`.
+- The five DTO hops between `Startup` and LiteDB are untouched: a credential is copied through `AddCredentialUseCaseTypeDto` → `AddCredentialDomainTypeDto` (the `Username` → `ExternalUsername` rename) → `NewCredentialUseCaseTypeDto` → `NewCredentialRepositoryTypeDto` → the LiteDB `Credential`, with a mapper at each step. Collapsing them to two edge mappers is the job of the architecture migration in `CLAUDE-project.md` → Architecture, not of this change.

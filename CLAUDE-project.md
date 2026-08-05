@@ -177,7 +177,20 @@ Composition root down: component/page → API record → workflow → adapter �
 
 ## Architecture
 
-**Functional onion**, after *Domain Modeling Made Functional* (Scott Wlaschin, Pragmatic Bookshelf, 2018). The rationale, the alternatives it beat, and worked sketches are in [`docs/architecture-options.md`](docs/architecture-options.md) — this section is the rule; that document is the argument. The book's own sample bounded context (`src/OrderTaking` in [swlaschin/DomainModelingMadeFunctional](https://github.com/swlaschin/DomainModelingMadeFunctional)) is the reference implementation to copy shapes from.
+**Functional onion**, after *Domain Modeling Made Functional* (Scott Wlaschin, Pragmatic Bookshelf, 2018). Everything below is self-contained — the shapes to copy are written out here rather than cited.
+
+### Why this shape, and not another
+
+It was chosen to close the two defects in the *Status* table below — the DTO hops and the store in a core signature. Everything else on the table was weighed and set aside:
+
+| Considered | Why not |
+| --- | --- |
+| **Dependency rejection + parameterization** — fetch–think–save, a.k.a. functional core / imperative shell | Not a rival: it is the technique this architecture contains. Its whole benefit arrives with the onion, so nothing about it is skipped |
+| **MVU / Elmish** | Helps only the screen, for defects that are already fixed. See *UI* |
+| **Reader monad** | Wlaschin advises against it "unless you can see a clear benefit over the other techniques", and it gets awkward once several effects are in play |
+| **Free monad / tagless final** | Roughly 100+ lines of scaffolding for a small instruction set, and the F# material is thin and advanced |
+| **Vertical slice architecture** | A code-organisation pattern from the object-oriented .NET world; its literature assumes C# web APIs. The good part — a feature's code grouped together — comes free with workflow pipelines |
+| **Clean / hexagonal, classic form** | Object-oriented at its core: interfaces, injected classes, containers. This reaches the same goal with functions instead |
 
 ### Status — specified vs built
 
@@ -192,6 +205,12 @@ This section describes the architecture **all new and changed code follows**. Th
 | Store in a core signature | Never | `Spine/Domains/CredentialsDomain.fs` takes `unit -> CredentialsCollection`, which is `ILiteCollection<Credential>` |
 
 So: **write new work in the shape below.** When you change existing credentials code, migrate the part you touch rather than extending the layer chain — and don't rewrite the whole path as a side effect of an unrelated change. Each migration step is a change folder under `docs/changes/` like any other.
+
+The order it gets there:
+
+1. **Create `MyDogsbody.Domain`** — referencing nothing, with `Result.fs` in it. The first feature-bearing change fills it.
+2. **Migrate as you touch.** Existing credentials code moves a piece at a time, each piece its own change folder — not one rewrite.
+3. **Retire `MyDogsbody.Spine`** once nothing routes through it, deleting its hop tests in the same change that deletes the hops.
 
 ### The rings
 
@@ -225,7 +244,7 @@ module EmailAddress =
     let value (EmailAddress s) = s
 ```
 
-`create` returns the plain reason for failure; the workflow decides what to call it. Copy the shape from the book's `Common.SimpleTypes.fs`.
+`create` returns the plain reason for failure; the workflow decides what to call it.
 
 **A type per stage of the pipeline** — not one record reused with optional fields. Typed-in, validated, stored are three different types, so code that has one cannot be handed another:
 
@@ -270,7 +289,7 @@ let linkAccount
     }
 ```
 
-- `result` is the domain's own generic builder in `MyDogsbody.Domain/Result.fs` — see *Errors* below for why it cannot be `handleError`. Hand-writing it is what the book's sample does rather than taking a dependency; FsToolkit.ErrorHandling is the alternative if a change needs `asyncResult` and more.
+- `result` is the domain's own generic builder in `MyDogsbody.Domain/Result.fs` — see *Errors* below for why it cannot be `handleError`. Write it by copying `MyDogsbody.Builders/HandleErrorBuilder.fs` and taking two things out: the `writeLog` constructor parameter, and the `MyDogsbodyException` annotations on `Bind` and `TryWith` that pin its error type. What is left — `Bind`, `Return`, `ReturnFrom`, `Zero`, `Delay`, `Run` — is the whole builder. If a workflow ever needs `asyncResult`, take the **FsToolkit.ErrorHandling** package rather than hand-writing that as well.
 - One workflow per file, named `<Workflow>Workflow.fs`, exposing one public function.
 - Steps that are pure decisions stay private functions in the same file.
 - **No I/O in the file.** `loadAccounts` performing a query is invisible here on purpose — the workflow sees a function value.
@@ -284,7 +303,7 @@ The layered design had five mappers, one per hop. This one has **two, both at th
 | Bottom | the integration's store | LiteDB entity (C#, `ObjectId`) ⇄ domain type |
 | Top | `Startup/*ApiMappers.fs` | domain type ⇄ `MyDogsbody.UI.Types` record |
 
-The top mapper is a deliberate choice, and it is where this deviates from the sketch in `architecture-options.md`: the workflow's summary type could be handed to the UI directly, saving a mapper, but that would put `MyDogsbody.Domain` in `UI.Portal`'s reference graph. Keeping the UI on its own records is what makes the domain *unreachable* from the screen rather than merely unused there — the same property the `startup-composition-root` change bought and the same reason `CredentialApi` was never widened to take a Spine type. One mapper is the price; pay it.
+The top mapper is a deliberate choice, and the book does not require it: a workflow's read/summary type could be handed to the UI directly, saving a mapper, but that would put `MyDogsbody.Domain` in `UI.Portal`'s reference graph. Keeping the UI on its own records is what makes the domain *unreachable* from the screen rather than merely unused there — the same property the `startup-composition-root` change bought and the same reason `CredentialApi` was never widened to take a Spine type. One mapper is the price; pay it.
 
 Everything between those two points is domain types. **Adding a workflow does not add a DTO hop.** If you find yourself writing a third record with the same fields, that is the defect this architecture exists to prevent.
 
@@ -318,6 +337,7 @@ The `with` branch *yields* the wrapped exception rather than raising it: the bui
 - `ExceptionHelpers.isApplicationException`: a `MyDogsbodyException` whose `InnerException` is an `ApplicationException` passes through **unlogged**. That's the idiom for expected/validation failures in the outer ring — see `ReadPdfDomain.getPdfContent` constructing one for a missing file. In the domain the same idea is free: an expected failure is just a DU case and was never an exception.
 - `writeLog` is wired in `Startup/Startup.fs` to `MyDogsbody.Logging`, which inserts an `ExceptionLog` into the `Exceptions` collection of `Logging.db` — the separate log database, never the main one (see *Storage → Log database*).
 - **Never raise as control flow, in either ring.** Exceptions are caught at the boundary and converted.
+- **Not every failure earns a DU case.** A domain error case is for a failure the domain *expects* and a person could name out loud — "that address is already linked". Bugs, violated invariants and infrastructure collapse are not that: they stay exceptions, get caught at the outer-ring boundary, and arrive as a `MyDogsbodyException` with a stack trace worth reading. A `*Error` DU that tries to enumerate everything that could go wrong becomes unreadable and stops being matchable.
 
 ### Logging is cross-cutting, not an integration
 
@@ -364,7 +384,7 @@ Adding a feature: declare its types, dependency function types and workflows in 
 
 ### UI (Fun.Blazor + MudBlazor + FSharp.Data.Adaptive)
 
-**The UI stays adaptive. This is settled, not pending.** `cval`, `aval`, `transact` and `adapt { }` are the state model, and the onion above stops at the composition root — it does not reach into the screen. MVU/Elmish was evaluated as Option 3 in `docs/architecture-options.md` and **rejected**: it addresses only the UI, the problems it prevents were already fixed by hand in the `startup-composition-root` change, and adopting it would mean a second state paradigm for no defect it currently closes. Do not introduce `Model`/`Msg`/`update`, `Cmd`, `Elmish`, or a dispatch loop. If a page's adaptive state is getting unwieldy, the answer is a better module creator, not a message type.
+**The UI stays adaptive. This is settled, not pending.** `cval`, `aval`, `transact` and `adapt { }` are the state model, and the onion above stops at the composition root — it does not reach into the screen. MVU/Elmish was evaluated and **rejected**: it addresses only the UI, the problems it prevents were already fixed by hand in the `startup-composition-root` change, and adopting it would mean a second state paradigm for no defect it currently closes. Do not introduce `Model`/`Msg`/`update`, `Cmd`, `Elmish`, or a dispatch loop. If a page's adaptive state is getting unwieldy, the answer is a better module creator, not a message type.
 
 What the onion *does* ask of the UI is unchanged from today: the screen talks to an API record of functions speaking `MyDogsbody.UI.Types`, and reaches no further.
 
@@ -435,7 +455,7 @@ Status: **only errors are implemented.** `writeLog` is the sole writer and `Exce
 ### Conventions
 
 - New `.fs` files must be added to the `.fsproj` `<Compile Include>` list **in dependency order** — F# compile order is significant and there is no glob.
-- **`MyDogsbody.Domain` folder shape: one folder per workflow area, named for the area, not the layer.** Inside it, `<Area>Types.fs` first (constrained types, stage types, the error DU, the dependency function types), then one `<Workflow>Workflow.fs` per workflow. `Result.fs` sits at the project root, compiled first. Copy the book's `src/OrderTaking` for anything not covered here.
+- **`MyDogsbody.Domain` folder shape: one folder per workflow area, named for the area, not the layer.** Inside it, `<Area>Types.fs` first (constrained types, stage types, the error DU, the dependency function types), then one `<Workflow>Workflow.fs` per workflow. `Result.fs` sits at the project root, compiled first.
 - **Do not create `Domains/Types`, `UseCases/Types` or `Repositories/Types` folders in new code.** That is the per-layer shape this architecture replaces; it survives only in `Spine` and the existing integrations. Inside an integration, new adapter code goes beside `Database/`, named for what it talks to (`GoogleAccountStore.fs`, `GoogleProfileApi.fs`).
 - Migrations are `Migrations/Migration_<timestamp>_<Name>.fs` holding one `[<Migration(<same timestamp>L)>] type <Name>()` with `Up()` and `Down()` — e.g. `Migration_20251104000001_CreateBlogTable.fs` / `CreateBlogTable`. Add each to `MyDogsbody.Database.Migrations.fsproj` in timestamp order, above `MigrationSetup.fs`. Never edit a migration that has been applied; write a new one.
 
