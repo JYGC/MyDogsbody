@@ -29,6 +29,10 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q2.3** — which calendar | **A default invoice calendar chosen per Google account, on the Google accounts page** | Not a picker on the invoices page. The calendar becomes a property of the registered account, which moves `ListCalendars` into change #6 — §3.5 |
 | **Q2.4** — what makes the diff "already there" | **A private extended property** on each created event, queried back with `privateExtendedProperty` | Survives renaming and moving the event. Also means the app only recognises events *it* created — see below |
 | **Q3.3 / Q3.4** — where credentials live | **Remove the separate credentials integration.** Credentials go in a `Credentials` collection inside **the provider integration's own LiteDB** | The only answer here that deletes existing, working, tested code. It needs a change of its own — §3.8 |
+| **Q4.1** — what "accounts" means | **The mail accounts configured in Thunderbird**, one selected at a time (per ask #5) | As proposed. No folder-level selection |
+| **Q4.2** — how the profile is located | **You give a folder, and it is searched recursively** for accounts | Not `profiles.ini` discovery. Needs a folder picker, which is awkward from a BlazorWebView — §3.3, Q4.5 |
+| **Q4.3** — mbox or maildir | **Both** | No "mbox first" phasing. Change #3 grows, and format detection becomes real work — §3.3 |
+| **Q4.4** — is Thunderbird running | **Yes** | The store must be read without a clean lock. Copying every scan collides with Q1.9's rescan-on-window-change — Q4.7 |
 | **Q5.1** — which storage tier | **Invoices are MyDogsbody items, not Integration items.** So are **suppliers** | The main SQLite database stops being theoretical: suppliers, templates and invoices all persist there, behind FluentMigrator migrations. §3.6 |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
@@ -71,10 +75,10 @@ There is **nothing** in the repo today that reads Thunderbird — no profile dis
 ### 3.1 Flow
 
 ```
-Thunderbird profile ──┐  Integrations.Thunderbird
-  profiles.ini        ├──►  ListMailAccounts
+folder you chose ─────┐  Integrations.Thunderbird
+  walked recursively  ├──►  ListMailAccounts
   prefs.js accounts   ├──►  ReadMailFolder account cutoff ──► messages + attachments
-  mbox / maildir      ┘                                              │
+  mbox AND maildir    ┘     (read in place, Thunderbird is running)  │
                                                                      ▼
 PDF / DOC / TXT ──────┐  Integrations.Documents                      │
   PdfPig              ├──►  ReadDocumentText — one type, four        │
@@ -187,10 +191,11 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 ### 3.3 Outer ring
 
 **`MyDogsbody.Integrations.Thunderbird`** (new) + `.Database.Models` (C#, if it stores anything)
-- `ThunderbirdProfileReader.fs` — `profiles.ini` → profile paths.
-- `ThunderbirdAccountReader.fs` — `prefs.js` → account list (`mail.account.*`, `mail.server.serverN.*`).
-- `MailFolderReader.fs` — mbox and/or maildir → messages; MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: skip a message on its `Date`/received header before touching its body or attachments, so a 1-month window doesn't pay for a 12-month mbox. mbox is append-ordered in practice but not guaranteed sorted, so it still has to be walked end to end — the saving is in not parsing MIME or opening PDFs for messages outside the window, which is where the time actually goes.
-- Its own small LiteDB store for the selected-account setting and the profile path override. Those are Thunderbird's own facts, so under §1.1 they stay here rather than going to the main database.
+- `ThunderbirdFolderScanner.fs` — **the entry point, per Q4.2.** Given a root folder you chose, walk it recursively and report every account found. No `profiles.ini` lookup and no `%APPDATA%` assumption: the folder you hand it is the whole truth. It therefore has to cope with the folder being a single profile, a parent of several profiles, or a backup copy of one.
+- `ThunderbirdAccountReader.fs` — `prefs.js` → account list (`mail.account.*`, `mail.server.serverN.*`). Recursion finds the `prefs.js` files; this reads them. Worth keeping even though discovery is now folder-based, because `prefs.js` is the only place the account's **display name, email address and store type** are written down — a bare directory walk yields server hostnames and little else. Q4.6.
+- `MailFolderReader.fs` — **mbox *and* maildir, both required per Q4.3.** Format per account comes from `mail.serverN.storeContractID` in `prefs.js` when available, and structurally otherwise: a maildir folder has `cur`/`tmp`/`new` subdirectories, an mbox folder is a single file with `.sbd` directories for its children. MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: skip a message on its `Date`/received header before touching its body or attachments, so a 1-month window doesn't pay for a 12-month mailbox. mbox is append-ordered in practice but not guaranteed sorted, so it still has to be walked end to end — the saving is in not parsing MIME or opening PDFs for messages outside the window, which is where the time actually goes. Maildir is the easier of the two here: one file per message, so out-of-window messages cost a stat rather than a parse.
+- **Reading around a running Thunderbird, per Q4.4.** Thunderbird holds its mail store open while it runs, so the reader cannot assume an exclusive handle. Copy-then-parse is the safe answer and the one I originally defaulted to — but on a multi-gigabyte mbox, copying on every scan is seconds to minutes, and Q1.9 has the window picker rescanning on each click. Q4.7 is where that gets resolved; the design should assume **open with `FileShare.ReadWrite` and tolerate a torn final message**, falling back to a copy only when the open genuinely fails.
+- Its own small LiteDB store for **the root folder you chose** and the selected account. Those are Thunderbird's own facts, so under §1.1 they stay here rather than going to the main database. The folder is no longer an "override" — after Q4.2 it is the only way the app finds anything, so the app is unusable until it is set, and the page has to say so rather than showing an empty table.
 - **Hands over bytes, not paths.** An attachment is extracted from the message in memory and passed on as a `DocumentSource`; nothing is spilled to disk. Q1.11.
 
 **`MyDogsbody.Integrations.Documents`** — the four readers behind `ReadDocumentText`
@@ -235,7 +240,7 @@ And **one pair deleted**: `CredentialApiFactory.fs` + `CredentialApiMappers.fs`,
 | --- | --- | --- |
 | Invoices | `/invoices` (top-level, not settings) | **Scan-window picker (1 / 2 / 3 / 4 / 6 / 12 months)**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column, "Upload to calendar" button, `MudAlert` from `ErrorAval` |
 | Google accounts | `/settings/google-accounts` | Table of registered accounts, "Add account" → consent flow, **the default invoice calendar for each account, picked from a dropdown of that account's own calendars**, remove / re-authorise |
-| Thunderbird accounts | `/settings/mail-accounts` | Table of accounts discovered in the profile, radio/select for the one to import from |
+| Thunderbird accounts | `/settings/mail-accounts` | **The root folder to search** (Q4.2) with a Browse button, a "scan for accounts" action, the table of accounts the recursive walk found — name, email, store format, message count — and a radio to pick the one to import from |
 | **Suppliers** | `/settings/suppliers` | Table of suppliers with their match rules; add / edit / delete via dialog; each row opens that supplier's templates |
 | **Templates** | `/settings/suppliers/{id}/templates` | The templates for one supplier: field rules, and — strongly recommended — a **"test against a message" panel** that runs `ApplyTemplateWorkflow` over a real scanned message and shows what each rule extracted. See §3.7 |
 
@@ -339,7 +344,7 @@ The answers in §1.1 roughly doubled this, so it is now seven:
 | --- | --- | --- | --- |
 | 1 | `invoice-ledger-foundation` | **The main SQLite database wired into the app for the first time**: `Suppliers` + `SupplierMatchers` migrations, store functions, `SupplierApi`, suppliers page. No invoices, no mail, no calendar | — |
 | 2 | `invoice-templates` | The template model (§3.7), `ApplyTemplateWorkflow`, template migrations, templates page with the rule editor and the test panel. Ask #6 | 1 |
-| 3 | `thunderbird-account-selection` | Thunderbird accounts page, profile/account discovery, selection persisted. Ask #5 | — |
+| 3 | `thunderbird-account-selection` | Thunderbird accounts page, **folder picker + recursive account discovery, both mbox and maildir**, selection persisted. Grew with the Q4.2/Q4.3 answers. Ask #5 | — |
 | 4 | `invoice-extraction` | The four document readers, the scan window, the `Invoices` migration, the scan pipeline, a read-only invoice table. Ask #2 | 1, 2, 3 |
 | 5 | `credentials-per-provider` | **Pure refactor, no new feature.** Deletes `Integrations.Credentials`; each provider integration gains a `Credentials` collection in its own LiteDB. Characterization tests before anything moves. §3.8 | — |
 | 6 | `google-account-integration` | Google accounts page, OAuth registration, calendar listing, **and the per-account default invoice calendar** — Q2.3 moved that here from #7. Ask #4 | 5 |
@@ -366,7 +371,9 @@ These are real, and each needs a decision — they are not blockers, but pretend
 9. **A user-editable rule engine sits awkwardly with "types carry the rules".** The codebase's instinct is to make invalid states unrepresentable at compile time; a template is typed in at runtime, so the guarantee has to move to a validation boundary — `ValidTemplate`, produced when the page saves and never constructed anywhere else. That's the right answer, but it is a weaker guarantee than the rest of the domain enjoys, and the tests have to carry more of the weight. Add the regex-timeout requirement from §3.7 and this is the riskiest area in the build.
 10. **Change #5 deletes tested, working code, and coverage goes down before it goes up.** Removing `Integrations.Credentials` takes three domain workflows, a store, two mappers, a UI page and their tests out of a suite that is currently 204 green tests. That is the correct outcome — code that no longer exists needs no tests — but the change must say plainly what was removed rather than letting the total quietly drop. Characterization tests over the behaviour being *preserved* (a credential round-trips, a secret survives storage unchanged) go in first and are what the new per-provider collections must satisfy.
 11. **The main database has never actually been run by the application.** `MigrationSetup` has no caller, there is no composition-root binding, and `createDatabaseContext` opens a `SqliteConnection` it never disposes — which the test guidance already warns keeps temp files locked on Windows. Change 1 is where all of that gets exercised for real for the first time. Expect to find something.
-12. **The clock is a new dependency function type, and CLAUDE.md calls those published interfaces** — meaning `GetCurrentTime` owes a contract suite run against the real implementation *and* every fake. The real implementation is `DateTime.Now`, whose whole nature is to return something different each call, so "assert both sides agree" has no obvious meaning. Workable answer: the suite asserts the properties that must hold of any clock (monotonic across two calls, `Kind` as expected, within a tolerance of `DateTime.Now` at the point of test) and the *cutoff arithmetic* — the part with actual logic — is unit-tested against fixed instants in the workflow. Say this explicitly in the change rather than quietly having no contract test for the clock. Worth checking whether month arithmetic near month ends behaves as you'd want: `.AddMonths(-1)` from 31 March gives 28 February, not 3 March.
+12. **A folder picker is the one thing here that may force the WPF host to change.** Q4.2 needs a real filesystem *path*, and Blazor cannot supply one — `InputFile` hands over content, not locations, and `webkitdirectory` is no better inside a `BlazorWebView`. A genuine folder dialog means `Microsoft.Win32.OpenFolderDialog` on the WPF side, exposed to the UI as an injected function and registered by the host. That is a small, clean seam — a `ChooseFolder: unit -> string option` in the API record, satisfied by WPF in production and a lambda in tests — but it does dent the "`MainWindow.xaml.cs` should not change" property that has held through every change so far. The fallback, a plain text box you paste a path into, needs no host change at all. Q4.5.
+13. **Recursively walking a folder you chose is not the same as reading a known profile path.** It can be enormous, it can contain several profiles or none, it will hit directories the process cannot read, and on Windows it can follow junctions into a loop. The scanner needs a depth bound, permission errors reported per-directory rather than aborting the walk, and a result that distinguishes "no accounts here" from "I could not look". None of that is hard; all of it is easy to leave out and then debug in anger.
+14. **The clock is a new dependency function type, and CLAUDE.md calls those published interfaces** — meaning `GetCurrentTime` owes a contract suite run against the real implementation *and* every fake. The real implementation is `DateTime.Now`, whose whole nature is to return something different each call, so "assert both sides agree" has no obvious meaning. Workable answer: the suite asserts the properties that must hold of any clock (monotonic across two calls, `Kind` as expected, within a tolerance of `DateTime.Now` at the point of test) and the *cutoff arithmetic* — the part with actual logic — is unit-tested against fixed instants in the workflow. Say this explicitly in the change rather than quietly having no contract test for the clock. Worth checking whether month arithmetic near month ends behaves as you'd want: `.AddMonths(-1)` from 31 March gives 28 February, not 3 March.
 
 ---
 
@@ -383,6 +390,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 - Suppliers, templates and invoices live in the main SQLite database, with the schema built **only** by FluentMigrator — no DDL in a store function, a test, or a SQLite tool.
 - A template carrying a pathological regex fails *that rule* with a named error inside its timeout, and the scan finishes. It does not hang the page.
 - `MyDogsbody.Domain` still names no Thunderbird, Google, LiteDB, SQLite, MIME or PDF type — the ledger got bigger, the centre did not get less pure.
+- **A scan completes with Thunderbird open**, against both an mbox account and a maildir one, without Thunderbird noticing and without corrupting anything. Reading someone's live mail store is the one operation here that could damage data that isn't ours, so it is read-only by construction and tested that way.
 - **No `Credentials.db` and no `MyDogsbody.Integrations.Credentials`.** Each provider's credentials sit in that provider's own database, and nothing outside a provider integration opens it. The solution has one fewer project than it does today, possibly two once `MyDogsbody.Enums` goes (Q3.8).
 
 ---
@@ -391,7 +399,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **48 questions**, of which §7.6 and Q5.7 are the two sets standing between here and a first `requirements.md`. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **49 questions**, of which §7.6 and Q5.7 are the two sets standing between here and a first `requirements.md`. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
@@ -481,14 +489,16 @@ Opened by removing the credentials integration (§3.8) — these block change #5
 
 ### 7.4 Thunderbird accounts — blocking
 
-- **Q4.1 — "Accounts" means what exactly?** The mail accounts configured in Thunderbird (one per server/identity), or folders within one account? And is *one* selected at a time, or several?
-  *Default:* Thunderbird accounts, exactly one selected at a time.
-- **Q4.2 — How is the profile folder located?** Discovered from `%APPDATA%\Thunderbird\profiles.ini`, or a folder path you set in settings?
-  *Default:* discover from `profiles.ini`, with an override field for when that's wrong.
-- **Q4.3 — Which storage format do your accounts use?** mbox (the default) or maildir? IMAP accounts store cached copies under `ImapMail/`; POP/Local under `Mail/`. If you can say which of yours matter, change #3 can support just those first.
-  *Default:* mbox first, maildir behind a follow-up change.
-- **Q4.4 — Is Thunderbird likely to be running at the same time?** Determines whether the reader copies the store to a temp file before parsing.
-  *Default:* assume yes; copy before parsing.
+- **Q4.5 — How do you choose the folder?** A real folder-browse dialog needs `Microsoft.Win32.OpenFolderDialog` on the WPF side, injected into the UI as a `ChooseFolder` function — clean, but it is the first change to touch the host (§5.12). A plain text box you paste a path into needs nothing.
+  *Default:* the native dialog. You will set this once, but pasting a path is exactly the sort of thing that goes wrong silently, and the seam is small and testable. If you'd rather the host stayed untouched, the text box is a legitimate answer.
+- **Q4.6 — What does the recursive walk look for?** Parse every `prefs.js` it finds and read the accounts from there, or infer accounts structurally from `Mail/` and `ImapMail/` subdirectories? Only `prefs.js` knows an account's display name, email address and store format; a bare directory walk gives you server hostnames.
+  *Default:* find `prefs.js` files and read accounts from them, falling back to structural detection for a mail store with no readable `prefs.js` beside it — a copied or partial backup, say. Show which method found each account, so a hostname-only row is explicable rather than mysterious.
+- **Q4.7 — How large is your mail store, and may we read it in place?** Q4.4 says Thunderbird will be running, and Q1.9 has the window picker rescanning on every click. Copy-then-parse is the safe read, but copying a multi-gigabyte mbox per scan turns a click into a coffee break.
+  *Default:* open with `FileShare.ReadWrite` and read in place, tolerating a torn final message — mbox is append-only in practice, so the risk is confined to a message arriving mid-read — and fall back to copy-then-parse only when the open fails. A rough size for your largest account would settle this immediately.
+- **Q4.8 — Which folders within the chosen account get scanned?** Inbox only, every folder, or a set you nominate? Templates decide *whether a message is an invoice*, but nothing yet decides *where to look*. Scanning everything means Junk, Trash and Sent too — Sent in particular can produce plausible false matches, since invoices get forwarded.
+  *Default:* every folder except Junk and Trash, with Sent excluded as well. Worth making the exclusions visible on the page rather than hidden in code.
+- **Q4.9 — What if the folder contains several profiles, or the same account twice?** A backup copy sitting next to a live profile would produce duplicate accounts with identical names.
+  *Default:* list them all, qualified by the path they were found at, and let you pick. Silently de-duplicating would hide the fact that you pointed at something unexpected.
 
 ### 7.5 Storage and process — decide during design
 
@@ -536,7 +546,7 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-§1.1 has closed eleven questions and opened twenty-five — 34 open before, 48 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those twenty-five would otherwise have surfaced mid-implementation, when they cost more.
+§1.1 has closed fifteen questions and opened thirty — 34 open before, 49 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those thirty would otherwise have surfaced mid-implementation, when they cost more.
 
 **Two independent starting points, either of which can begin now:**
 
@@ -546,5 +556,7 @@ This is the part with no precedent in the codebase, and the answers decide how b
 **§7.6 is the one to think hardest about.** It decides change #2, which is the largest and least precedented piece of the build, and no amount of design work elsewhere will de-risk it. If you want to sanity-check the template model before committing to it, the fastest test is to take two real invoices from two different suppliers and check whether the four rule kinds in §3.7 can actually locate every field.
 
 The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6, §7.4 → #3. Everything in §7.5 apart from Q5.7 can be settled during design.
+
+**One question worth answering early even though it blocks nothing yet: Q4.7.** A rough size for your largest mail account decides whether reading it is instant or a coffee break, and that in turn decides whether the scan window can rescan on every click (Q1.9) or needs a Refresh button. It is one number and it removes a design fork.
 
 Requirements in EARS notation, agreed before any `design.md`, per CLAUDE.md.
