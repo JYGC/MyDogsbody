@@ -44,6 +44,14 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q5.1** — which storage tier | **Invoices are MyDogsbody items, not Integration items.** So are **suppliers** | The main SQLite database stops being theoretical: suppliers, templates and invoices all persist there, behind FluentMigrator migrations. §3.6 |
 | **Scan window values** — supersedes Q1.8 | **Days, not months: 7 / 14 / 30 / 90 / 180 seeded, and the user can add more** on a settings page | The six-case union dies. A window is a **row**, so the set is runtime data like suppliers and templates, and the compile-time guarantee becomes a validation boundary. No fixed ceiling either, so `create` now needs a sanity bound — Q1.16. §3.2 |
 | **Q1.7** — which window is selected on first open, and is it remembered | **14 days**, and the choice **persists in the main SQLite database** | Not in the Thunderbird store where the selected account lives — §5.16. This is the app's first real user setting and needs the first settings table — §3.6, Q5.13 |
+| **Q2.5** — the diff's time window | **The same window as the Thunderbird scan** | One knob, not two. It cannot be applied *literally* backwards, though: events sit on **due** dates, which run ahead of receipt. So the same N is mirrored around today and stretched to cover the latest due date in view — §3.2 |
+| **Q2.6** — insert-only, or update and delete | **All three** | The diff stops being a status list and becomes a three-action **plan**. It also makes the sync **destructive**, which needs a hard guard (§5.18), and it reverses half of what Q2.4 bought — Q2.14 |
+| **Q2.7** — upload everything, or a selection | **Both** — per-row checkboxes *and* a bulk button | The invoice table gains selection state; the button acts on the selection when there is one and on everything outstanding when there isn't |
+| **Q2.8 / Q2.11 / Q2.12** — partial failure, unset calendar, per-upload override | **All three as proposed** | Continue past a failure and report per row; an account with no default calendar reads as *not ready* with the button disabled; no per-upload calendar override |
+| **Q3.1 / Q3.2 / Q3.5 / Q3.6** — the OAuth flow | **All four as proposed** | System browser + loopback via `GoogleWebAuthorizationBroker`, as the prototype already does; one app-wide client secret pasted once; the `userinfo.email` scope so accounts show their address; removing an account deletes the local token and does not revoke at Google |
+| **Q3.7** — what happens to `MyDogsbody.Domain/Credentials/` | **It stops being a domain area** | Nothing in the domain ever reasoned about a credential. Deletes `CredentialsTypes.fs` and three green workflows with their tests — a real coverage loss to state plainly in change #5 |
+| **Q3.8** — do `InfrastructureType` and `Infrastructure` go too | **Both, and `MyDogsbody.Enums` with them** | The database identifies the provider, so the discriminator was a second source of truth. Also removes a pair of edge mappers and drops `Enums` out of `UI.Portal`'s reference set |
+| **Q3.9** — the rows already in `Credentials.db` | **Discard** | No migration. It is a development database in `bin\Debug\net9.0\` holding a handful of retypeable rows; say so in the change rather than letting the file quietly stop being read |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
 
@@ -193,7 +201,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
     ```
 
     The composition root binds one reader per format and dispatches on `Format`, so the domain sees a single function and adding a fifth format never touches a workflow. **This does not match the existing `ReadDocumentContent`**, which takes a `DocumentPath` and returns coordinate-bearing `Word`s — see Q1.11, it is a real decision, not a detail.
-  - **The store, as functions**: `LoadInvoices = ScanCutoff option -> Result<StoredInvoice list, InvoiceError>`, `UpsertInvoices = ValidInvoice list -> Result<StoredInvoice list, InvoiceError>`, `MarkSynced = InvoiceId -> CalendarEventId -> Result<unit, InvoiceError>`. Upsert rather than insert, because rescanning the same window must not double the ledger — see Q5.8 for what makes two scans agree they found the same invoice.
+  - **The store, as functions**: `LoadInvoices = ScanCutoff option -> Result<StoredInvoice list, InvoiceError>`, `UpsertInvoices = ValidInvoice list -> Result<StoredInvoice list, InvoiceError>`, `MarkSynced = InvoiceId -> CalendarEventId -> Result<unit, InvoiceError>` and — once Q2.6 allows a delete — `ClearSyncRecord = InvoiceId -> Result<unit, InvoiceError>`. Upsert rather than insert, because rescanning the same window must not double the ledger — see Q5.8 for what makes two scans agree they found the same invoice.
   - **The scan windows, as functions**: `LoadScanWindows = unit -> Result<StoredScanWindow list, InvoiceError>`, `SaveScanWindow = ValidScanWindow -> Result<StoredScanWindow, InvoiceError>`, `DeleteScanWindow = ScanWindowId -> Result<unit, InvoiceError>`, plus the remembered choice: `LoadSelectedScanWindow = unit -> Result<ScanWindowDays option, InvoiceError>` and `SaveSelectedScanWindow = ScanWindowDays -> Result<unit, InvoiceError>`. The `option` is the honest shape — a fresh database has no choice recorded, and that is what `fallback` is for.
 
   From the `Suppliers` and `InvoiceTemplates` areas the invoice workflows also take `LoadSuppliers` and `LoadTemplatesForSupplier`. A workflow taking a dependency declared in a sibling area is fine — they are all inside `MyDogsbody.Domain`, and the alternative is duplicating the type.
@@ -201,19 +209,34 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 **`Calendar/CalendarTypes.fs`**
 - `GoogleAccountId`, `CalendarId`, `CalendarEventId`, `CalendarEvent`, and `InvoiceSyncKey` — the idempotency key, now settled as the value stamped into a private extended property (Q2.4). It is a domain type precisely because both sides of the diff have to derive it the same way.
 - `AllDayEvent` — start date and title/description only. Q2.1 makes every invoice event all-day on the due date, so there is no reason for the domain to carry times, time zones or durations it never sets. Keeping them out means the mapper cannot accidentally invent one.
-- `RegisteredGoogleAccount` carries its **default invoice calendar** (Q2.3): `{ Id; EmailAddress; DefaultInvoiceCalendar: CalendarId option }`. The `option` is not laziness — a freshly authorised account genuinely has no calendar chosen yet, and Q2.11 is about what the UI does in that state.
-- Error DU: `CalendarError` — `CalendarUnreachable`, `NotAuthorised`, `AccountNotRegistered`, `NoDefaultCalendar of GoogleAccountId`, `CalendarNoLongerExists of CalendarId`, `EventRejected`, …
-- Dependency function types: `ListGoogleAccounts`, `RegisterGoogleAccount`, `SetDefaultInvoiceCalendar`, `ListCalendars`, `ListCalendarEvents`, `CreateCalendarEvent`.
+- `RegisteredGoogleAccount` carries its **default invoice calendar** (Q2.3): `{ Id; EmailAddress; DefaultInvoiceCalendar: CalendarId option }`. The `option` is not laziness — a freshly authorised account genuinely has no calendar chosen yet, and per Q2.11 that state renders as *not ready* with the sync button disabled, rather than as a failure at the API.
+- **`CalendarDateRange`** — the bound `Events.list` needs, `private CalendarDateRange of DateTime * DateTime`. Q2.5 ties it to the scan window, which needs saying carefully, because the obvious reading is wrong: the scan window looks **backwards** at when mail arrived, while an invoice event sits on its **due date**, which is normally ahead of that. Querying `[today - N, today]` would therefore miss the event for every invoice not yet due, read it as absent, and create a second one. So the same N drives both, mirrored: `[today - N, today + N]`, **stretched forward if any invoice in view falls due later than that** — a supplier on 60-day terms inside a 14-day window is not exotic. One number, one setting, no second knob on the page; it just cannot be applied in one direction only.
+- **`SyncAction`** — what Q2.6 turns the diff into:
+
+  ```fsharp
+  type SyncAction =
+      | CreateEvent of UploadableInvoice
+      | UpdateEvent of CalendarEventId * UploadableInvoice   // the invoice changed since upload
+      | DeleteEvent of CalendarEventId                       // the invoice is gone from the ledger
+      | LeaveAlone  of CalendarEventId                       // identical - no API call at all
+  ```
+
+  `LeaveAlone` is a case rather than an absence on purpose: it is what makes "sync twice, second one does nothing" assertable, and with update enabled that is no longer free the way it was under insert-only.
+- Error DU: `CalendarError` — `CalendarUnreachable`, `NotAuthorised`, `AccountNotRegistered`, `NoDefaultCalendar of GoogleAccountId`, `CalendarNoLongerExists of CalendarId`, `EventRejected`, and now `EventNoLongerExists of CalendarEventId` — an update or delete aimed at an event somebody already removed by hand, which is expected rather than exceptional and must not fail the batch.
+- Dependency function types: `ListGoogleAccounts`, `RegisterGoogleAccount`, `SetDefaultInvoiceCalendar`, `ListCalendars`, `ListCalendarEvents` (now taking a `CalendarDateRange`), `CreateCalendarEvent`, and per Q2.6 **`UpdateCalendarEvent`** and **`DeleteCalendarEvent`**.
 
 **One consequence of Q2.4 worth stating plainly:** a private extended property only exists on events *this app* created. An event you added to the calendar by hand for the same invoice carries no property, so the diff will not see it and the upload will create a second one. That is the correct trade for robustness against renaming — but it is the behaviour, so the page should not claim to detect "any event for this invoice".
+
+**Q2.6 turns half of that trade around, and it is worth seeing before it is built.** Under insert-only, "the property survives you renaming the event" meant *we will not duplicate it*. With update enabled it also means *we will rename it back* — the app can now find your edited event and overwrite the edit. Same for moving it to another date. That is defensible if an invoice event is app-owned data with no business being hand-edited, and it is infuriating if you moved it deliberately. **Q2.14.**
 
 **Workflows** (one file each, one public function each):
 - **`ApplyTemplateWorkflow` — pure, no dependencies**: `Template -> ScannedMessage -> Result<UnvalidatedInvoice, InvoiceError>`. The rule engine. Everything that makes template editing worth having is decided here, and none of it touches a file, a clock or a network. Table-driven unit tests over `(template, text) → expected fields` are the cheapest coverage in the whole feature, and they'll be where template bugs actually get found.
 - **`MatchSupplierWorkflow` — pure**: `StoredSupplier list -> ScannedMessage -> Result<SupplierId, InvoiceError>`. Also decides what happens when two suppliers match — Q7.6.4.
 - **`ResolveScanWindowWorkflow` — pure**: `StoredScanWindow list -> ScanWindowDays option -> ScanWindowDays`. Given what exists and what was remembered, decide which window the page opens on. Three cases, one function, one place: nothing remembered → `fallback`; remembered and still in the list → that one; remembered but since deleted → `fallback`, or the shortest window still present if 14 has itself been deleted. Small enough to look not worth naming, and exactly the sort of rule that otherwise ends up half in a module creator and half in a mapper.
 - `ScanForInvoicesWorkflow` — `getCurrentTime → readMailFolder → readDocumentText → loadSuppliers → loadTemplates → upsertInvoices → (account, ScanWindowDays) → StoredInvoice list`. The orchestration: work out the cutoff, pull the messages, flatten each to text, match a supplier, apply its template, validate, store. Note how much of it is calls to the two pure workflows above — that is the shape to aim for. The cutoff arithmetic (`getCurrentTime().Date.AddDays(-days)`) is a private pure function in this file, so "180 days back from 5 January" is a unit test with a fixed clock and no mail store anywhere near it. Days are uniform in a way months are not, which quietly removes the month-end trap flagged in §5.15.
-- `DiffInvoicesAgainstCalendarWorkflow` — **pure**: `StoredInvoice list -> CalendarEvent list -> InvoiceSyncStatus list`. Still the heart of the feature and still the cheapest thing to test, provided the match key is a value and not a heuristic.
-- `UploadInvoicesToCalendarWorkflow` — takes the diff result, calls `CreateCalendarEvent` for the missing ones only, and `MarkSynced` for each success.
+- `DiffInvoicesAgainstCalendarWorkflow` — **pure**: `StoredInvoice list -> CalendarEvent list -> SyncAction list`. Still the heart of the feature and still the cheapest thing to test, provided the match key is a value and not a heuristic. Q2.6 makes it produce a *plan* rather than a status, which is the better shape anyway: every decision about what to touch is made here, in a function with no network in it, and the outer workflow only executes.
+  **The one rule this workflow must not break:** a `DeleteEvent` is only ever produced for an invoice that has *left the ledger*. An invoice that simply falls outside the current window is not gone — it is not being looked at. Get that wrong and narrowing the picker from 180 days to 7 deletes six months of calendar entries, which is the worst thing this feature could possibly do. It is one condition, and it is the single most important test in change #7. §5.18.
+- `SyncInvoicesToCalendarWorkflow` (was `UploadInvoicesToCalendar…`, renamed because it no longer only uploads) — takes the plan, calls `CreateCalendarEvent`, `UpdateCalendarEvent` or `DeleteCalendarEvent` per action, skips `LeaveAlone` entirely, and records the outcome: `MarkSynced` after a create, `ClearSyncRecord` after a delete. Per Q2.8 it continues past a failure and returns a per-action outcome list rather than stopping at the first one; an `EventNoLongerExists` on an update or delete is a success, not a failure — the calendar already agrees with where we were trying to get to.
 - Supplier and template CRUD: `AddSupplierWorkflow`, `EditSupplierWorkflow`, `DeleteSupplierWorkflow`, `ListSuppliersWorkflow`, and the same four for templates. These are the same shape as the existing `AddCredentialWorkflow` / `EditCredentialWorkflow` and should be written by copying them.
 - Scan-window CRUD, the same shape again but smaller: `AddScanWindowWorkflow` (rejects a duplicate and anything outside `create`'s bounds), `DeleteScanWindowWorkflow` (rejects deleting the last one), `ListScanWindowsWorkflow`, `SelectScanWindowWorkflow` (persists the choice). No edit workflow — a window is one number, so changing it is a delete and an add, and offering an edit would just be a second path to the same duplicate check.
 - `ListMailAccountsWorkflow`, `SelectMailAccountWorkflow`, `RegisterGoogleAccountWorkflow`, `ListGoogleAccountsWorkflow`.
@@ -247,7 +270,7 @@ As an integration it follows the same rules as `Integrations.Credentials` does t
 Whether this project *absorbs* `MyDogsbody.Integrations.Pdf` (rename, move the file, keep the tests) or sits beside it is Q1.14. Absorbing is my recommendation: one project per *capability* rather than per library keeps the composition root binding one dependency type in one place.
 
 **`MyDogsbody.Integrations.Google`** (exists as a stub)
-- `GoogleCalendarClient.fs` — `CalendarService` behind `ListCalendars` / `ListCalendarEvents` / `CreateCalendarEvent`, lifted from the `GoogleCalendarCRUD` prototype.
+- `GoogleCalendarClient.fs` — `CalendarService` behind `ListCalendars` / `ListCalendarEvents` / `CreateCalendarEvent` / `UpdateCalendarEvent` / `DeleteCalendarEvent`, lifted from the `GoogleCalendarCRUD` prototype. **Q2.6 costs nothing here**: the prototype is a CRUD prototype and already does all four operations against `CalendarService`. The cost of update-and-delete is entirely in the domain and the UI, not in the adapter.
 - `GoogleAccountStore.fs` — registered accounts, their default invoice calendar, and **their credentials**, all in `Google.db`: an `Accounts` collection and a `Credentials` collection in the provider's own database (§1.1, §3.9).
 - `GoogleAuthorization.fs` — the consent flow (Q3.1).
 
@@ -275,12 +298,13 @@ And **one pair deleted**: `CredentialApiFactory.fs` + `CredentialApiMappers.fs`,
 - **`ScanWindowUiType`** — now a plain record, `{ Id: string; Days: int; Label: string }`, because the domain type it mirrors is no longer a union either. An earlier draft argued for mirroring a six-case union here so the compiler could reject a seventh value; **that argument is dead**, and worth being explicit about rather than quietly dropping. Making the set user-editable moves the "is this a legal window?" check out of the compiler and into `ScanWindowDays.create`, and the mapper becomes trivial in both directions. What is bought: the app no longer needs a rebuild to gain a window. What is paid: an illegal number is now a runtime `Error`, caught at one boundary, and only tests can prove that boundary holds. Same trade as templates (§5.9), one tier smaller.
   `Label` is the mapper's business, not the domain's — "14 days", "6 months" for 180 if you want it — so the component renders a string it was handed rather than composing one.
 - `Modules/GoogleAccountsBrowserModule.fs`, `Modules/MailAccountsBrowserModule.fs`, `Modules/ScanWindowsBrowserModule.fs`, `Modules/InvoiceSyncModule.fs` — each a record of `aval` fields + commands, same shape as `CredentialsBrowserModule`. `InvoiceSyncModule` carries `SelectedScanWindowAval: aval<ScanWindowUiType>`, `AvailableScanWindowsAval: aval<ScanWindowUiType list>` and `SelectScanWindow: ScanWindowUiType -> unit`; selecting one **persists the choice and then rescans**, which is write-then-reload exactly like an edit, so the table always shows what was actually scanned rather than what the picker was holding. The initial value comes from `ResolveScanWindowWorkflow` through the API, never from a literal `14` in the component.
+  Q2.7 adds selection to the same module: `SelectedInvoiceIdsAval: aval<Set<string>>`, `ToggleInvoice`, `ClearSelection`, and a derived `PendingActionCountAval` the button renders. Selection is view state and is deliberately **not** persisted — it resets on a rescan, because a tick against a row that no longer exists is worse than no tick at all.
 
 **`MyDogsbody.UI.Portal`** — six pages, registered in `Shell.fs`; the five settings pages also linked from `SettingsComponents.settingsNavMenu`:
 
 | Page | Route | Contents |
 | --- | --- | --- |
-| Invoices | `/invoices` (top-level, not settings) | **Scan-window picker, rendering whatever windows the store holds and opening on the remembered choice**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column, "Upload to calendar" button, `MudAlert` from `ErrorAval` |
+| Invoices | `/invoices` (top-level, not settings) | **Scan-window picker, rendering whatever windows the store holds and opening on the remembered choice**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column (**four states now, not two** — up to date, missing, changed, orphaned) and **a per-row checkbox** (Q2.7), a "Sync to calendar" button that acts on the ticked rows or on everything outstanding when none are ticked and shows that count, per-row outcomes after a partial failure (Q2.8), `MudAlert` from `ErrorAval` |
 | Google accounts | `/settings/google-accounts` | Table of registered accounts, "Add account" → consent flow, **the default invoice calendar for each account, picked from a dropdown of that account's own calendars**, remove / re-authorise |
 | Thunderbird accounts | `/settings/mail-accounts` | **The root folder to search** (Q4.2) with a Browse button, a "scan for accounts" action, the table of accounts the recursive walk found — name, email, store format, message count — and a radio to pick the one to import from |
 | **Suppliers** | `/settings/suppliers` | Table of suppliers with their match rules; add / edit / delete via dialog; each row opens that supplier's templates |
@@ -304,7 +328,7 @@ The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. 
 | `InvoiceTemplates` | id, supplier id, name, which document part it applies to, ordering |
 | `TemplateFieldRules` | template id, target field, rule kind, pattern/label, parse hint |
 | `Invoices` | id, supplier id, reference, amount, currency, due date (nullable), source message id, scanned date |
-| `InvoiceCalendarEvents` | invoice id, google account id, calendar id, event id, uploaded date |
+| `InvoiceCalendarEvents` | invoice id, google account id, calendar id, event id, last synced date |
 | `ScanWindows` | id, days — **unique**, so 14 cannot be added twice |
 | `InvoiceSettings` | a single row with its primary key fixed at 1 — the remembered scan window, in days |
 
@@ -314,7 +338,9 @@ The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. 
 
 **`InvoiceSettings` is a single-row typed table, not a key/value store** — see Q5.13, because this is the first setting and whatever it does becomes the habit. A `Settings(Key, Value)` table would take one migration and then never need another, at the cost of every setting being a string parsed at the point of use; a typed row costs a migration per setting and keeps the store honest about what it holds. The codebase's whole instinct is the second, and adding a column by migration is already the rule for every other schema change here.
 
-**`InvoiceCalendarEvents`** is the table worth arguing about. A sync record is a fact about *an invoice*, so it belongs on this side rather than in the Google integration's store — but it also means the app has an opinion about what's on a calendar that can go stale if you delete an event by hand. **The calendar remains the source of truth for the diff** (Q2.4's extended-property query), and this table is history: what we uploaded, when, to which account. Don't let it become the answer to "is it there?".
+**`InvoiceCalendarEvents`** is the table worth arguing about. A sync record is a fact about *an invoice*, so it belongs on this side rather than in the Google integration's store — but it also means the app has an opinion about what's on a calendar that can go stale if you delete an event by hand. **The calendar remains the source of truth for the diff** (Q2.4's extended-property query), and this table is history: what we synced, when, to which account. Don't let it become the answer to "is it there?".
+
+Q2.6 sharpens that. A delete clears the row (`ClearSyncRecord`), an update refreshes its date, and neither is allowed to become the thing the diff consults — if this table and the calendar disagree, the calendar is right and this table is out of date. Its actual job is diagnostic: *when did we last touch this event, and on whose calendar?*, which is the first question worth asking when a sync did something unexpected.
 
 **The store functions live in `MyDogsbody.Database`** (Q5.9): it gains `SupplierStore.fs`, `TemplateStore.fs`, `InvoiceStore.fs`, `ScanWindowStore.fs` and their record ⇄ domain mappers, plus a `ProjectReference` to `MyDogsbody.Domain`. No new project. It is outer-ring code, so it keeps the outer-ring shape: dependencies first, input last, `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames` entry per function.
 
@@ -425,10 +451,14 @@ This is the only decision so far that deletes working, tested code, so it is wor
 | `MyDogsbody.Integrations.Credentials.Database.Models` (C# `Credential` entity) | A credential entity per provider, in that provider's `.Database.Models` |
 | `Credentials.db` in the working directory | Nothing — the rows live in `Google.db` and friends |
 | `Startup.fs`'s credential context and `credentialApi` binding | Per-provider API records, bound the same way |
-| Possibly `MyDogsbody.Domain/Credentials/` and its three workflows | Q3.7 |
-| Possibly `/settings/credentials`, `CredentialsComponents`, `CredentialsBrowserModule*` | The Google accounts page, which is already the place you manage Google's credentials |
+| `MyDogsbody.Domain/Credentials/` — `CredentialsTypes.fs` and all three workflows (Q3.7) | Nothing. A credential stops being a domain concept; it is a token the Google adapter holds |
+| `MyDogsbody.Enums`, `InfrastructureType` and the domain's `Infrastructure` union (Q3.8) | Nothing. The database identifies the provider |
+| `/settings/credentials`, `CredentialsComponents`, `CredentialsBrowserModule*` and their tests (Q3.10) | The Google accounts page, which is already the place you manage Google's credentials |
+| The rows in `Credentials.db` (Q3.9) | Nothing — discarded and retyped |
 
-**The database is the provider, so the discriminator field goes.** This is the same argument CLAUDE-project.md already makes for the log store — *"the collection is the severity, do not add a `Severity` field"* — applied one tier up. A credential in `Google.db` is a Google credential; an `InfrastructureType` column beside it would be a second source of truth for a fact the file path already states. That in turn makes `MyDogsbody.Enums` (which exists only to share `InfrastructureType` between F# and C#) possibly redundant, and the domain's own `Infrastructure` union along with it — see Q3.7 and Q3.8.
+**The database is the provider, so the discriminator field goes.** This is the same argument CLAUDE-project.md already makes for the log store — *"the collection is the severity, do not add a `Severity` field"* — applied one tier up. A credential in `Google.db` is a Google credential; an `InfrastructureType` column beside it would be a second source of truth for a fact the file path already states. **Q3.8 settles that: the discriminator goes, and `MyDogsbody.Enums` goes with it** — a whole C# project whose only reason to exist was sharing `InfrastructureType` between F# and C#. The domain's own `Infrastructure` union goes too, and so does the pair of edge mappers that translated between them. `UI.Portal`'s reference set shrinks from three projects to two.
+
+**The arithmetic of change #5**, since a refactor that deletes things should be honest about what it leaves: three projects removed — `Integrations.Credentials`, its `.Database.Models`, and `MyDogsbody.Enums` — against one added, `Integrations.Google.Database.Models`, which has to exist for the credentials to move into. The solution ends up two projects smaller, one domain area lighter, and with `/settings/credentials` gone from the nav.
 
 **This must be its own change, and it must go first among the Google work.** It modifies code that is currently green at all four test levels, and CLAUDE.md is explicit: *"Existing behaviour you depend on but are not changing gets a characterization test before you change anything near it."* Folding this into `google-account-integration` would mean a change that simultaneously deletes a store, moves a UI page, rewires the composition root and adds OAuth — with no clean point to check the suite. Split, it is a boring refactor followed by an ordinary feature.
 
@@ -450,7 +480,7 @@ The answers in §1.1 roughly doubled this, so it is now seven:
 | 4 | `invoice-extraction` | The four document readers, the `Invoices` migration, the scan pipeline, a read-only invoice table — **and the whole scan-window apparatus**: the `ScanWindows` and `InvoiceSettings` migrations with their seed, the settings page, the picker, the remembered choice. Ask #2 | 1, 2, 3 |
 | 5 | `credentials-per-provider` | **Pure refactor, no new feature.** Deletes `Integrations.Credentials`; each provider integration gains a `Credentials` collection in its own LiteDB. Characterization tests before anything moves. §3.9 | — |
 | 6 | `google-account-integration` | Google accounts page, OAuth registration, calendar listing, **and the per-account default invoice calendar** — Q2.3 moved that here from #7. Ask #4 | 5 |
-| 7 | `invoice-calendar-sync` | The diff, the sync-status column, the upload button, `InvoiceCalendarEvents`. Asks #1 and #3 | 4, 6 |
+| 7 | `invoice-calendar-sync` | The diff as a four-action plan — create, update, delete, leave alone (Q2.6) — the sync-status column, per-row selection plus a bulk button (Q2.7), `InvoiceCalendarEvents`. **The only change here that can destroy data outside the app**, so §5.18's guard is its headline test. Asks #1 and #3 | 4, 6 |
 
 The scan-window work could technically move into change #1 — it is two small tables, a store and a settings page, all of it main-database machinery that #1 exists to prove. It stays in #4 because a window with nothing to scan is a setting that does nothing, and #1's value is being the smallest change that proves SQLite works. If #4 turns out too large once §7.1 is answered, this is the piece to move.
 
@@ -482,6 +512,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 16. **Settings are now split across two stores, by rule rather than by accident.** The selected *mail account* lives in the Thunderbird integration's own LiteDB, because §1.1 makes it Thunderbird's own fact. The selected *scan window* lives in the main SQLite database, because you said so and because it is a preference about the invoices page rather than about anyone's mail client. Both placements follow the ownership rule; together they mean there is no single "settings" store to point at, and the next preference will need the same judgement made again. The rule is what belongs in the change description — not the location.
 17. **Seeding rows from a migration is a new precedent in this repo.** Every migration so far creates schema and nothing else. The five default windows have to come from somewhere, and the alternatives are worse: `Startup.fs` checking on each launch whether it ought to write five rows is runtime schema management by another name, and hard-coding them in the component is the thing this whole change is undoing. `Insert.IntoTable` in `Up`, matching `Delete.FromTable` in `Down` — but say plainly in change #4 that the file now carries data as well as structure, because the next person will copy whichever migration they open first.
+18. **Q2.6 makes the sync destructive, and that is a different class of risk from everything else in this proposal.** Until now the worst this feature could do was write a wrong row to a database it owns, or leave a duplicate calendar event you delete by hand. With `DeleteCalendarEvent` bound, a defect in a *pure* function can remove entries from a calendar the app neither owns nor can restore. Two hazards, both cheap to guard and both unrecoverable if missed: **(a)** deletion driven by *window* absence rather than *ledger* absence — narrowing the picker from 180 days to 7 must never read as "173 days of invoices disappeared"; **(b)** deletion driven by a failed read — if `ListCalendarEvents` comes back empty because a token expired, an unguarded diff concludes every event is missing and its mirror image concludes every invoice is orphaned. **A read failure must abort the plan, never produce one.** Worth a confirmation on any plan containing deletes, at least until change #7 has been used in anger a few times.
 
 ---
 
@@ -490,8 +521,9 @@ These are real, and each needs a decision — they are not blockers, but pretend
 - `dotnet build MyDogsbody.sln` clean; `dotnet test` green with zero skips, across all four levels — with the one honest exception in §5.2 declared in the change description.
 - `MyDogsbody.Domain` still has zero `ProjectReference` elements (`AssertDomainReferencesNothing` + `Contracts/DomainIsolationTests.fs` both still pass).
 - Still exactly two mapping points per feature: entity ⇄ domain in each integration, domain ⇄ UI record in `Startup/*ApiMappers.fs`.
-- `UI.Portal` still references only `UI.Types`, `Enums`, `Exceptions.Types`.
-- Uploading twice in a row creates no duplicate events.
+- `UI.Portal` references only `UI.Types` and `Exceptions.Types` — one fewer than today, since Q3.8 takes `Enums` out of the graph entirely.
+- **Syncing twice in a row makes no API calls the second time.** Not "creates no duplicates" — that was the insert-only bar. With Q2.6's updates in play, a second sync over unchanged data must produce a plan of nothing but `LeaveAlone`, or every run quietly rewrites every event.
+- **No `DeleteEvent` is ever produced for an invoice that is merely outside the current window**, and no plan at all is produced from a failed calendar read. Two assertions, both against the pure diff, both cheap — and between them they are what stops this feature from destroying data that isn't ours. §5.18.
 - **Scan windows exist as rows and nowhere else.** No list of days in a component, a mapper or a union; the seeded five arrive from a migration and the picker renders whatever the store holds. **Adding a sixth window is done on screen and takes effect without a rebuild** — the same acceptance test as a supplier or a template, one tier smaller.
 - **The picker opens on 14 days against a fresh database, on your last choice on every run after that**, and on the fallback if the window you last chose has since been deleted. That third case has a unit test, because it is the one nobody thinks to try by hand.
 - Deleting the last remaining scan window is refused with a named error, so the picker can never be empty and no component needs an "if the list is empty" branch.
@@ -502,7 +534,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 - `MyDogsbody.Domain` still names no Thunderbird, Google, LiteDB, SQLite, MIME or PDF type — the ledger got bigger, the centre did not get less pure.
 - **A scan completes with Thunderbird open**, against both an mbox account and a maildir one, without Thunderbird noticing and without corrupting anything. Reading a live 16 GB mail store is the one operation here that could damage data that isn't ours, so it is read-only by construction — opened for read with `FileShare.ReadWrite`, never copied, never written — and tested that way.
 - **The accounts page lists exactly the 10 accounts `prefs.js` declares** for the profile in §3.8 — not the 15 directories under `ImapMail/`, and not the six orphans left by deleted accounts. That number is the acceptance test for discovery.
-- **No `Credentials.db` and no `MyDogsbody.Integrations.Credentials`.** Each provider's credentials sit in that provider's own database, and nothing outside a provider integration opens it. The solution has one fewer project than it does today, possibly two once `MyDogsbody.Enums` goes (Q3.8).
+- **No `Credentials.db`, no `MyDogsbody.Integrations.Credentials`, no `MyDogsbody.Enums`, and no `MyDogsbody.Domain/Credentials/`.** Each provider's credentials sit in that provider's own database, and nothing outside a provider integration opens it. Three projects deleted against one added, so the solution is **two projects smaller** than it is today (§3.9).
 
 ---
 
@@ -510,13 +542,13 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **42 questions**. **§7.4 is empty**, so **changes #1 and #3 can both be specified today** — see §8. §7.6 is the set that still gates the largest piece of the build. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **30 questions**. **§7.3 and §7.4 are both empty**, so **four of the seven changes are now specifiable** — see §8. §7.6 is the set that still gates the largest piece of the build. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
 | §7.1 | what an invoice is, the scan window, document formats | 4 |
-| §7.2 | what lands on the calendar | 7 |
-| §7.3 | Google accounts (Q3.1–Q3.6) and the credentials removal (Q3.7–Q3.10) | 6, and **5** |
+| §7.2 | what lands on the calendar — down to four, two of them new | 7 |
+| ~~§7.3~~ | ~~Google accounts and the credentials removal~~ — **fully resolved** | ~~6, 5~~ **both ready** |
 | ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ **ready to specify** |
 | §7.5 | housekeeping, except Q5.13 which #4's first migration needs | 4, for Q5.13 only (#1 **ready to specify**) |
 | **§7.6** | **templates** | **2** |
@@ -561,47 +593,24 @@ Opened by making the window list editable:
 
 ### 7.2 What lands on the calendar — blocking
 
-- **Q2.5 — Over what time window does the diff look?** `Events.list` needs a bound, and now there are two windows in play — the mail scan window from Q1.6 and this one. Letting them drift apart produces nonsense: query 180 days of calendar against a 7-day scan and every older event reads as "on the calendar but missing from the source".
-  *Default:* derive this one from the invoices actually found — the range they span, padded a month either side — so the scan window drives both and they cannot disagree. The diff then only ever answers "of what I scanned, what is already up there?".
-- **Q2.6 — Insert-only, or also update and delete?** If an invoice's amount changes after upload, does the existing event get updated? If the user deletes the event by hand, does the next upload put it back?
-  *Default:* insert-only for change #7; deletion by hand means it comes back on the next upload. Say so on screen.
-- **Q2.7 — Upload everything, or a selection?** Checkboxes per row, or one "upload all missing" button?
-  *Default:* one button uploading everything currently missing, with the count shown on it.
-- **Q2.8 — Partial failure mid-batch?** Stop at the first failure, or continue and report "14 of 17 uploaded, 3 failed"?
-  *Default:* continue, then report per-row outcomes.
 - **Q2.9 — Does the scan window bound the import, the view, or both?** Now that invoices persist (§1.1), these come apart. The window necessarily bounds the **import** — it's what decides which mail is read. Whether it also filters the **table** is a separate choice: the store may well hold invoices from outside it.
-  *Default:* both, with the window and count stated above the table ("41 invoices, received in the last 90 days") so the list is obviously a view of a range rather than the whole ledger. Nothing is deleted when you narrow it — narrowing hides, it does not forget — and the upload button acts only on what is visible.
+  *Default:* both, with the window and count stated above the table ("41 invoices, received in the last 90 days") so the list is obviously a view of a range rather than the whole ledger. Nothing is deleted when you narrow it — narrowing hides, it does not forget — and the sync button acts only on what is visible. **Q2.6 raises the stakes on that sentence**: with deletes bound, "hides, does not forget" has to hold in the diff as well as in the table, which is §5.18's first hazard and Q2.13's safe rule.
 
 Opened by the answers to Q2.3 and Q2.4:
 
 - **Q2.10 — What value goes inside the private extended property?** Q2.4 settled the *mechanism*; this is the string it carries. It has to be stable across rescans and unique per invoice — which argues for the Q5.8 natural key (supplier + invoice reference) rather than the local database id, since that id would change if you ever rebuilt the ledger from scratch and every event would then read as missing.
   *Default:* a composite of supplier id and invoice reference under a single well-known property name, with the local invoice id stored alongside for diagnostics only.
-- **Q2.11 — What if an account's default invoice calendar is unset, or has since been deleted at Google?** Q2.3 makes the calendar a property of the account, so both states are reachable — a freshly authorised account has no default until you choose one.
-  *Default:* the invoices page shows that account as not ready, with a link to the Google accounts page, and disables the upload button rather than failing at the API. A calendar that has vanished at Google surfaces as `CalendarNoLongerExists`, not a raw 404.
-- **Q2.12 — Can the calendar be overridden for a single upload?** Q2.3 sets a default per account; this is whether the invoices page may deviate from it.
-  *Default:* no. One less control on that page, and one less way to file a month of invoices somewhere you didn't mean to. Changing it is a deliberate trip to the Google accounts page.
 
-### 7.3 Google accounts — blocking
+Opened by Q2.6 — both are about the same thing, which is that the app can now change and remove events rather than only add them:
 
-- **Q3.1 — How does consent happen?** `GoogleWebAuthorizationBroker` (as in the prototype) opens the *system* browser and listens on a loopback port. Acceptable inside this WPF/BlazorWebView app, or should the consent page render inside the WebView?
-  *Default:* system browser + loopback. It's what the prototype already does and it's the flow Google recommends for desktop apps.
-- **Q3.2 — Where does the OAuth client secret (`credentials.json`) come from?** Shipped with the app, pasted by you once, or one per account?
-  *Default:* one client secret for the app, pasted once and stored, reused by every account.
-- **Q3.5 — How is an account labelled in the table?** Showing the email address needs the extra `userinfo.email` scope at consent time. Acceptable, or should accounts get a nickname you type?
-  *Default:* request `userinfo.email` and show the address — a nickname on top is fine, but a wrong address is confusing.
-- **Q3.6 — Removing an account:** delete the stored token only, or also revoke it at Google?
-  *Default:* delete locally; mention that revoking happens in the Google account settings.
+- **Q2.13 — What makes an event eligible for deletion?** The safe rule is *the invoice left the ledger* and nothing else — §5.18 explains why anything looser is dangerous. That still leaves the trigger: when you delete an invoice by hand (Q5.12), does its calendar event go **immediately**, on the **next sync**, or only if you say so?
+  *Default:* on the next sync, as a `DeleteEvent` in the plan, shown in the count on the button before you press it. Deleting a row in one app should not silently reach into another; and a plan you can see before it runs is the difference between a feature you trust with delete permission and one you don't.
+- **Q2.14 — Does a sync overwrite an event you edited by hand?** Q2.4 chose the extended property because it survives you renaming or moving the event. Under insert-only that meant *we won't duplicate it*; under Q2.6 it also means *we can rename it back*. So: is an invoice event app-owned data that always wins, or does a hand edit stand?
+  *Default:* app-owned, it always wins — with the title and date treated as ours and rewritten, because the whole point of the event is to say "£420 due on the 14th" accurately, and a stale title that disagrees with the ledger is worse than a lost edit. The alternative worth considering is narrower: rewrite only the **date** (which is the fact that matters) and leave the title alone once created, which keeps hand-annotation possible at the cost of a title that can drift out of date.
 
-Opened by removing the credentials integration (§3.9) — these block change #5, not #6:
+### 7.3 Google accounts and the credentials removal — ✅ fully resolved
 
-- **Q3.7 — What happens to `MyDogsbody.Domain/Credentials/`?** It holds `CredentialsTypes.fs` and three workflows, all currently green. Does a generic credentials area survive with the provider as a parameter, does each provider get its own credential types in its own domain area, or does the concept stop being a domain concern at all once a credential is just a token the Google adapter needs?
-  *Default:* it stops being a domain area. Nothing in the domain reasons about a credential — no workflow makes a decision from one — so it is infrastructure the Google adapter holds, not a modelled concept. That deletes three workflows and their tests, which is a real loss of coverage to state plainly in the change description.
-- **Q3.8 — Do `MyDogsbody.Enums.InfrastructureType` and the domain's `Infrastructure` union go too?** If the database identifies the provider (§3.9), the discriminator is redundant. `MyDogsbody.Enums` is a whole C# project that exists only to share that one enum.
-  *Default:* both go, and `MyDogsbody.Enums` with them. Fewer projects, one less pair of edge mappers, and one less way for the two spellings to disagree. Worth confirming nothing else is planned for that enum.
-- **Q3.9 — What happens to the rows already in `Credentials.db`?** Migrate them into the provider databases, or discard and re-enter?
-  *Default:* discard. It is a development database in `bin\Debug\net9.0\`, and writing a one-shot migration for a handful of rows you can retype costs more than it saves. Say so explicitly rather than letting the file quietly stop being read.
-- **Q3.10 — Does `/settings/credentials` disappear entirely?** Once each provider owns its credentials, the Google accounts page *is* Google's credential page. A generic page listing everything would have to reach into every provider's database, which is exactly the coupling §3.9 removes.
-  *Default:* it goes, along with `CredentialsComponents`, `CredentialsBrowserModule` and their tests. The nav entry is replaced by the per-provider pages.
+Nothing open. Q3.1–Q3.6 settle the OAuth flow and Q3.7–Q3.10 settle what the credentials refactor deletes, so **change #5 can be specified now** and **change #6 has no unanswered questions of its own** — it waits only on #5 landing. The decisions are in §1.1 and the demolition list is §3.9.
 
 ### 7.4 Thunderbird accounts — ✅ fully resolved
 
@@ -647,25 +656,26 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-§1.1 has now closed thirty questions and opened thirty-eight — 40 open before the scan-window answer, 42 after it. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those would otherwise have surfaced mid-implementation, when they cost more.
+§1.1 has now closed forty-four questions and opened forty — 42 were open at the start of this round, **30 now**. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those would otherwise have surfaced mid-implementation, when they cost more.
 
-**The scan-window answer is the clearest example of that so far.** "7, 14, 30, 90, 180 and let me add more" reads like a change to a list of numbers. It is not: making the set editable turns a closed union into a table, deletes a compile-time guarantee and replaces it with a validation boundary, adds a settings page and two migrations, introduces the app's first stored preference and therefore its first settings table, and forces a decision about what "the last 14 days" measures from. Four new questions, one reversed UI recommendation, and one design argument in §3.5 that had to be struck out rather than quietly edited. All of it cheap here, none of it cheap once `ScanWindow` is a union in a shipped domain.
+**Two answers in this round were larger than they looked, and both are worth seeing before they are built.**
 
-**§3.8 is the part of this document I trust most**, because it is the only part measured rather than reasoned. Two of my defaults were wrong — structural account detection and copy-then-parse — and both would have survived into code. It is worth doing the equivalent for the templates in §3.7 before change #2: two real invoices from two real suppliers, checked against the four rule kinds.
+- **"7, 14, 30, 90, 180 and let me add more"** reads like a change to a list of numbers. It is not: making the set editable turns a closed union into a table, deletes a compile-time guarantee and replaces it with a validation boundary, adds a settings page and two migrations, introduces the app's first stored preference and therefore its first settings table, and forces a decision about what "the last 14 days" is measured from. It also struck out a design recommendation in §3.5 rather than quietly editing it.
+- **"Also update and delete"** turns the sync from additive into destructive. The adapter cost is nil — the `GoogleCalendarCRUD` prototype already does all four operations — but the app can now remove entries from a calendar it neither owns nor can restore. §5.18 is the consequence, and its first hazard is the one that would genuinely happen in use: deleting an event because its invoice is outside the current *window* rather than absent from the *ledger*. Narrowing the picker from 180 days to 7 must not clear six months of calendar.
 
-**Two changes are ready now, with nothing left to ask of either:**
+**§3.8 is still the part of this document I trust most**, because it is the only part measured rather than reasoned. Two of my defaults there were wrong — structural account detection and copy-then-parse — and both would have survived into code. The equivalent exercise for §3.7 is worth doing before change #2: two real invoices from two real suppliers, checked against the four rule kinds.
 
-- **Change #1, `invoice-ledger-foundation`.** Q5.7, Q5.8 and Q5.9 were the last blockers and all three are settled. It is small, has no external dependency, and it proves the main SQLite database, its migrations and its store shape — which every later change leans on. **Start here.**
-- **Change #3, `thunderbird-account-selection`.** §7.4 is empty and §3.8 is measured against your actual profile. It is also the change that produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
+**Four changes are now specifiable, three of them today:**
 
-They are independent, so either order works, or both.
+- **Change #1, `invoice-ledger-foundation`.** Small, no external dependency, and it proves the main SQLite database, its migrations and its store shape — which every later change leans on. **Start here.**
+- **Change #3, `thunderbird-account-selection`.** §7.4 is empty and §3.8 is measured against your actual profile. It is also the one that produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
+- **Change #5, `credentials-per-provider`.** §7.3 is now empty too. It depends on nothing, it unblocks the Google work, and it is the only change here that makes the codebase *smaller*: two projects fewer, one domain area gone, `/settings/credentials` off the nav. Its risk is regression rather than design — it deletes green tests, so the characterization tests go in first.
+- **Change #6, `google-account-integration`** has no unanswered questions of its own. It waits only on #5 landing.
 
-**One more a question away:** Q3.7–Q3.10 → **change #5**, the credentials refactor. It depends on nothing and blocks the Google work, and it is the only change here that makes the codebase *smaller* — a good one to have behind you.
+#1, #3 and #5 are mutually independent, so any order works, or all three at once.
 
-**§7.6 is the one to think hardest about.** It decides change #2, which is the largest and least precedented piece of the build, and no amount of design work elsewhere will de-risk it. If you want to sanity-check the template model before committing to it, the fastest test is to take two real invoices from two different suppliers and check whether the four rule kinds in §3.7 can actually locate every field.
+**§7.6 is the one to think hardest about.** It decides change #2, the largest and least precedented piece of the build, and no amount of design work elsewhere will de-risk it. The fastest sanity check is still two real invoices from two different suppliers, tested against the four rule kinds in §3.7.
 
-The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6. §7.5 is housekeeping apart from **Q5.13**, which change #4 needs before it writes its first migration — a settings table is easy to add and awkward to reshape once something is stored in it.
-
-**One question worth answering early even though it blocks nothing yet: Q4.8.** Which folders get scanned decides whether change #4 reads 6.2 GB or 15.2 GB, and that single choice has more effect on how the app feels than anything else in this proposal.
+What remains blocks exactly three changes: **§7.1 plus Q5.13 → #4**, **§7.2's four → #7**, **§7.6's eight → #2**. Two of those four in §7.2 — Q2.13 and Q2.14 — exist only because of the update-and-delete answer, and both come down to the same thing: how much authority the app has over an event once it has created one.
 
 Requirements in EARS notation, agreed before any `design.md`, per CLAUDE.md.
