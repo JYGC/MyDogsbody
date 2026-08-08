@@ -164,7 +164,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 - `ValidTemplate` is the type that matters: it can only be produced by validating an `UnvalidatedTemplate`, and `ApplyTemplateWorkflow` accepts nothing else. That is how a runtime-authored rule still gets a compile-time guarantee at the point it's used.
 
 **`Invoices/InvoicesTypes.fs`**
-- Constrained primitives: `InvoiceReference` (the supplier's own invoice number), `Money` (amount + currency), `DueDate`, `SourceMessageId`. **`SupplierName` is not here** — an invoice carries a `SupplierId`, per §1.1.
+- Constrained primitives: `InvoiceReference` (the supplier's own invoice number — **`create` folds internal whitespace**, because §3.10 found a utility that prints its reference in space-separated groups and names the attachment with the same digits unspaced, which under Q5.8 would otherwise be two keys for one invoice), `Money` (amount + currency), `IssueDate`, `DueDate`, `SourceMessageId`. **`SupplierName` is not here** — an invoice carries a `SupplierId`, per §1.1.
 - **The scan window is a constrained number of days, and the set of windows is data** — not a closed union. Five values are seeded (7, 14, 30, 90, 180) and more can be added on a settings page, so "which windows exist?" is a question only the store can answer:
 
   ```fsharp
@@ -219,6 +219,10 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 
     ```fsharp
     type DocumentFormat = Pdf | Word | PlainText | EmailBody
+
+    // Chosen by filename extension, never by Content-Type: §3.10 measured 155 of 644 PDFs
+    // arriving as application/octet-stream and 4 as application/.pdf. Dispatching on the
+    // declared type would misroute a quarter of them.
 
     /// Bytes, not a path: an attachment lives inside an mbox, and it should not have to be
     /// spilled to a temp file (and cleaned up, and kept out of a backup) to be read.
@@ -288,7 +292,8 @@ As an integration it follows the same rules as `Integrations.Credentials` does t
 - **Hands over bytes, not paths.** An attachment is extracted from the message in memory and passed on as a `DocumentSource`; nothing is spilled to disk. Q1.11.
 
 **`MyDogsbody.Integrations.Documents`** — the four readers behind `ReadDocumentText`
-- `PdfDocumentReader.fs` — PdfPig. **Already exists**, in `MyDogsbody.Integrations.Pdf`, with a contract suite.
+- `PdfDocumentReader.fs` — PdfPig. **Already exists**, in `MyDogsbody.Integrations.Pdf`, with a contract suite. It does the overwhelming majority of the work: §3.10 found the invoice fields in the PDF 91% of the time and in the body 8%.
+- **Format is decided by filename extension, not by `Content-Type`.** 24% of the PDFs in the real mailbox declare themselves `application/octet-stream`. §3.10.
 - `WordDocumentReader.fs` — **`.docx` only** (Q1.12), via DocumentFormat.OpenXml. A legacy binary `.doc` is not read at all: it is reported as an unsupported-format problem against that message, which is how you find out whether one ever actually arrives.
 - `PlainTextDocumentReader.fs` — decoding and line splitting; no library.
 - `EmailBodyReader.fs` — the message body itself. Per Q1.13 it takes the `text/plain` alternative when the message carries one and strips markup only when it does not, so multipart selection stays the reader's problem and never becomes the template's.
@@ -417,7 +422,7 @@ Four things this raises now rather than later:
 4. **Supplier name is not extracted.** It comes from the supplier record the matcher chose. There is no `TargetField.Supplier`, deliberately.
 5. **Q5.10 asks the model to stay serialisable, and it already is.** Templates are relational rows (`InvoiceTemplates` + `TemplateFieldRules`), not an opaque blob, so a JSON export is a read and a write rather than a redesign. Worth keeping true: if a rule kind is ever added that needs a nested structure, it gets a column, not a serialised field smuggled into one. The point of the constraint is that a `dotnet clean` should never be able to destroy a morning's template work.
 
-§7.6 is the question set for all of this.
+**§3.10 is this model measured against your actual mailbox** — 1,199 candidate messages and 644 PDFs — and **§3.11 is the rule set that came out of it.** It changes the shape above in four ways: three rule kinds are added, a normalization contract becomes mandatory, `TargetField` gains `IssueDate`, and the body demotes from a first-class source to a rounding error. Read §3.10 before answering §7.6; most of those questions now have evidence behind them rather than a preference.
 
 ### 3.8 Extracting accounts — a plan verified against the real profile
 
@@ -493,6 +498,152 @@ This is the only decision so far that deletes working, tested code, so it is wor
 
 **This must be its own change, and it must go first among the Google work.** It modifies code that is currently green at all four test levels, and CLAUDE.md is explicit: *"Existing behaviour you depend on but are not changing gets a characterization test before you change anything near it."* Folding this into `google-account-integration` would mean a change that simultaneously deletes a store, moves a UI page, rewires the composition root and adds OAuth — with no clean point to check the suite. Split, it is a boring refactor followed by an ordinary feature.
 
+### 3.10 The rule set — measured against the real mailbox
+
+Measured on 2026-08-09 against `C:\Users\jygcn\AppData\Roaming\Thunderbird\Profiles\49stkd1y.default`, the same profile as §3.8. This is the exercise §8 kept asking for: §3.7's rule model tested against real invoices instead of imagined ones. **Everything below is a count, not a guess.**
+
+No invoice contents are reproduced here — supplier names and layout shapes only. Amounts, references, account numbers and addresses stay out of version control on purpose.
+
+#### What was scanned
+
+| | |
+| --- | --- |
+| In-scope mbox files walked | **505** (Trash / Junk / Deleted / Sent / Drafts excluded per Q4.8) |
+| Messages whose headers were parsed | **234,446** |
+| Invoice-like candidates (subject or sender) | **1,199** |
+| PDF attachments extracted and read | **644** |
+| Suppliers appearing more than twice | **~30** |
+
+The header pass over 234,446 messages ran in minutes on a cold cache, which is the first practical confirmation that Q1.9's immediate-rescan and Q4.10's watermarks are on solid ground: **skipping on headers is cheap, and opening bodies is what costs.**
+
+#### Finding 1 — the data is in the PDF, and almost never in the body
+
+This inverts an assumption §3.7 was written on. Per document that contained readable text:
+
+| Field found by any label rule | In PDF attachments (n=558) | In email bodies (n=1,164) |
+| --- | --- | --- |
+| Invoice reference | **91%** | 8% |
+| Amount | 77% | 8% |
+| Due date | 22% | 2% |
+
+**The body is not a secondary source, it is a rounding error.** Of the four `DocumentPart` values in §3.7, `Attachment Pdf` does essentially all the work. The two largest suppliers by volume both send a body that says, in full, some variant of *"attached is your invoice"*.
+
+`.pdf` is also effectively the only attachment format that matters: **644 PDFs, 114 `.xlsx`, 1 `.docx`, 0 legacy `.doc`**. Q1.12 chose `.docx`-only and the mailbox says even that is close to dead — while spreadsheets, which no reader is planned for, outnumber Word documents 114 to 1. None of the `.xlsx` files sampled were invoices (they are property-management statements), so this is not a call to build a fourth reader; it is a reason to make the unsupported-format problem row from Q1.12 say *which* format, so the question can be answered from data later.
+
+#### Finding 2 — PDF text extraction works, and needs no OCR
+
+| | |
+| --- | --- |
+| PDFs with an extractable text layer | **610 / 644 — 94.7%** |
+| PDFs with no text layer (scanned images) | **10 — 1.6%** |
+| PDFs that failed to open at all | **24 — 3.7%** |
+| Single-page | 441 · two-page 150 · three or more 51 |
+
+**No OCR is required**, which removes the largest cost risk in the extraction path. The 34 unreadable PDFs are a `ScanProblem` row each (Q1.5), not a reason to add Tesseract.
+
+#### Finding 3 — the due date is the binding constraint, and it is worse than expected
+
+Across the 558 PDFs with readable text, testing every label variant for each field:
+
+| Field | Found |
+| --- | --- |
+| Invoice reference | 75% |
+| Amount | 76% |
+| Issue / invoice date | 48% |
+| **Due date** | **19%** |
+| Reference **and** amount | 69% |
+| **All three, including a due date** | **12%** |
+| Reference, amount, and *any* date | 39% |
+
+**Only about one invoice in eight states a due date.** Q2.1 puts an all-day event on the due date and Q1.10 stores a due-date-less invoice as *not uploadable* — so on this mailbox, as specified, roughly seven invoices in eight would arrive in the ledger greyed out and the calendar would stay nearly empty. That is not a defect in the design; it is what the source data contains, and it is much better known now than after change #7.
+
+**The fix is one rule kind.** 48% of documents carry an issue or invoice date, and payment terms are a property of the supplier rather than of the document. Deriving the due date from the issue date plus the supplier's terms lifts complete coverage from **12% to 39%** — a 3.2× improvement for one rule and one number per supplier. It is the single highest-value change this scan suggests.
+
+#### Finding 4 — normalization is mandatory, and its absence is invisible
+
+Three separate ways the text arrives unusable, each of which silently produces "rule matched nothing" rather than an error:
+
+1. **Non-breaking spaces.** The largest supplier's PDF renders as `Invoice\u00a0Number:\u00a07422`. A rule written as `AfterLabel "Invoice Number:"` never matches, and nothing on screen explains why.
+2. **Hard-wrapped labels.** One utility's email wraps `Invoice number` across two lines and splits the value across two more — in *both* the plain-text and HTML alternatives, because the wrapping is in the source. Label-anchored rules cannot see a label that is not on one line.
+3. **Letter-spaced headings.** PDF text extraction returns `TA X INVOICE` where the document shows `TAX INVOICE`, because the letters are individually positioned.
+
+So the rule engine needs a **defined normalization contract, applied before any rule runs** and identical at authoring time and scan time:
+
+- Unicode NFKC, then fold `U+00A0`, `U+2007`, `U+202F` and friends to a plain space.
+- Collapse runs of spaces and tabs; strip leading and trailing space per line.
+- Join a wrapped continuation line to its predecessor **within a block**, where a block is a table cell or paragraph — never across blocks, or `LinesAfterLabel` loses the structure it depends on.
+- Drop empty lines before applying line offsets, so `LinesAfterLabel(label, 1)` means "the next line with content".
+
+Nothing in §3.7 said any of this, and every one of the three would have produced a template that worked in the test panel and failed in production, or vice versa.
+
+#### Finding 5 — Q1.13's "prefer text/plain" is wrong for this mail
+
+589 of 1,199 candidates carry both a `text/plain` and a `text/html` alternative. Where the body matters at all, the HTML is the **better** source, because the table structure keeps a label and its value adjacent while the plain-text alternative has already thrown that away by wrapping. Given Finding 1 this affects few invoices, so it is a correction rather than a crisis — but the reasoning behind Q1.13's default does not survive contact with the data, and the answer should be "prefer whichever alternative preserves block structure", which in practice means HTML.
+
+---
+
+### 3.11 The rule set
+
+The deliverable: what §3.10's measurements say the template DSL should be. Changes from §3.7 are marked.
+
+#### Kept, and validated by the data
+
+| Rule | Evidence |
+| --- | --- |
+| `LinesAfterLabel of label * offset` | **The dominant kind.** Yarra Valley Water, Xero and OC Energy all print the label on its own line with the value beneath. Offset is almost always 1 |
+| `AfterLabel of label` | IODM's whole invoice is `Label: value`; Xero uses it for the due date in the same document where the reference is label-above-value |
+| `RegexCapture of pattern` | Earns its place as the escape hatch — one supplier's body is a single sentence carrying both reference and amount, which no label rule can decompose |
+| `FixedValue` | 96% of documents carry `$` and every one sampled is AUD. Currency as a fixed value per supplier is right, confirming Q7.6.8 |
+
+**A template must allow a different rule kind per field.** Xero proves it: label-above-value for the reference and inline `Label: value` for the due date, in one document. §3.7 already models this correctly — each `TemplateFieldRule` carries its own `Rule` — so nothing changes, but it is now a requirement rather than an accident.
+
+#### Added, each for a measured reason
+
+```fsharp
+type FieldRule =
+    | AfterLabel        of label: string
+    | LinesAfterLabel   of label: string * offset: int
+    | RegexCapture      of pattern: string
+    | FixedValue        of string
+    // added after measuring the real mailbox:
+    | SubjectCapture    of pattern: string          // the reference is in the Subject
+    | AttachmentName    of pattern: string          // ...or in the attachment filename
+    | DateFromField     of source: TargetField * addDays: int
+```
+
+- **`SubjectCapture`** — **209 of 1,199 candidates (17%) carry the invoice reference in the subject line**, and §3.7 had no way to read it. One supplier's subject states the reference explicitly while its PDF states it only in a table.
+- **`AttachmentName`** — the largest supplier by volume names every attachment for its invoice number and nothing else; a utility names the file with the same reference its PDF prints. This is the most reliable single field source found in the whole scan, and it costs nothing to read.
+- **`DateFromField`** — the 12% → 39% rule from Finding 3. `DateFromField (IssueDate, 30)` means *due thirty days after the issue date this template already extracted*. It needs `IssueDate` added to `TargetField`, which is worth having regardless: 48% of documents state one.
+
+`TargetField` becomes `Reference | Amount | Currency | IssueDate | DueDate`.
+
+#### Two hazards the DSL must handle, not the template author
+
+1. **Ambiguous numeric dates.** 26% of dates are `d/m/yyyy` and 5% are `d/m/yy`. On Australian mail `02/08/2016` is 2 August; read as US month-first it becomes 8 February — **a six-month error that silently lands an event on the wrong day**. `ParseHint.AsDate` must therefore take an explicit format string and never fall back to `DateTime.Parse` with ambient culture. Dominant formats, in order: `d MMM yyyy` (63%), `d/M/yyyy` (26%), `d/M/yy` (5%), `MMM d, yyyy` (3%).
+2. **References printed with grouping spaces.** One utility prints its invoice number in three space-separated groups while naming the attachment with the same digits unspaced. Under Q5.8 those are two different natural keys for one invoice, so **`InvoiceReference.create` must normalize internal whitespace** — otherwise the same invoice read from the PDF and from the filename produces two ledger rows and two calendar events.
+
+#### Worked templates
+
+Shapes only, values redacted. These are the four suppliers whose layouts proved consistent across every sample:
+
+| Supplier | Part | Reference | Amount | Dates |
+| --- | --- | --- | --- | --- |
+| Invoice-management platform (271 msgs) | `Attachment Pdf` | `AfterLabel "Invoice Number:"` — or `AttachmentName "^(\d+)\.pdf$"`, which is equally reliable and cheaper | `LinesAfterLabel ("Total", 1)` | `AfterLabel "Date:"` as **issue** date; no due date is ever printed, so `DateFromField (IssueDate, terms)` |
+| Water utility (52 msgs) | `Attachment Pdf` | `LinesAfterLabel ("Invoice number", 1)` | `LinesAfterLabel ("Amount due", 1)` | `LinesAfterLabel ("Due date", 1)`, **and a second template** using `"Direct debit"` |
+| Accounting-platform invoices (15 msgs) | `Attachment Pdf` | `LinesAfterLabel ("Invoice Number", 1)`, or `SubjectCapture` | `LinesAfterLabel ("Amount AUD", 1)` | `AfterLabel "Due Date"` inline; `LinesAfterLabel ("Invoice Date", 1)` |
+| Embedded-network energy retailer (15 msgs) | `Attachment Pdf` | `LinesAfterLabel ("Invoice Number", 1)` | `LinesAfterLabel ("Total Amount Due", 1)` | `LinesAfterLabel ("Due Date", 1)` and `"Date of Issue"` |
+
+**The water utility needs two templates for one supplier** — direct-debit customers get a `Direct debit` label where everyone else gets `Due date`. That settles Q7.6.3 with evidence rather than preference: a supplier owns an *ordered list* of templates, tried until one yields every required field.
+
+#### Where the rule set fails, and what it costs
+
+**Multi-column layouts defeat every line-based rule.** One strata notice interleaves two columns in PDF reading order, so the line after `Total Amount` is a date and the line after `Due Date` is money. No `LinesAfterLabel` can be written for it, and its consistency across samples was 2 in 11 — noise.
+
+This is the case for coordinates, and **it is the first real justification for the `Word { Text; Bottom; Left }` type that `ReadDocumentContent` already returns** (§3.2). Q1.11 kept that type on the grounds that something might need layout; something does. A future `SameRowAsLabel of label` rule — take the words whose vertical position matches the label's and whose horizontal position is to its right — would handle column layouts, and it is the only rule kind here that cannot be written against plain text.
+
+**It is not proposed for the first version.** One supplier in the sample needs it, the existing four kinds plus the three additions cover the rest, and a coordinate rule is materially harder to explain in an editor. It is recorded as the known next rule kind, with a concrete case waiting for it.
+
+Two other categories that look like invoices and are not: **council rates receipts** and **property-management owner statements**. Both parse cleanly and neither carries an invoice reference or a due date, because both are records of money already moved. They are the strongest argument for Q1.5's problem list being visible: the honest answer for these is *"matched a supplier, produced no invoice"*, repeated monthly, and you want to see that and mark it deliberate rather than wonder why nothing appeared.
 ---
 
 ## 4. Proposed change breakdown
@@ -543,6 +694,8 @@ These are real, and each needs a decision — they are not blockers, but pretend
 17. **Seeding rows from a migration is a new precedent in this repo.** Every migration so far creates schema and nothing else. The five default windows have to come from somewhere, and the alternatives are worse: `Startup.fs` checking on each launch whether it ought to write five rows is runtime schema management by another name, and hard-coding them in the component is the thing this whole change is undoing. `Insert.IntoTable` in `Up`, matching `Delete.FromTable` in `Down` — but say plainly in change #4 that the file now carries data as well as structure, because the next person will copy whichever migration they open first.
 18. **Q2.6 makes the sync destructive, and that is a different class of risk from everything else in this proposal.** Until now the worst this feature could do was write a wrong row to a database it owns, or leave a duplicate calendar event you delete by hand. With `DeleteCalendarEvent` bound, a defect in a *pure* function can remove entries from a calendar the app neither owns nor can restore. Two hazards, both cheap to guard and both unrecoverable if missed: **(a)** deletion driven by *window* absence rather than *ledger* absence — narrowing the picker from 180 days to 7 must never read as "173 days of invoices disappeared"; **(b)** deletion driven by a failed read — if `ListCalendarEvents` comes back empty because a token expired, an unguarded diff concludes every event is missing and its mirror image concludes every invoice is orphaned. **A read failure must abort the plan, never produce one.** Worth a confirmation on any plan containing deletes, at least until change #7 has been used in anger a few times.
 
+19. **On your real mail, only about one invoice in eight states a due date (§3.10).** Every calendar decision in this proposal — Q2.1's all-day event, Q1.10's not-uploadable state, the whole of change #7 — rests on a field that 19% of your invoice PDFs actually contain. Adding `DateFromField (IssueDate, terms)` lifts complete extraction from 12% to 39%, which makes it the highest-value single addition the measurement found; without it, change #7 ships a calendar that stays mostly empty and a ledger that is mostly greyed out. This is not a design fault — it is what the source documents contain — but it should be a known number before #7 is built, not a surprise after.
+
 ---
 
 ## 6. What would be true when it's done
@@ -559,7 +712,9 @@ These are real, and each needs a decision — they are not blockers, but pretend
 - No workflow reads the clock directly; every cutoff test pins a fixed instant and asserts an exact date. The same window scanned twice in one day produces the same cutoff both times.
 - **Adding a supplier and teaching the app to read its invoices is done entirely on screen** — no rebuild, no F# change, no restart. That is the whole point of ask #6, and it is the acceptance test for it.
 - Suppliers, templates and invoices live in the main SQLite database, with the schema built **only** by FluentMigrator — no DDL in a store function, a test, or a SQLite tool.
-- A template carrying a pathological regex fails *that rule* with a named error inside its timeout, and the scan finishes. It does not hang the page.
+- A template carrying a pathological regex fails *that rule* with a named error inside its timeout, and the scan finishes.
+- **The four worked templates in §3.10 are in the test suite as fixtures**, each asserting every field it claims to extract. They are the only extraction tests in this build written against layouts that demonstrably exist.
+- Normalization is applied identically at authoring time and at scan time, and there is a test proving a non-breaking space, a hard-wrapped label and a blank line between label and value all still match. Each of those was found in the real mailbox and each fails silently without it. It does not hang the page.
 - `MyDogsbody.Domain` still names no Thunderbird, Google, LiteDB, SQLite, MIME or PDF type — the ledger got bigger, the centre did not get less pure.
 - **A scan completes with Thunderbird open**, against both an mbox account and a maildir one, without Thunderbird noticing and without corrupting anything. Reading a live 16 GB mail store is the one operation here that could damage data that isn't ours, so it is read-only by construction — opened for read with `FileShare.ReadWrite`, never copied, never written — and tested that way.
 - **The accounts page lists exactly the 10 accounts `prefs.js` declares** for the profile in §3.8 — not the 15 directories under `ImapMail/`, and not the six orphans left by deleted accounts. That number is the acceptance test for discovery.
@@ -604,24 +759,24 @@ Nothing open. Q5.14 — the hole between "you may delete an invoice" and "the sc
 
 ### 7.6 Templates — the only set left, blocking change #2
 
-This is the part with no precedent in the codebase, and the answers decide how big change #2 is. It is also, now, the whole of what is unanswered.
+This is the part with no precedent in the codebase, and the answers decide how big change #2 is. It is also, now, the whole of what is unanswered — but **§3.10 has since measured the rule model against 1,199 real candidate messages, so most of these are no longer judgement calls.** Each below now cites what the mailbox actually showed.
 
 - **Q7.6.1 — Which rule kinds does the first version need?** §3.7 proposes four: `AfterLabel`, `LinesAfterLabel`, `RegexCapture`, `FixedValue`. Every kind is an editor to build and a concept to learn, so fewer is genuinely better if it covers your suppliers.
-  *Default:* all four. `AfterLabel` will do most of the work, `RegexCapture` is the escape hatch for when it doesn't.
+  *Measured (§3.10):* all four are used, but the ranking was wrong — **`LinesAfterLabel` is the dominant kind**, not `AfterLabel`, because most invoice PDFs print the label above the value rather than beside it. And four is not enough: `SubjectCapture`, `AttachmentName` and `DateFromField` each earn their place on measured evidence, the last of them tripling complete-invoice coverage. *Recommendation:* the seven in §3.11.
 - **Q7.6.2 — Do you want raw regex on the page at all?** It is the most powerful option and the one most likely to hang a scan or fail silently against a layout change. Labels only would be safer, simpler and less capable.
-  *Default:* keep regex, with the mandatory match timeout from §3.7. You're the only user, and the escape hatch is worth more than the protection.
+  *Measured (§3.10):* it is used exactly once in the sample — a supplier whose body is a single sentence carrying both reference and amount — and nothing else needed it. *Recommendation:* keep it with the mandatory match timeout, but it is genuinely an escape hatch rather than a workhorse, so it can be the last editor built.
 - **Q7.6.3 — A supplier has several templates. How is the right one chosen?** By document part (body vs PDF), by explicit priority order, or "try each until one yields every required field"?
-  *Default:* filter by document part, then try in the user's order, first complete match wins — and record which template produced each invoice so a wrong answer is diagnosable.
+  *Measured (§3.10):* **this is settled by data, not preference.** One water utility labels the same field `Due date` for most customers and `Direct debit` for direct-debit ones — one supplier, two layouts, both live in your mailbox. *Recommendation:* as proposed — filter by document part, try in the user's order, first complete match wins, and record which template produced each invoice.
 - **Q7.6.4 — Two suppliers match the same message. Then what?** An error on that message, or first-match-wins by an order you control?
   *Default:* treat it as an error against that message and show it in the table. Silently picking one is how you get a month of invoices filed under the wrong supplier.
 - **Q7.6.5 — How is a supplier matched?** Sender address, sender domain, or subject pattern — and may a supplier hold several matchers?
   *Default:* all three kinds, several per supplier, matching on any. Sender domain will be the one you actually use.
 - **Q7.6.6 — Is the "test against a message" panel in scope for change #2?** §3.7 argues it is close to essential — editing extraction rules against text you cannot see is guesswork. It is also perhaps a third of the page's work.
-  *Default:* yes, in scope. It's the difference between a feature you can use and one you fight.
+  *Measured (§3.10):* stronger than "in scope" — three of the failure modes found (non-breaking spaces, hard-wrapped labels, letter-spaced headings) produce **silent** non-matches that are indistinguishable from "this supplier sends nothing". Without a panel showing what each rule extracted, they are undiagnosable. *Recommendation:* yes, in scope, and it must display the text **after** normalization, because that is the text the rules actually see.
 - **Q7.6.7 — When a template changes, what happens to invoices it already produced?** Leave them, re-extract them on the next scan, or offer a "reprocess this supplier" button?
   *Default:* leave stored invoices alone; the next scan of a window covering them updates them via the Q5.8 key. A reprocess button is a good follow-up, not a first-pass necessity.
 - **Q7.6.8 — Currency: per supplier, or extracted per invoice?** A supplier almost always bills in one currency, and extracting it is one more rule to get wrong.
-  *Default:* a fixed value on the template (`FixedValue`), overridable by a rule if a supplier ever needs it.
+  *Measured (§3.10):* 96% of documents carry `$` and every one sampled is AUD. *Recommendation:* as proposed — `FixedValue` per template, overridable by a rule. Nothing in the sample needs the override.
 
 ---
 
@@ -643,11 +798,18 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ### The one thing left
 
-**§7.6 is now the entire remaining question set, and change #2 is the largest and least precedented piece of the build.** It is also the only part of this proposal with nothing like §3.8's measurement behind it — and §3.8 is where two of my confident defaults turned out to be wrong.
+**§7.6 is the entire remaining question set — but it is no longer the unmeasured one.** §3.10 ran the exercise this section kept recommending, against 1,199 real candidate messages and 644 PDFs rather than the two invoices originally suggested. Four of the eight questions now carry measured answers instead of preferences, and the rule model came back changed:
 
-The fastest way to de-risk it has not changed, and it does not require writing any code: **take two real invoices from two different suppliers and check whether `AfterLabel`, `LinesAfterLabel`, `RegexCapture` and `FixedValue` can actually locate the reference, the amount, the currency and the due date in each.** If they can, §3.7 is sound and the eight questions are mostly about scope. If they can't, better to find out now than after the rule editor is built — that is the same lesson §3.8 already paid for once.
+- **The rule kinds were ranked wrong.** `LinesAfterLabel` does most of the work, not `AfterLabel`.
+- **Four kinds were not enough.** `SubjectCapture`, `AttachmentName` and `DateFromField` each earned a place on evidence.
+- **Normalization was missing entirely**, and its absence fails silently — a non-breaking space is enough to make a correct-looking rule never match.
+- **The email body is a rounding error.** 91% of references are in the PDF, 8% in the body.
+
+**The number that should shape the decision: only 12% of your invoice PDFs carry a reference, an amount *and* a due date.** With `DateFromField` that becomes 39%. §5.19 states what this means for change #7.
 
 ### What this round produced besides answers
+
+**§3.10 is the second measured section in this document, and like §3.8 it overturned things I was confident about** — the rule ranking, the value of the body, and the absence of any normalization step. That is now twice that measuring beat reasoning, on the two parts of the build that carry the most risk.
 
 Three holes that no single answer revealed, each one sitting between two separately reasonable decisions:
 
