@@ -37,6 +37,10 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q4.6 / Q4.7** — how accounts are found, and may we read in place | **Settled by measuring the real profile** — see §3.8 | `prefs.js` is the mechanism, not a fallback; and at **16 GB**, copy-then-parse is impossible. Both were guesses before; neither is now |
 | **Q4.8–Q4.11** — folders scanned, duplicates, incremental scanning, maildir | **All four as proposed** | Scan excludes Trash/Deleted/Junk/Sent/Drafts (6.2 GB, not 15.2); duplicate profiles listed qualified by path; per-folder watermarks with a full-rescan escape; maildir built against synthetic fixtures only. **§7.4 is now fully resolved** |
 | **Thunderbird data retrieval** | **It is an Integration** | The mirror of the invoice/supplier rule. Accounts, folder lists, watermarks and the chosen root folder are Thunderbird's own facts, in Thunderbird's own store — never in the main database. §3.3 |
+| **Q5.7** — do invoices really persist | **Yes.** The ledger is real | Confirms the reading §1.1 was built on. **Change #1 is unblocked** |
+| **Q5.8** — what makes two scans agree | **Supplier + invoice reference** as the natural key, `SourceMessageId` for traceability, unique index in the migration | Rescanning an overlapping window updates rather than duplicates, and the database refuses a duplicate even if the code is wrong |
+| **Q5.9** — where SQLite store functions live | **In `MyDogsbody.Database`**, which gains a `ProjectReference` to `MyDogsbody.Domain` | No new project. Outer-ring shape preserved: `handleError`, `Result<_, MyDogsbodyException>`, one `ActionNames` entry per function |
+| **Q5.2 / Q5.3 / Q5.5** — testing and housekeeping | All as proposed | Google contract suites run against fakes + stubbed HTTP with live verification recorded as manual; synthetic mbox and invoice fixtures committed; `GoogleCalendarCRUD` deleted in change #6 |
 | **Q5.1** — which storage tier | **Invoices are MyDogsbody items, not Integration items.** So are **suppliers** | The main SQLite database stops being theoretical: suppliers, templates and invoices all persist there, behind FluentMigrator migrations. §3.6 |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
@@ -52,7 +56,7 @@ Invoices and suppliers are the application's own concepts with their own lifecyc
 - Reading a PDF is still an *integration* — it's an adapter for a capability the domain declares. Don't read this as moving `PdfDocumentReader` inward; the reading is infrastructure, the invoice is not.
 - **Thunderbird data retrieval is an Integration, explicitly** — the mirror image of the rule above, and the two together draw the line cleanly. A Thunderbird *account* is not a MyDogsbody item: it is a fact about someone else's mail client, discovered by reading their files, meaningless if you uninstall Thunderbird. An *invoice* extracted from it is a MyDogsbody item and survives. So `Integrations.Thunderbird` owns the root folder, the discovered accounts, the folder lists and the scan watermarks, in its own LiteDB — and **none of those go anywhere near the main SQLite database**, which holds only suppliers, templates and invoices.
 
-The one place this may overshoot is **persistence**. If you meant only "the concept belongs to the domain", and you're happy for the table to be a live view of your mailbox recomputed on each scan and stored nowhere, say so — it is a materially smaller build. Note that templates push hard the other way: a template you typed has to be saved somewhere regardless, so at least part of the ledger is now unavoidable. See **Q5.7**.
+**Persistence is confirmed** (Q5.7): the ledger is real, and an invoice is a stored fact rather than a view recomputed from your mailbox. Everything in §3.6 follows from that, and it is what makes the 16 GB measured in §3.8 tolerable — you read mail once and keep what you found, rather than re-deriving it on every glance.
 
 ---
 
@@ -282,7 +286,9 @@ The scan-window picker is six fixed choices, so a `MudToggleGroup` of six button
 
 The last table is the one worth arguing about. A sync record is a fact about *an invoice*, so it belongs on this side rather than in the Google integration's store — but it also means the app has an opinion about what's on a calendar that can go stale if you delete an event by hand. **The calendar remains the source of truth for the diff** (Q2.4's extended-property query), and this table is history: what we uploaded, when, to which account. Don't let it become the answer to "is it there?".
 
-**Where the store functions live** is a genuine choice — see Q5.9. Recommendation: `MyDogsbody.Database` gains `SupplierStore.fs`, `TemplateStore.fs`, `InvoiceStore.fs` and their record ⇄ domain mappers, plus a `ProjectReference` to `MyDogsbody.Domain`. It's outer-ring code either way, so it keeps the outer-ring shape: dependencies first, input last, `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames` entry per function.
+**The store functions live in `MyDogsbody.Database`** (Q5.9): it gains `SupplierStore.fs`, `TemplateStore.fs`, `InvoiceStore.fs` and their record ⇄ domain mappers, plus a `ProjectReference` to `MyDogsbody.Domain`. No new project. It is outer-ring code, so it keeps the outer-ring shape: dependencies first, input last, `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames` entry per function.
+
+**`Invoices` carries a unique index on (supplier id, invoice reference)** (Q5.8). That pair is the natural key, so a rescan of an overlapping window updates rather than duplicates, and the database refuses a duplicate even when the code is wrong. `SourceMessageId` rides along for traceability but is not the key — one message can carry more than one invoice.
 
 **The mapper count does not go up.** Still exactly two hops per feature: SQLite record ⇄ domain at the bottom, domain ⇄ UI record at the top. If a third record with the same fields appears, something has gone wrong.
 
@@ -467,15 +473,15 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **45 questions**, of which §7.6 and Q5.7 are the two sets standing between here and a first `requirements.md`. **§7.4 is empty** — Thunderbird is fully specified. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **40 questions**. **§7.4 is empty** and §7.5 no longer blocks anything, so **changes #1 and #3 can both be specified today** — see §8. §7.6 is the set that still gates the largest piece of the build. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
 | §7.1 | what an invoice is, the scan window, document formats | 4 |
 | §7.2 | what lands on the calendar | 7 |
 | §7.3 | Google accounts (Q3.1–Q3.6) and the credentials removal (Q3.7–Q3.10) | 6, and **5** |
-| ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ ready to specify |
-| §7.5 | storage, testing, process | 1 (via Q5.7, Q5.9) |
+| ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ **ready to specify** |
+| §7.5 | what's left is housekeeping — nothing blocks a change | — (#1 **ready to specify**) |
 | **§7.6** | **templates — the new set** | **2** |
 
 ### 7.1 What an invoice *is*, and how far back to look — blocking
@@ -561,26 +567,16 @@ Nothing open. All eleven questions are answered, the plan is measured against th
 
 ### 7.5 Storage and process — decide during design
 
-- **Q5.2 — Do you accept the contract-test compromise in §5.2** (fakes + stubbed HTTP, with live Google verified manually and recorded as such)?
-  *Default:* yes.
-- **Q5.3 — Test fixtures:** may sample Thunderbird mbox files and sample invoice PDFs be committed to the repo for tests? They'd need anonymising.
-  *Default:* yes, hand-built synthetic ones rather than real mail.
 - **Q5.4 — Does the seven-change breakdown in §4 suit you?** It grew from four as a direct result of the §1.1 answers. If it feels like too much ceremony, the honest minimum is four: foundation+templates, extraction, the credentials refactor, sync.
   *Default:* seven, in the order given, starting with `invoice-ledger-foundation`.
-- **Q5.5 — Should `GoogleCalendarCRUD` be deleted** once `Integrations.Google` does the same work for real?
-  *Default:* delete it in change #6, the way `Spine` was deleted when it was superseded.
 - **Q5.6 — Encryption at rest for OAuth tokens (§5.5)** — in scope now, or explicitly deferred?
   *Default:* deferred, and noted in the change description so it isn't forgotten.
-- **Q5.7 — Confirming the inference: do invoices actually persist?** §1.1 reads "invoices are MyDogsbody items" as *stored* — a ledger you accumulate, surviving a switch of mail account. The alternative reading is that the concept merely belongs to the domain, and the table is a live view of your mailbox recomputed on each scan and stored nowhere. The second is a materially smaller build; it also means an invoice you already uploaded vanishes from view the moment it falls outside the window (Q2.9).
-  *Default:* they persist. It is the reading that makes "MyDogsbody item" mean something distinct from "domain type", and templates already force a store to exist regardless.
-- **Q5.8 — What makes two scans agree they found the same invoice?** Rescanning an overlapping window has to update rather than duplicate. Candidate keys: source message id (breaks when one mail carries two invoices), supplier + invoice reference (breaks if a supplier reuses numbers across years), or both together.
-  *Default:* supplier + invoice reference as the natural key, source message id stored for traceability, and a unique index in the migration so the database refuses a duplicate even when the code is wrong.
-- **Q5.9 — Where do the SQLite store functions live?** In `MyDogsbody.Database` alongside the context — which then needs a `ProjectReference` to `MyDogsbody.Domain` — or in a new outer-ring project referencing both?
-  *Default:* in `MyDogsbody.Database`. It is already the main-database tier, the reference points inward so it breaks no rule, and a separate project per store is more ceremony than this earns.
 - **Q5.10 — Do templates need export/import?** They will represent real effort to get right, and they'd currently live only in a SQLite file in `bin\Debug\net9.0\`. A JSON export would make them backup-able and reproducible after a clean rebuild.
   *Default:* not in the first pass, but keep the template model serialisable so adding it later is a page, not a redesign. Worth saying out loud that a `dotnet clean` should never be able to destroy a morning's template work.
 - **Q5.11 — How much provenance does an invoice keep, now that its source is an Integration?** `SourceMessageId` is already on the invoice — a Thunderbird-shaped fact sitting on a MyDogsbody item. Should the invoice also record the account and folder it came from, which would help answer "why did this appear?", or is that leaking integration vocabulary into the ledger?
   *Default:* keep `SourceMessageId`, add nothing else. A message id is a standard identifier that still means something outside Thunderbird; account and folder names are that client's vocabulary and stop making sense the moment mail is moved or the client changes. If a diagnostic view wants more, the Thunderbird integration can answer from the message id.
+- **Q5.12 — Can an invoice be corrected or deleted by hand?** Opened by Q5.7: now that the ledger is real, a mis-parsed amount is a stored wrong number rather than a transient display glitch. Is the only recourse to fix the template and rescan, or can you edit the row? And can you delete an invoice that was never really one?
+  *Default:* delete yes, edit no — with a caveat. Deleting is needed because a bad template will produce junk rows before you get it right. Editing is the trap: a hand-corrected value would be silently overwritten by the next rescan under the Q5.8 key, which is worse than not offering it. If editing is wanted, it needs an "edited by hand, don't overwrite" flag on the row, and that is a real design addition rather than a checkbox.
 
 ### 7.6 Templates — the new question set, blocking for change #2
 
@@ -607,20 +603,22 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-§1.1 has closed twenty-two questions and opened thirty-three — 34 open before, 45 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those thirty-two would otherwise have surfaced mid-implementation, when they cost more.
+§1.1 has closed twenty-eight questions and opened thirty-four — 34 open before, 40 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those thirty-two would otherwise have surfaced mid-implementation, when they cost more.
 
 **§3.8 is the part of this document I trust most**, because it is the only part measured rather than reasoned. Two of my defaults were wrong — structural account detection and copy-then-parse — and both would have survived into code. It is worth doing the equivalent for the templates in §3.7 before change #2: two real invoices from two real suppliers, checked against the four rule kinds.
 
-**Change #3 is ready now, with nothing left to ask.** §7.4 is empty and §3.8 is measured against your actual profile, so `docs/changes/thunderbird-account-selection/requirements.md` can be written today. It is also the change that produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
+**Two changes are ready now, with nothing left to ask of either:**
 
-**Two more starting points, each one question away:**
+- **Change #1, `invoice-ledger-foundation`.** Q5.7, Q5.8 and Q5.9 were the last blockers and all three are settled. It is small, has no external dependency, and it proves the main SQLite database, its migrations and its store shape — which every later change leans on. **Start here.**
+- **Change #3, `thunderbird-account-selection`.** §7.4 is empty and §3.8 is measured against your actual profile. It is also the change that produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
 
-- **Q5.7 → change #1.** Confirm invoices really persist and `invoice-ledger-foundation` can be specified. Small, no external dependency, and it proves the main SQLite database, its migrations and its store shape — which everything else leans on.
-- **Q3.7–Q3.10 → change #5.** The credentials refactor depends on nothing and blocks the Google work. It is also the only change that makes the codebase *smaller*, so it is a good one to have behind you.
+They are independent, so either order works, or both.
+
+**One more a question away:** Q3.7–Q3.10 → **change #5**, the credentials refactor. It depends on nothing and blocks the Google work, and it is the only change here that makes the codebase *smaller* — a good one to have behind you.
 
 **§7.6 is the one to think hardest about.** It decides change #2, which is the largest and least precedented piece of the build, and no amount of design work elsewhere will de-risk it. If you want to sanity-check the template model before committing to it, the fastest test is to take two real invoices from two different suppliers and check whether the four rule kinds in §3.7 can actually locate every field.
 
-The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6. Everything in §7.5 apart from Q5.7 can be settled during design.
+The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6. §7.5 is down to housekeeping and blocks nothing.
 
 **One question worth answering early even though it blocks nothing yet: Q4.8.** Which folders get scanned decides whether change #4 reads 6.2 GB or 15.2 GB, and that single choice has more effect on how the app feels than anything else in this proposal.
 
