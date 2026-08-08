@@ -1,7 +1,7 @@
 # Pre-proposal — Invoices from Thunderbird to Google Calendar
 
-**Status:** pre-proposal. Not a change folder yet — no `requirements.md` exists, and none should be written until the blocking questions in §7 are answered.
-**Date:** 2026-08-08
+**Status:** pre-proposal, and **fully answered — §7 is empty.** Every question this document raised has been decided, the rule model has been measured against the real mailbox (§3.10, §3.11), and **all seven changes in §4 can now be specified.** The next artefact is a `requirements.md` in a change folder of its own, not another revision of this file.
+**Date:** 2026-08-08, last measured and revised 2026-08-09
 
 ---
 
@@ -77,6 +77,14 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q2.13** — what makes an event eligible for deletion | **The invoice left the ledger**, and the delete happens **on the next sync**, visible in the plan before you press it | Deleting a row in one app does not silently reach into another. A plan you can see before it runs is the difference between trusting this feature with delete permission and not |
 | **Q2.14** — does a sync overwrite a hand-edited event | **Yes — the event is app-owned and always wins.** Title and date are rewritten | The honest cost of Q2.6: Q2.4 chose the extended property so a rename would not cause a duplicate, and it now also means a rename gets reverted. Justified because a title disagreeing with the ledger is worse than a lost edit — but the page should not pretend otherwise |
 | **Q5.14** — does a hand-deleted invoice stay deleted | **Yes** — a **tombstone** on the natural key, which the scan skips. Visible and reversible | Without it "delete" meant "hide until the next scan", which is the failure mode that ruled out hand-editing in Q5.12. **§7.2 and §7.5 are now empty, and §7.6 is all that remains** |
+| **Q7.6.1** — which rule kinds | **The seven in §3.11**, not the original four | `LinesAfterLabel` is the workhorse; `SubjectCapture`, `AttachmentName` and `DateFromField` were each added on measured evidence. The last of them is what takes complete extraction from 12% to 39% |
+| **Q7.6.2** — raw regex on the page | **Keep it**, with the mandatory match timeout | It fired exactly once in 1,199 candidates, so it is a genuine escape hatch. Its editor is the **last** one built in change #2, not the first |
+| **Q7.6.3** — several templates per supplier | **Filter by document part, try in your order, first complete match wins**, and record which template produced each invoice | Settled by data rather than preference: one water utility labels the same field `Due date` for most customers and `Direct debit` for direct-debit ones |
+| **Q7.6.4** — two suppliers match one message | **An error against that message**, shown in the table | Silently picking one is how a month of invoices ends up filed under the wrong supplier. It lands in `ScanProblems` (Q1.19) like any other cause |
+| **Q7.6.5** — how a supplier is matched | **Sender address, sender domain and subject pattern; several per supplier; matching on any** | Sender domain will do most of the work. The matcher stays on the supplier, not the template — §3.2 |
+| **Q7.6.6** — is the test panel in scope | **Yes**, and it must show the text **after normalization** | Three of the failure modes in §3.10 are silent non-matches indistinguishable from "this supplier sends nothing". The panel has to show the text the rules actually see, or it agrees with a broken template |
+| **Q7.6.7** — a template changes, what happens to invoices it made | **Leave them**; the next scan of a covering window updates them via the Q5.8 key | A reprocess button is a follow-up, and Q1.19 makes it cheap when it comes — the problem rows name exactly which messages to re-read |
+| **Q7.6.8** — currency | **`FixedValue` per template**, overridable by a rule | 96% of documents carry `$` and every one sampled is AUD. Nothing in the sample needs the override. **§7.6 is now empty, and so is §7** |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
 
@@ -154,6 +162,7 @@ Google Calendar ──────┐                       Domain/Calendar  Dif
 - `SupplierId`, `SupplierName` (constrained, non-empty, unique — uniqueness is the store's to enforce and the workflow's to report).
 - `SupplierMatcher` — how a message is recognised as this supplier's. Sender address, sender domain, or a subject pattern; a supplier can hold several, and matching is "any of them".
 - Stage types `UnvalidatedSupplier` → `ValidSupplier` → `StoredSupplier`, and `SupplierError` (`SupplierNameInvalid`, `SupplierNameTaken`, `SupplierNotFound`, `MatcherInvalid`).
+- **`PaymentTermDays`** — how long after issue this supplier's invoices fall due, used by §3.11's `DateFromField` when a document states no due date. A supplier-level fact for the same reason the matcher is one, and the difference between a calendar that gets 12% of your invoices and one that gets 39%.
 - Dependency types: `LoadSuppliers`, `SaveSupplier`, `UpdateSupplier`, `DeleteSupplier`.
 
 Keeping the matcher on the **supplier** rather than on the template is deliberate: "is this mail from Acme?" is a fact about Acme, while a template answers the different question "given it *is* Acme, where are the fields?". Splitting them lets one supplier own several templates — which you will want the first time a supplier changes their invoice layout — without repeating the matching rules in each.
@@ -354,7 +363,7 @@ The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. 
 
 | Table | Holds |
 | --- | --- |
-| `Suppliers` | id, name |
+| `Suppliers` | id, name, payment term days |
 | `SupplierMatchers` | supplier id, kind (sender / domain / subject), value |
 | `InvoiceTemplates` | id, supplier id, name, which document part it applies to, ordering |
 | `TemplateFieldRules` | template id, target field, rule kind, pattern/label, parse hint |
@@ -608,12 +617,14 @@ type FieldRule =
     // added after measuring the real mailbox:
     | SubjectCapture    of pattern: string          // the reference is in the Subject
     | AttachmentName    of pattern: string          // ...or in the attachment filename
-    | DateFromField     of source: TargetField * addDays: int
+    | DateFromField     of source: TargetField      // + the supplier's payment terms
 ```
 
 - **`SubjectCapture`** — **209 of 1,199 candidates (17%) carry the invoice reference in the subject line**, and §3.7 had no way to read it. One supplier's subject states the reference explicitly while its PDF states it only in a table.
 - **`AttachmentName`** — the largest supplier by volume names every attachment for its invoice number and nothing else; a utility names the file with the same reference its PDF prints. This is the most reliable single field source found in the whole scan, and it costs nothing to read.
-- **`DateFromField`** — the 12% → 39% rule from Finding 3. `DateFromField (IssueDate, 30)` means *due thirty days after the issue date this template already extracted*. It needs `IssueDate` added to `TargetField`, which is worth having regardless: 48% of documents state one.
+- **`DateFromField`** — the 12% → 39% rule from Finding 3. `DateFromField IssueDate` means *due this supplier's payment terms after the issue date the template already extracted*. It needs `IssueDate` added to `TargetField`, which is worth having regardless: 48% of documents state one.
+
+  **The term length lives on the supplier, not on the rule** — `StoredSupplier.PaymentTermDays`. "Acme bills net 30" is a fact about Acme in exactly the way "is this mail from Acme?" is, which is the same argument §3.2 already makes for keeping matchers on the supplier. Putting the number on the rule would let one supplier's two templates (Q7.6.3) disagree about when its own invoices fall due.
 
 `TargetField` becomes `Reference | Amount | Currency | IssueDate | DueDate`.
 
@@ -726,7 +737,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **8 questions, all of them in §7.6**, down from 42 at the start of this round. **§7.3 and §7.4 are empty and §7.5 is down to one**, so **four of the seven changes are specifiable** — see §8. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. **Nothing is left: all six sets are resolved**, 42 questions closed across two rounds and every one of them recorded. Numbering is not contiguous; gaps are answered questions, and numbers were never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
@@ -735,7 +746,7 @@ Answer the **blocking** ones before the `requirements.md` for the change they bl
 | ~~§7.3~~ | ~~Google accounts and the credentials removal~~ — **fully resolved** | ~~6, 5~~ |
 | ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ |
 | ~~§7.5~~ | ~~storage and process~~ — **fully resolved** | ~~4~~ |
-| **§7.6** | **templates — the only set left, and the one never yet touched** | **2** |
+| ~~§7.6~~ | ~~templates~~ — **fully resolved**, four of eight from measurement (§3.10) | ~~2~~ |
 
 ### 7.1 What an invoice *is*, and how far back to look — ✅ fully resolved
 
@@ -757,66 +768,44 @@ Nothing open. All eleven questions are answered, the plan is measured against th
 
 Nothing open. Q5.14 — the hole between "you may delete an invoice" and "the scan upserts on a natural key" — is closed with a tombstone, and §3.6 says why that list has to be visible rather than merely present.
 
-### 7.6 Templates — the only set left, blocking change #2
+### 7.6 Templates — ✅ fully resolved
 
-This is the part with no precedent in the codebase, and the answers decide how big change #2 is. It is also, now, the whole of what is unanswered — but **§3.10 has since measured the rule model against 1,199 real candidate messages, so most of these are no longer judgement calls.** Each below now cites what the mailbox actually showed.
+Nothing open. All eight are recorded in §1.1, and four were answered from measurement rather than judgement — §3.10 tested the model against 1,199 real candidate messages and §3.11 is the rule set that came out of it.
 
-- **Q7.6.1 — Which rule kinds does the first version need?** §3.7 proposes four: `AfterLabel`, `LinesAfterLabel`, `RegexCapture`, `FixedValue`. Every kind is an editor to build and a concept to learn, so fewer is genuinely better if it covers your suppliers.
-  *Measured (§3.10):* all four are used, but the ranking was wrong — **`LinesAfterLabel` is the dominant kind**, not `AfterLabel`, because most invoice PDFs print the label above the value rather than beside it. And four is not enough: `SubjectCapture`, `AttachmentName` and `DateFromField` each earn their place on measured evidence, the last of them tripling complete-invoice coverage. *Recommendation:* the seven in §3.11.
-- **Q7.6.2 — Do you want raw regex on the page at all?** It is the most powerful option and the one most likely to hang a scan or fail silently against a layout change. Labels only would be safer, simpler and less capable.
-  *Measured (§3.10):* it is used exactly once in the sample — a supplier whose body is a single sentence carrying both reference and amount — and nothing else needed it. *Recommendation:* keep it with the mandatory match timeout, but it is genuinely an escape hatch rather than a workhorse, so it can be the last editor built.
-- **Q7.6.3 — A supplier has several templates. How is the right one chosen?** By document part (body vs PDF), by explicit priority order, or "try each until one yields every required field"?
-  *Measured (§3.10):* **this is settled by data, not preference.** One water utility labels the same field `Due date` for most customers and `Direct debit` for direct-debit ones — one supplier, two layouts, both live in your mailbox. *Recommendation:* as proposed — filter by document part, try in the user's order, first complete match wins, and record which template produced each invoice.
-- **Q7.6.4 — Two suppliers match the same message. Then what?** An error on that message, or first-match-wins by an order you control?
-  *Default:* treat it as an error against that message and show it in the table. Silently picking one is how you get a month of invoices filed under the wrong supplier.
-- **Q7.6.5 — How is a supplier matched?** Sender address, sender domain, or subject pattern — and may a supplier hold several matchers?
-  *Default:* all three kinds, several per supplier, matching on any. Sender domain will be the one you actually use.
-- **Q7.6.6 — Is the "test against a message" panel in scope for change #2?** §3.7 argues it is close to essential — editing extraction rules against text you cannot see is guesswork. It is also perhaps a third of the page's work.
-  *Measured (§3.10):* stronger than "in scope" — three of the failure modes found (non-breaking spaces, hard-wrapped labels, letter-spaced headings) produce **silent** non-matches that are indistinguishable from "this supplier sends nothing". Without a panel showing what each rule extracted, they are undiagnosable. *Recommendation:* yes, in scope, and it must display the text **after** normalization, because that is the text the rules actually see.
-- **Q7.6.7 — When a template changes, what happens to invoices it already produced?** Leave them, re-extract them on the next scan, or offer a "reprocess this supplier" button?
-  *Default:* leave stored invoices alone; the next scan of a window covering them updates them via the Q5.8 key. A reprocess button is a good follow-up, not a first-pass necessity.
-- **Q7.6.8 — Currency: per supplier, or extracted per invoice?** A supplier almost always bills in one currency, and extracting it is one more rule to get wrong.
-  *Measured (§3.10):* 96% of documents carry `$` and every one sampled is AUD. *Recommendation:* as proposed — `FixedValue` per template, overridable by a rule. Nothing in the sample needs the override.
+The one to carry into change #2: **Q7.6.6's test panel must display the text after normalization.** Three of the failure modes found in your mailbox are silent non-matches, and a panel showing raw text would cheerfully agree with a template that cannot work.
 
 ---
 
 ## 8. Next step
 
-**8 questions remain, down from 42 at the start of this round, and all eight are §7.6.** §7.1 through §7.5 are empty. Every question this document originally asked has been answered, and so has every question those answers opened — **except templates, which have not been touched since they were first written down.**
+**Nothing is open.** 42 questions were answered across this round, every decision is recorded in §1.1, and the two riskiest parts of the build were settled by measuring your actual machine rather than by reasoning: §3.8 against the Thunderbird profile, §3.10 and §3.11 against 1,199 real invoice candidates.
 
-**Six of the seven changes now have no open questions. Only change #2 does, and everything downstream needs it.**
+**All seven changes in §4 can now be specified.** The next artefact is a `requirements.md` in a change folder — not another revision of this file.
 
-### Ready to specify now
+### Where to start
 
-- **Change #1, `invoice-ledger-foundation`.** Small, no external dependency, proves the main SQLite database, its migrations and its store shape. **Start here.**
-- **Change #3, `thunderbird-account-selection`.** §3.8 is measured against your actual profile, and it produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
-- **Change #5, `credentials-per-provider`.** Two projects fewer, one domain area gone, `/settings/credentials` off the nav. Its risk is regression rather than design, so the characterization tests go in first.
-- **Change #6, `google-account-integration`.** Waits only on #5 landing.
-- **Changes #4 and #7** have no open questions either, but cannot be built until #2 and #6 exist. Their requirements could be written today; there is limited value in doing so before §7.6 is settled, because a template model that turns out to be too weak changes what #4 extracts.
+**Change #1, `invoice-ledger-foundation`.** Small, no external dependency, and it proves the main SQLite database, its migrations and its store shape — which every later change leans on and none of them wants to debug. It is also the only change whose scope did not grow during this round.
 
-#1, #3 and #5 are mutually independent, so any order works, or all three.
+#1, #3 and #5 are mutually independent, so any order works. #2 is the largest and now the best understood. #6 waits on #5; #4 on 1/2/3; #7 on 4 and 6.
 
-### The one thing left
+### The three numbers to carry into implementation
 
-**§7.6 is the entire remaining question set — but it is no longer the unmeasured one.** §3.10 ran the exercise this section kept recommending, against 1,199 real candidate messages and 644 PDFs rather than the two invoices originally suggested. Four of the eight questions now carry measured answers instead of preferences, and the rule model came back changed:
+1. **12% → 39%.** Only 12% of your invoice PDFs state a reference, an amount *and* a due date. `DateFromField` plus per-supplier payment terms takes that to 39%. Change #7's value depends on this more than on anything in its own scope — §5.19.
+2. **91% vs 8%.** The invoice fields are in the PDF attachment, essentially never in the email body. Build the PDF path first and treat the body reader as the exception it is.
+3. **16 GB, 6.2 GB in scope.** Reading is in place with `FileShare.ReadWrite`, never copied, and incremental after the first pass. The header-only scan of 234,446 messages was fast; opening bodies is what costs.
 
-- **The rule kinds were ranked wrong.** `LinesAfterLabel` does most of the work, not `AfterLabel`.
-- **Four kinds were not enough.** `SubjectCapture`, `AttachmentName` and `DateFromField` each earned a place on evidence.
-- **Normalization was missing entirely**, and its absence fails silently — a non-breaking space is enough to make a correct-looking rule never match.
-- **The email body is a rounding error.** 91% of references are in the PDF, 8% in the body.
+### What this document got wrong, and how it was caught
 
-**The number that should shape the decision: only 12% of your invoice PDFs carry a reference, an amount *and* a due date.** With `DateFromField` that becomes 39%. §5.19 states what this means for change #7.
+Worth keeping, because it is the argument for measuring before building:
 
-### What this round produced besides answers
+- **§3.8** overturned structural account detection (would have found 15 accounts where 9 exist) and copy-then-parse (impossible at 16 GB).
+- **§3.10** overturned the rule-kind ranking, the value of the email body, the "prefer text/plain" default, and the assumption that no normalization step was needed — that last one silently, since a non-breaking space is enough to make a correct-looking rule never match.
+- **Three holes appeared between separately reasonable answers**, none visible from any single one: a transient problem list emptied by incremental scanning (Q1.19), hand-deleted invoices resurrected by upsert (Q5.14), and a pure diff that could delete calendar entries it did not own (§5.18).
 
-**§3.10 is the second measured section in this document, and like §3.8 it overturned things I was confident about** — the rule ranking, the value of the body, and the absence of any normalization step. That is now twice that measuring beat reasoning, on the two parts of the build that carry the most risk.
+Every one of those would have surfaced during implementation instead.
 
-Three holes that no single answer revealed, each one sitting between two separately reasonable decisions:
+### The one thing still unproven
 
-- **Q1.19** — an incremental scan would have emptied the problem list before you could read it. Closed: problems persist.
-- **Q5.14** — an upsert on a natural key would have resurrected every hand-deleted invoice on the next scan. Closed: tombstones.
-- **§5.18** — update-and-delete turned a pure diff into something that can remove entries from a calendar the app does not own. Not a question but a standing guard: deletion follows *ledger* absence, never *window* absence, and a failed read must abort the plan rather than produce one.
-
-All three would have surfaced during change #4 or #7, after the code was written.
+**No code has been written, and no template has been run by MyDogsbody itself.** §3.11's rule set is derived from real documents and its four worked templates are drawn from layouts that demonstrably exist — but they were exercised by a scratch script, not by `ApplyTemplateWorkflow`. Making those four the first fixtures in change #2's test suite is what closes the gap, and it is the cheapest acceptance test available: the layouts are known, the expected fields are known, and the templates are already written down.
 
 Requirements in EARS notation, agreed before any `design.md`, per CLAUDE.md.
