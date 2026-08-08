@@ -10,7 +10,7 @@
 Six user-facing pieces:
 
 1. **An invoice page** with a table that lists every invoice found in one account of the Thunderbird profile folder, and a button that uploads them to a chosen Google account's calendar.
-2. **A scan window on that page** — a chooser for how far back to scan the invoice source: **1, 2, 3, 4, 6 or 12 months from today**. The table shows what falls inside the chosen window, and changing it rescans.
+2. **A scan window on that page** — a chooser for how far back to scan the invoice source, in **days**: **7, 14, 30, 90 and 180 to begin with, with more addable on a settings page**. **14 days is the default**, and whatever you pick is **saved in the MyDogsbody database** so the page opens on it next time. The table shows what falls inside the chosen window, and changing it rescans.
 3. **A diff in that same table** — for the selected calendar, show which invoices are already on it and which are not.
 4. **A Google accounts page** for registering Google calendar integrations. Many Google accounts can be registered at once.
 5. **A Thunderbird accounts page** that lists the accounts available in the profile folder and lets one be selected for import.
@@ -42,6 +42,8 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q5.9** — where SQLite store functions live | **In `MyDogsbody.Database`**, which gains a `ProjectReference` to `MyDogsbody.Domain` | No new project. Outer-ring shape preserved: `handleError`, `Result<_, MyDogsbodyException>`, one `ActionNames` entry per function |
 | **Q5.2 / Q5.3 / Q5.5** — testing and housekeeping | All as proposed | Google contract suites run against fakes + stubbed HTTP with live verification recorded as manual; synthetic mbox and invoice fixtures committed; `GoogleCalendarCRUD` deleted in change #6 |
 | **Q5.1** — which storage tier | **Invoices are MyDogsbody items, not Integration items.** So are **suppliers** | The main SQLite database stops being theoretical: suppliers, templates and invoices all persist there, behind FluentMigrator migrations. §3.6 |
+| **Scan window values** — supersedes Q1.8 | **Days, not months: 7 / 14 / 30 / 90 / 180 seeded, and the user can add more** on a settings page | The six-case union dies. A window is a **row**, so the set is runtime data like suppliers and templates, and the compile-time guarantee becomes a validation boundary. No fixed ceiling either, so `create` now needs a sanity bound — Q1.16. §3.2 |
+| **Q1.7** — which window is selected on first open, and is it remembered | **14 days**, and the choice **persists in the main SQLite database** | Not in the Thunderbird store where the selected account lives — §5.16. This is the app's first real user setting and needs the first settings table — §3.6, Q5.13 |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
 
@@ -94,12 +96,12 @@ PDF / DOC / TXT ──────┐  Integrations.Documents                   
   OpenXml / NPOI      ├──►  readers, chosen by the format the   ─────┤
   plain text + body   ┘     message actually carries                 │
                                                                      ▼
-  ScanWindow (page) ─┐                              Domain/Invoices  ExtractInvoicesWorkflow
-  GetCurrentTime ────┴────────────────────────────────────────────►    │  cutoff = now - window
+  ScanWindow picker ─┐                              Domain/Invoices  ExtractInvoicesWorkflow
+  GetCurrentTime ────┴────────────────────────────────────────────►    │  cutoff = today - N days
                                                                        │  match supplier
-main SQLite ──► LoadSuppliers, LoadTemplates ─────────────────────►    │  apply template (pure)
-(MyDogsbody.Database)                                                  │
-            ◄── SaveInvoices ◄─────────────────────────────────────────┤  StoredInvoice list
+main SQLite ──► LoadSuppliers, LoadTemplates, ────────────────────►    │  apply template (pure)
+(MyDogsbody.Database)  LoadScanWindows, LoadSelectedScanWindow         │
+            ◄── SaveInvoices, SaveSelectedScanWindow ◄─────────────────┤  StoredInvoice list
                                                                        ▼
 Google Calendar ──────┐                       Domain/Calendar  DiffInvoicesWorkflow  (pure)
   Events.list         ├──►  ListCalendarEvents ────────────────►│
@@ -130,24 +132,40 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 
 **`Invoices/InvoicesTypes.fs`**
 - Constrained primitives: `InvoiceReference` (the supplier's own invoice number), `Money` (amount + currency), `DueDate`, `SourceMessageId`. **`SupplierName` is not here** — an invoice carries a `SupplierId`, per §1.1.
-- **The scan window is a closed union, not a number** — six choices were asked for, so six cases, and "7 months" cannot be written down:
+- **The scan window is a constrained number of days, and the set of windows is data** — not a closed union. Five values are seeded (7, 14, 30, 90, 180) and more can be added on a settings page, so "which windows exist?" is a question only the store can answer:
 
   ```fsharp
-  type ScanWindow =
-      | OneMonth | TwoMonths | ThreeMonths | FourMonths | SixMonths | TwelveMonths
+  /// A window is a row, not a case. The seeded values are a starting set, not the whole set, so
+  /// the guarantee a closed union would have given moves into this create - the same move a
+  /// user-authored template already forces (§5.9).
+  type ScanWindowDays = private ScanWindowDays of int
 
-  module ScanWindow =
-      let months = function
-          | OneMonth -> 1 | TwoMonths -> 2 | ThreeMonths -> 3
-          | FourMonths -> 4 | SixMonths -> 6 | TwelveMonths -> 12
+  module ScanWindowDays =
 
-      /// All six, in display order — the picker renders this rather than its own list, so
-      /// adding a window is one edit and the UI cannot drift out of step.
-      let all = [ OneMonth; TwoMonths; ThreeMonths; FourMonths; SixMonths; TwelveMonths ]
+      [<Literal>]
+      let Minimum = 1
+
+      [<Literal>]
+      let Maximum = 3650                        // a typo guard, not a policy - Q1.16
+
+      let create (days: int) : Result<ScanWindowDays, string> =
+          if days < Minimum then Error "A scan window must be at least one day."
+          elif days > Maximum then Error $"A scan window must be {Maximum} days or fewer."
+          else Ok (ScanWindowDays days)
+
+      let value (ScanWindowDays days) = days
+
+      /// Seeded by migration, never hard-coded in a component.
+      let seeded = [ 7; 14; 30; 90; 180 ]
+
+      /// Used when nothing has been chosen yet, or the remembered choice no longer exists.
+      let fallback = 14
   ```
 
-  No `create`/`value` pair here: a union of six cases is already impossible to get wrong, so the constrained-primitive shape would be ceremony. Parsing whatever the UI sends back into a `ScanWindow` is the top mapper's job (see §3.5).
-- `ScanCutoff` — the instant computed from the window, `private ScanCutoff of DateTime`. Distinct from the window on purpose: a window is a *choice*, a cutoff is a *fact derived from the clock*, and the adapter must be handed the second so it cannot re-derive it differently.
+  The usual three stage types follow: `UnvalidatedScanWindow` (what the number box held, a string) → `ValidScanWindow` → `StoredScanWindow { Id: ScanWindowId; Days: ScanWindowDays }`. They stay inside `Invoices/` rather than earning a fifth area — a window has no meaning outside a scan, and splitting it would have the invoice workflows depend on a sibling area for a value they own.
+
+  **The remembered selection is stored as a number of days, not as a `ScanWindowId`.** An id would need a foreign key and a rule for what a deleted row does to it; a number survives its row being deleted, still means exactly what it meant, and simply isn't offered by the picker any more. See Q1.17.
+- `ScanCutoff` — the instant computed from the window, `private ScanCutoff of DateTime`. Distinct from the window on purpose: a window is a *choice*, a cutoff is a *fact derived from the clock*, and the adapter must be handed the second so it cannot re-derive it differently. **Anchored to the start of the day** rather than to the moment of the click, so the same window scanned twice in one afternoon means the same thing both times — Q1.18.
 - Stage types, now six, because persistence and the calendar each add one:
 
   | Stage | Shape | Meaning |
@@ -160,10 +178,10 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
   | `SyncedInvoice` | + `CalendarEventId` | been put on a calendar |
 
   `UploadableInvoice` is how "an invoice with no due date can't go on a calendar" stops being a runtime check: the upload workflow accepts only that type, so an invoice missing a due date cannot reach it. The invoice is still stored and still listed — it just isn't uploadable, and the table says why. See Q1.10.
-- Error DU: `InvoiceError` — `InvoiceReferenceInvalid`, `AmountUnparseable`, `MailStoreUnreadable of message`, `NoAccountSelected`, `SupplierNotRecognised of sender`, `NoTemplateForSupplier of SupplierId`, `TemplateMatchedNothing of fieldName`, `AttachmentUnreadable of filename * reason`, …
+- Error DU: `InvoiceError` — `InvoiceReferenceInvalid`, `AmountUnparseable`, `MailStoreUnreadable of message`, `NoAccountSelected`, `SupplierNotRecognised of sender`, `NoTemplateForSupplier of SupplierId`, `TemplateMatchedNothing of fieldName`, `AttachmentUnreadable of filename * reason`, and three the editable window list adds: `ScanWindowInvalid of reason`, `ScanWindowAlreadyExists of days`, `CannotDeleteLastScanWindow`. The last one is a rule, not a guard — the picker must always have something to offer, so emptying the list is refused rather than handled downstream.
 - Dependency function types: `ListMailAccounts`, `LoadSelectedMailAccount`, `SaveSelectedMailAccount`, and
-  - `ReadMailFolder = MailAccountId -> ScanCutoff -> Result<MailMessage list, InvoiceError>` — the cutoff is a parameter so the adapter stops reading rather than reading everything and discarding. On a 12-month window over a large mbox that difference is the whole responsiveness of the page.
-  - **`GetCurrentTime = unit -> DateTime`** — new, and required by the rules: CLAUDE.md forbids the domain reading a clock, and "months from present" needs one. Production binds `fun () -> DateTime.Now` at the composition root; every test binds a fixed instant, which is what makes the cutoff arithmetic assertable at all.
+  - `ReadMailFolder = MailAccountId -> ScanCutoff -> Result<MailMessage list, InvoiceError>` — the cutoff is a parameter so the adapter stops reading rather than reading everything and discarding. On a 180-day window over a large mbox that difference is the whole responsiveness of the page.
+  - **`GetCurrentTime = unit -> DateTime`** — new, and required by the rules: CLAUDE.md forbids the domain reading a clock, and "N days back from today" needs one. Production binds `fun () -> DateTime.Now` at the composition root; every test binds a fixed instant, which is what makes the cutoff arithmetic assertable at all.
   - **`ReadDocumentText = DocumentSource -> Result<TextLine list, InvoiceError>`** — one type for all four formats, where
 
     ```fsharp
@@ -176,6 +194,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 
     The composition root binds one reader per format and dispatches on `Format`, so the domain sees a single function and adding a fifth format never touches a workflow. **This does not match the existing `ReadDocumentContent`**, which takes a `DocumentPath` and returns coordinate-bearing `Word`s — see Q1.11, it is a real decision, not a detail.
   - **The store, as functions**: `LoadInvoices = ScanCutoff option -> Result<StoredInvoice list, InvoiceError>`, `UpsertInvoices = ValidInvoice list -> Result<StoredInvoice list, InvoiceError>`, `MarkSynced = InvoiceId -> CalendarEventId -> Result<unit, InvoiceError>`. Upsert rather than insert, because rescanning the same window must not double the ledger — see Q5.8 for what makes two scans agree they found the same invoice.
+  - **The scan windows, as functions**: `LoadScanWindows = unit -> Result<StoredScanWindow list, InvoiceError>`, `SaveScanWindow = ValidScanWindow -> Result<StoredScanWindow, InvoiceError>`, `DeleteScanWindow = ScanWindowId -> Result<unit, InvoiceError>`, plus the remembered choice: `LoadSelectedScanWindow = unit -> Result<ScanWindowDays option, InvoiceError>` and `SaveSelectedScanWindow = ScanWindowDays -> Result<unit, InvoiceError>`. The `option` is the honest shape — a fresh database has no choice recorded, and that is what `fallback` is for.
 
   From the `Suppliers` and `InvoiceTemplates` areas the invoice workflows also take `LoadSuppliers` and `LoadTemplatesForSupplier`. A workflow taking a dependency declared in a sibling area is fine — they are all inside `MyDogsbody.Domain`, and the alternative is duplicating the type.
 
@@ -191,10 +210,12 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 **Workflows** (one file each, one public function each):
 - **`ApplyTemplateWorkflow` — pure, no dependencies**: `Template -> ScannedMessage -> Result<UnvalidatedInvoice, InvoiceError>`. The rule engine. Everything that makes template editing worth having is decided here, and none of it touches a file, a clock or a network. Table-driven unit tests over `(template, text) → expected fields` are the cheapest coverage in the whole feature, and they'll be where template bugs actually get found.
 - **`MatchSupplierWorkflow` — pure**: `StoredSupplier list -> ScannedMessage -> Result<SupplierId, InvoiceError>`. Also decides what happens when two suppliers match — Q7.6.4.
-- `ScanForInvoicesWorkflow` — `getCurrentTime → readMailFolder → readDocumentText → loadSuppliers → loadTemplates → upsertInvoices → (account, ScanWindow) → StoredInvoice list`. The orchestration: work out the cutoff, pull the messages, flatten each to text, match a supplier, apply its template, validate, store. Note how much of it is calls to the two pure workflows above — that is the shape to aim for. The cutoff arithmetic (`now.AddMonths(-months)`) is a private pure function in this file, so "6 months back from 31 March" is a unit test with a fixed clock and no mail store anywhere near it.
+- **`ResolveScanWindowWorkflow` — pure**: `StoredScanWindow list -> ScanWindowDays option -> ScanWindowDays`. Given what exists and what was remembered, decide which window the page opens on. Three cases, one function, one place: nothing remembered → `fallback`; remembered and still in the list → that one; remembered but since deleted → `fallback`, or the shortest window still present if 14 has itself been deleted. Small enough to look not worth naming, and exactly the sort of rule that otherwise ends up half in a module creator and half in a mapper.
+- `ScanForInvoicesWorkflow` — `getCurrentTime → readMailFolder → readDocumentText → loadSuppliers → loadTemplates → upsertInvoices → (account, ScanWindowDays) → StoredInvoice list`. The orchestration: work out the cutoff, pull the messages, flatten each to text, match a supplier, apply its template, validate, store. Note how much of it is calls to the two pure workflows above — that is the shape to aim for. The cutoff arithmetic (`getCurrentTime().Date.AddDays(-days)`) is a private pure function in this file, so "180 days back from 5 January" is a unit test with a fixed clock and no mail store anywhere near it. Days are uniform in a way months are not, which quietly removes the month-end trap flagged in §5.15.
 - `DiffInvoicesAgainstCalendarWorkflow` — **pure**: `StoredInvoice list -> CalendarEvent list -> InvoiceSyncStatus list`. Still the heart of the feature and still the cheapest thing to test, provided the match key is a value and not a heuristic.
 - `UploadInvoicesToCalendarWorkflow` — takes the diff result, calls `CreateCalendarEvent` for the missing ones only, and `MarkSynced` for each success.
 - Supplier and template CRUD: `AddSupplierWorkflow`, `EditSupplierWorkflow`, `DeleteSupplierWorkflow`, `ListSuppliersWorkflow`, and the same four for templates. These are the same shape as the existing `AddCredentialWorkflow` / `EditCredentialWorkflow` and should be written by copying them.
+- Scan-window CRUD, the same shape again but smaller: `AddScanWindowWorkflow` (rejects a duplicate and anything outside `create`'s bounds), `DeleteScanWindowWorkflow` (rejects deleting the last one), `ListScanWindowsWorkflow`, `SelectScanWindowWorkflow` (persists the choice). No edit workflow — a window is one number, so changing it is a delete and an add, and offering an edit would just be a second path to the same duplicate check.
 - `ListMailAccountsWorkflow`, `SelectMailAccountWorkflow`, `RegisterGoogleAccountWorkflow`, `ListGoogleAccountsWorkflow`.
 
 ### 3.3 Outer ring
@@ -202,7 +223,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 **`MyDogsbody.Integrations.Thunderbird`** (new) + `.Database.Models` (C#, if it stores anything)
 - `ThunderbirdFolderScanner.fs` — **the entry point, per Q4.2.** Given the root folder you chose, walk it recursively for `prefs.js` files; each one found is a profile root. No `profiles.ini` lookup and no `%APPDATA%` assumption. Handles the folder being one profile, a parent of several, or a backup copy.
 - `ThunderbirdAccountReader.fs` — `prefs.js` → accounts. **The authoritative list is `mail.accountmanager.accounts`, not the directory tree** — verified against the real profile in **§3.8**, where a directory walk would have found 15 IMAP accounts where 9 exist. Store paths come from `directory-rel`, never from `directory`, which was measurably stale.
-- `MailFolderReader.fs` — **mbox *and* maildir, both required per Q4.3**, though the real profile is 100% mbox, so maildir ships against synthetic fixtures only (Q4.11). Format per account comes from `storeContractID`. MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: skip a message on its `Date` header before touching its body or attachments, so a 1-month window doesn't pay for a 12-month mailbox.
+- `MailFolderReader.fs` — **mbox *and* maildir, both required per Q4.3**, though the real profile is 100% mbox, so maildir ships against synthetic fixtures only (Q4.11). Format per account comes from `storeContractID`. MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: skip a message on its `Date` header before touching its body or attachments, so a 7-day window doesn't pay for a decade of mailbox.
 - **Reads in place, never copies.** Thunderbird is running (Q4.4) and the store is 16 GB (§3.8), so `FileShare.ReadWrite` with a tolerated torn final message is the only workable read. Copy-then-parse — which I defaulted to before measuring — is off the table.
 - **Scans incrementally.** Re-reading 6.2 GB of in-scope mail on every window change is not viable, so each folder carries a watermark and a scan reads only what has been appended since. §3.8, Q4.10.
 - **Its own LiteDB store, holding everything Thunderbird-shaped**: the root folder you chose, the discovered accounts and their folder lists, the selected account, and the per-folder scan watermarks from Q4.10. Per §1.1 this is an Integration, so all of it stays here and none of it reaches the main SQLite database. The folder is no longer an "override" — after Q4.2 it is the only way the app finds anything, so the app is unusable until it is set, and the page must say so rather than showing an empty table.
@@ -234,38 +255,41 @@ Both follow the existing rules: `Result<'T, MyDogsbodyException>`, `handleError`
 
 ### 3.4 Composition root
 
-Five new API factories, each in the established three-file split with no module-level I/O outside `Startup.fs`:
+Six new API factories, each in the established three-file split with no module-level I/O outside `Startup.fs`:
 
 - `SupplierApiFactory.fs` + `SupplierApiMappers.fs`
 - `TemplateApiFactory.fs` + `TemplateApiMappers.fs`
 - `MailAccountApiFactory.fs` + `MailAccountApiMappers.fs`
 - `GoogleAccountApiFactory.fs` + `GoogleAccountApiMappers.fs`
 - `InvoiceSyncApiFactory.fs` + `InvoiceSyncApiMappers.fs`
+- `ScanWindowApiFactory.fs` + `ScanWindowApiMappers.fs` — small, and kept separate on purpose: it is consumed by *two* surfaces (the settings page that maintains the list, and the invoices page's picker), and neither of them should have to take the whole invoice API to read five numbers
 
 And **one pair deleted**: `CredentialApiFactory.fs` + `CredentialApiMappers.fs`, per §3.9.
 
-`Startup.fs` gains the SQLite context, the provider LiteDB handles and the `GetCurrentTime` binding, loses the credentials context, and ends with five registrations instead of one. `MainWindow.xaml.cs` still does not change — that is the property worth preserving through all of this.
+`Startup.fs` gains the SQLite context, the provider LiteDB handles and the `GetCurrentTime` binding, loses the credentials context, and ends with six registrations instead of one. `MainWindow.xaml.cs` still does not change — that is the property worth preserving through all of this.
 
 ### 3.5 UI
 
 **`MyDogsbody.UI.Types`** — new records (no domain types leak here):
-- `GoogleAccountUiType`, `CalendarUiType`, `MailAccountUiType`, `SupplierUiType`, `TemplateUiType`, `FieldRuleUiType`, `InvoiceUiType` (with a `SyncStatus` field and a resolved supplier name — the UI shows a name, the domain holds an id), and the API records `GoogleAccountApi`, `MailAccountApi`, `SupplierApi`, `TemplateApi`, `InvoiceSyncApi`.
-- **`ScanWindowUiType`** — the UI needs its own, because `UI.Types` cannot reference `MyDogsbody.Domain`. Either a six-case union mirroring the domain's, or a plain `int` of months. Recommend the **union**, mapped in `InvoiceSyncApiMappers` with an exhaustive match in both directions: an `int` puts `7` back on the table and moves the "is this a legal window?" check from the compiler into a runtime error. This is the same tax `Infrastructure` ⇄ `InfrastructureType` already pays, for the same reason.
-- `Modules/GoogleAccountsBrowserModule.fs`, `Modules/MailAccountsBrowserModule.fs`, `Modules/InvoiceSyncModule.fs` — each a record of `aval` fields + commands, same shape as `CredentialsBrowserModule`. `InvoiceSyncModule` carries `SelectedScanWindowAval: aval<ScanWindowUiType>`, `AvailableScanWindowsAval` and `SelectScanWindow: ScanWindowUiType -> unit`; selecting one is a write-then-reload exactly like an edit, so the table always shows what was actually scanned rather than what the picker was holding.
+- `GoogleAccountUiType`, `CalendarUiType`, `MailAccountUiType`, `SupplierUiType`, `TemplateUiType`, `FieldRuleUiType`, `InvoiceUiType` (with a `SyncStatus` field and a resolved supplier name — the UI shows a name, the domain holds an id), and the API records `GoogleAccountApi`, `MailAccountApi`, `SupplierApi`, `TemplateApi`, `InvoiceSyncApi`, `ScanWindowApi`.
+- **`ScanWindowUiType`** — now a plain record, `{ Id: string; Days: int; Label: string }`, because the domain type it mirrors is no longer a union either. An earlier draft argued for mirroring a six-case union here so the compiler could reject a seventh value; **that argument is dead**, and worth being explicit about rather than quietly dropping. Making the set user-editable moves the "is this a legal window?" check out of the compiler and into `ScanWindowDays.create`, and the mapper becomes trivial in both directions. What is bought: the app no longer needs a rebuild to gain a window. What is paid: an illegal number is now a runtime `Error`, caught at one boundary, and only tests can prove that boundary holds. Same trade as templates (§5.9), one tier smaller.
+  `Label` is the mapper's business, not the domain's — "14 days", "6 months" for 180 if you want it — so the component renders a string it was handed rather than composing one.
+- `Modules/GoogleAccountsBrowserModule.fs`, `Modules/MailAccountsBrowserModule.fs`, `Modules/ScanWindowsBrowserModule.fs`, `Modules/InvoiceSyncModule.fs` — each a record of `aval` fields + commands, same shape as `CredentialsBrowserModule`. `InvoiceSyncModule` carries `SelectedScanWindowAval: aval<ScanWindowUiType>`, `AvailableScanWindowsAval: aval<ScanWindowUiType list>` and `SelectScanWindow: ScanWindowUiType -> unit`; selecting one **persists the choice and then rescans**, which is write-then-reload exactly like an edit, so the table always shows what was actually scanned rather than what the picker was holding. The initial value comes from `ResolveScanWindowWorkflow` through the API, never from a literal `14` in the component.
 
-**`MyDogsbody.UI.Portal`** — three pages, registered in `Shell.fs`, the two settings pages also linked from `SettingsComponents.settingsNavMenu`:
+**`MyDogsbody.UI.Portal`** — six pages, registered in `Shell.fs`; the five settings pages also linked from `SettingsComponents.settingsNavMenu`:
 
 | Page | Route | Contents |
 | --- | --- | --- |
-| Invoices | `/invoices` (top-level, not settings) | **Scan-window picker (1 / 2 / 3 / 4 / 6 / 12 months)**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column, "Upload to calendar" button, `MudAlert` from `ErrorAval` |
+| Invoices | `/invoices` (top-level, not settings) | **Scan-window picker, rendering whatever windows the store holds and opening on the remembered choice**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column, "Upload to calendar" button, `MudAlert` from `ErrorAval` |
 | Google accounts | `/settings/google-accounts` | Table of registered accounts, "Add account" → consent flow, **the default invoice calendar for each account, picked from a dropdown of that account's own calendars**, remove / re-authorise |
 | Thunderbird accounts | `/settings/mail-accounts` | **The root folder to search** (Q4.2) with a Browse button, a "scan for accounts" action, the table of accounts the recursive walk found — name, email, store format, message count — and a radio to pick the one to import from |
 | **Suppliers** | `/settings/suppliers` | Table of suppliers with their match rules; add / edit / delete via dialog; each row opens that supplier's templates |
 | **Templates** | `/settings/suppliers/{id}/templates` | The templates for one supplier: field rules, and — strongly recommended — a **"test against a message" panel** that runs `ApplyTemplateWorkflow` over a real scanned message and shows what each rule extracted. See §3.7 |
+| **Scan windows** | `/settings/scan-windows` | The list of windows in days — 7, 14, 30, 90 and 180 seeded — with add and delete, the currently remembered one marked, and the last remaining one undeletable. One number field per row and no edit action, per §3.2 |
 
 Both new settings pages are the credentials page again: `MudTable` + toolbar button + `FunComponent` dialog + module creator with `cval`/`transact`. Nothing novel, which is the point — the novelty is all in §3.7.
 
-The scan-window picker is six fixed choices, so a `MudToggleGroup` of six buttons reads better than a dropdown — the whole range is visible and switching is one click, which matters if the intended use is "try 3, then look further back". A `MudSelect` is the fallback if the toolbar gets crowded. Either way it renders `AvailableScanWindowsAval`, never a hard-coded list in the component.
+The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. **It can't be, now that the count is unknown at build time** — five looks fine as buttons and twelve does not, and the component cannot know which it will get. So: a `MudSelect` bound to `AvailableScanWindowsAval`, which renders any number of windows without the toolbar deciding how many are reasonable. The component holds no list of its own either way — that part of the original argument survives, and matters more now that the list is genuinely variable.
 
 ### 3.6 Persistence — the main SQLite database, finally wired in
 
@@ -281,12 +305,18 @@ The scan-window picker is six fixed choices, so a `MudToggleGroup` of six button
 | `TemplateFieldRules` | template id, target field, rule kind, pattern/label, parse hint |
 | `Invoices` | id, supplier id, reference, amount, currency, due date (nullable), source message id, scanned date |
 | `InvoiceCalendarEvents` | invoice id, google account id, calendar id, event id, uploaded date |
+| `ScanWindows` | id, days — **unique**, so 14 cannot be added twice |
+| `InvoiceSettings` | a single row with its primary key fixed at 1 — the remembered scan window, in days |
 
 `Blog` and `Comment` stay as they are — they're scaffold, and nothing here disturbs them.
 
-The last table is the one worth arguing about. A sync record is a fact about *an invoice*, so it belongs on this side rather than in the Google integration's store — but it also means the app has an opinion about what's on a calendar that can go stale if you delete an event by hand. **The calendar remains the source of truth for the diff** (Q2.4's extended-property query), and this table is history: what we uploaded, when, to which account. Don't let it become the answer to "is it there?".
+**The five seeded windows are inserted by the migration that creates the table**, with `Insert.IntoTable`, and removed again by its `Down`. That keeps the rule CLAUDE-project.md states — the schema, and now its seed data, come from FluentMigrator and from nowhere else — rather than having `Startup.fs` check on every launch whether it ought to write five rows. The consequence to accept knowingly: if you delete a seeded window, re-running migrations will not bring it back. That is the correct behaviour for a value you chose to remove, and it is why `ScanWindowDays.fallback` exists rather than the code assuming 14 is present.
 
-**The store functions live in `MyDogsbody.Database`** (Q5.9): it gains `SupplierStore.fs`, `TemplateStore.fs`, `InvoiceStore.fs` and their record ⇄ domain mappers, plus a `ProjectReference` to `MyDogsbody.Domain`. No new project. It is outer-ring code, so it keeps the outer-ring shape: dependencies first, input last, `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames` entry per function.
+**`InvoiceSettings` is a single-row typed table, not a key/value store** — see Q5.13, because this is the first setting and whatever it does becomes the habit. A `Settings(Key, Value)` table would take one migration and then never need another, at the cost of every setting being a string parsed at the point of use; a typed row costs a migration per setting and keeps the store honest about what it holds. The codebase's whole instinct is the second, and adding a column by migration is already the rule for every other schema change here.
+
+**`InvoiceCalendarEvents`** is the table worth arguing about. A sync record is a fact about *an invoice*, so it belongs on this side rather than in the Google integration's store — but it also means the app has an opinion about what's on a calendar that can go stale if you delete an event by hand. **The calendar remains the source of truth for the diff** (Q2.4's extended-property query), and this table is history: what we uploaded, when, to which account. Don't let it become the answer to "is it there?".
+
+**The store functions live in `MyDogsbody.Database`** (Q5.9): it gains `SupplierStore.fs`, `TemplateStore.fs`, `InvoiceStore.fs`, `ScanWindowStore.fs` and their record ⇄ domain mappers, plus a `ProjectReference` to `MyDogsbody.Domain`. No new project. It is outer-ring code, so it keeps the outer-ring shape: dependencies first, input last, `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames` entry per function.
 
 **`Invoices` carries a unique index on (supplier id, invoice reference)** (Q5.8). That pair is the natural key, so a rescan of an overlapping window updates rather than duplicates, and the database refuses a duplicate even when the code is wrong. `SourceMessageId` rides along for traceability but is not the key — one message can carry more than one invoice.
 
@@ -417,10 +447,12 @@ The answers in §1.1 roughly doubled this, so it is now seven:
 | 1 | `invoice-ledger-foundation` | **The main SQLite database wired into the app for the first time**: `Suppliers` + `SupplierMatchers` migrations, store functions, `SupplierApi`, suppliers page. No invoices, no mail, no calendar | — |
 | 2 | `invoice-templates` | The template model (§3.7), `ApplyTemplateWorkflow`, template migrations, templates page with the rule editor and the test panel. Ask #6 | 1 |
 | 3 | `thunderbird-account-selection` | Thunderbird accounts page, native folder picker (first host change), recursive `prefs.js` discovery per §3.8, both mbox and maildir, selection persisted. Grew with the Q4.2–Q4.4 answers. Ask #5 | — |
-| 4 | `invoice-extraction` | The four document readers, the scan window, the `Invoices` migration, the scan pipeline, a read-only invoice table. Ask #2 | 1, 2, 3 |
+| 4 | `invoice-extraction` | The four document readers, the `Invoices` migration, the scan pipeline, a read-only invoice table — **and the whole scan-window apparatus**: the `ScanWindows` and `InvoiceSettings` migrations with their seed, the settings page, the picker, the remembered choice. Ask #2 | 1, 2, 3 |
 | 5 | `credentials-per-provider` | **Pure refactor, no new feature.** Deletes `Integrations.Credentials`; each provider integration gains a `Credentials` collection in its own LiteDB. Characterization tests before anything moves. §3.9 | — |
 | 6 | `google-account-integration` | Google accounts page, OAuth registration, calendar listing, **and the per-account default invoice calendar** — Q2.3 moved that here from #7. Ask #4 | 5 |
 | 7 | `invoice-calendar-sync` | The diff, the sync-status column, the upload button, `InvoiceCalendarEvents`. Asks #1 and #3 | 4, 6 |
+
+The scan-window work could technically move into change #1 — it is two small tables, a store and a settings page, all of it main-database machinery that #1 exists to prove. It stays in #4 because a window with nothing to scan is a setting that does nothing, and #1's value is being the smallest change that proves SQLite works. If #4 turns out too large once §7.1 is answered, this is the piece to move.
 
 1, 3 and 5 are independent starting points. Change 5 is the odd one out — it is the only change here that *removes* something rather than adding, and it is the only one whose success criterion is "the suite is still green and one fewer project exists". **Change 1 is the one I'd start with regardless of the rest**: it is small, it has no external dependency to negotiate, and it is the change that proves the main database, its migrations and its store shape actually work — every later change leans on that and none of them wants to discover a problem with it.
 
@@ -446,7 +478,10 @@ These are real, and each needs a decision — they are not blockers, but pretend
 12. **The folder picker forces the first change to the WPF host** — Q4.5 chose the native dialog, so this is now a fact rather than a risk. Blazor cannot supply a filesystem path: `InputFile` hands over content, not locations, and `webkitdirectory` is no better inside a `BlazorWebView`. It means `Microsoft.Win32.OpenFolderDialog` on the WPF side, exposed as an injected `ChooseFolder: unit -> string option` — satisfied by WPF in production and a lambda in tests. A small, clean seam, but it does end the run of changes in which `MainWindow.xaml.cs` never had to be touched. Worth noting in change #3's description rather than slipping it in.
 13. **Recursively walking a folder you chose is not the same as reading a known profile path.** It can be enormous, contain several profiles or none, hit directories the process cannot read, and on Windows follow junctions into a loop. The scanner needs a depth bound, permission errors reported per-directory rather than aborting the walk, and a result that distinguishes "no accounts here" from "I could not look". §3.8 adds a concrete case: this profile holds **six orphan mail directories from deleted accounts**, one with 2 GB in it, so "found a mail store" and "found an account" are genuinely different answers.
 14. **The mail store is 16 GB, and that is a design input rather than a footnote.** It kills copy-then-parse outright, it makes Q4.8's folder exclusions load-bearing (they remove 9 of 15.2 GB), it forces incremental scanning (Q4.10), and it puts real pressure on Q1.9's rescan-on-every-click. It also strengthens Q5.7: re-deriving invoices from 6 GB of mail on demand is a poor substitute for storing them once. Any performance assumption in this proposal should be checked against that number rather than against a test mailbox.
-15. **The clock is a new dependency function type, and CLAUDE.md calls those published interfaces** — meaning `GetCurrentTime` owes a contract suite run against the real implementation *and* every fake. The real implementation is `DateTime.Now`, whose whole nature is to return something different each call, so "assert both sides agree" has no obvious meaning. Workable answer: the suite asserts the properties that must hold of any clock (monotonic across two calls, `Kind` as expected, within a tolerance of `DateTime.Now` at the point of test) and the *cutoff arithmetic* — the part with actual logic — is unit-tested against fixed instants in the workflow. Say this explicitly in the change rather than quietly having no contract test for the clock. Worth checking whether month arithmetic near month ends behaves as you'd want: `.AddMonths(-1)` from 31 March gives 28 February, not 3 March.
+15. **The clock is a new dependency function type, and CLAUDE.md calls those published interfaces** — meaning `GetCurrentTime` owes a contract suite run against the real implementation *and* every fake. The real implementation is `DateTime.Now`, whose whole nature is to return something different each call, so "assert both sides agree" has no obvious meaning. Workable answer: the suite asserts the properties that must hold of any clock (monotonic across two calls, `Kind` as expected, within a tolerance of `DateTime.Now` at the point of test) and the *cutoff arithmetic* — the part with actual logic — is unit-tested against fixed instants in the workflow. Say this explicitly in the change rather than quietly having no contract test for the clock. Moving the window to **days** removes the trap this bullet used to warn about — `.AddMonths(-1)` from 31 March gives 28 February, and nobody expects that — because days are uniform and `.AddDays(-14.0)` cannot surprise anyone. What replaces it is smaller but real: `DateTime.Now` is local, so a window measured from the exact instant of the click quietly means "N×24 hours ago, at whatever time it is now", and the same window scanned at 09:00 and at 17:00 covers different mail. Anchoring the cutoff to `.Date` fixes that and makes the value stable for the whole day, which incremental scanning (Q4.10) also prefers. **Q1.18.**
+
+16. **Settings are now split across two stores, by rule rather than by accident.** The selected *mail account* lives in the Thunderbird integration's own LiteDB, because §1.1 makes it Thunderbird's own fact. The selected *scan window* lives in the main SQLite database, because you said so and because it is a preference about the invoices page rather than about anyone's mail client. Both placements follow the ownership rule; together they mean there is no single "settings" store to point at, and the next preference will need the same judgement made again. The rule is what belongs in the change description — not the location.
+17. **Seeding rows from a migration is a new precedent in this repo.** Every migration so far creates schema and nothing else. The five default windows have to come from somewhere, and the alternatives are worse: `Startup.fs` checking on each launch whether it ought to write five rows is runtime schema management by another name, and hard-coding them in the component is the thing this whole change is undoing. `Insert.IntoTable` in `Up`, matching `Delete.FromTable` in `Down` — but say plainly in change #4 that the file now carries data as well as structure, because the next person will copy whichever migration they open first.
 
 ---
 
@@ -457,8 +492,10 @@ These are real, and each needs a decision — they are not blockers, but pretend
 - Still exactly two mapping points per feature: entity ⇄ domain in each integration, domain ⇄ UI record in `Startup/*ApiMappers.fs`.
 - `UI.Portal` still references only `UI.Types`, `Enums`, `Exceptions.Types`.
 - Uploading twice in a row creates no duplicate events.
-- The six scan windows exist in exactly two places — the domain union and its UI mirror — with an exhaustive match between them, so a seventh could never be half-added. No component holds its own list of months.
-- No workflow reads the clock directly; every cutoff test pins a fixed instant and asserts an exact date.
+- **Scan windows exist as rows and nowhere else.** No list of days in a component, a mapper or a union; the seeded five arrive from a migration and the picker renders whatever the store holds. **Adding a sixth window is done on screen and takes effect without a rebuild** — the same acceptance test as a supplier or a template, one tier smaller.
+- **The picker opens on 14 days against a fresh database, on your last choice on every run after that**, and on the fallback if the window you last chose has since been deleted. That third case has a unit test, because it is the one nobody thinks to try by hand.
+- Deleting the last remaining scan window is refused with a named error, so the picker can never be empty and no component needs an "if the list is empty" branch.
+- No workflow reads the clock directly; every cutoff test pins a fixed instant and asserts an exact date. The same window scanned twice in one day produces the same cutoff both times.
 - **Adding a supplier and teaching the app to read its invoices is done entirely on screen** — no rebuild, no F# change, no restart. That is the whole point of ask #6, and it is the acceptance test for it.
 - Suppliers, templates and invoices live in the main SQLite database, with the schema built **only** by FluentMigrator — no DDL in a store function, a test, or a SQLite tool.
 - A template carrying a pathological regex fails *that rule* with a named error inside its timeout, and the scan finishes. It does not hang the page.
@@ -473,7 +510,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **40 questions**. **§7.4 is empty** and §7.5 no longer blocks anything, so **changes #1 and #3 can both be specified today** — see §8. §7.6 is the set that still gates the largest piece of the build. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **42 questions**. **§7.4 is empty**, so **changes #1 and #3 can both be specified today** — see §8. §7.6 is the set that still gates the largest piece of the build. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
@@ -481,25 +518,21 @@ Answer the **blocking** ones before the `requirements.md` for the change they bl
 | §7.2 | what lands on the calendar | 7 |
 | §7.3 | Google accounts (Q3.1–Q3.6) and the credentials removal (Q3.7–Q3.10) | 6, and **5** |
 | ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ **ready to specify** |
-| §7.5 | what's left is housekeeping — nothing blocks a change | — (#1 **ready to specify**) |
-| **§7.6** | **templates — the new set** | **2** |
+| §7.5 | housekeeping, except Q5.13 which #4's first migration needs | 4, for Q5.13 only (#1 **ready to specify**) |
+| **§7.6** | **templates** | **2** |
 
 ### 7.1 What an invoice *is*, and how far back to look — blocking
 
 - **Q1.5 — What happens to a message that yields no invoice?** Templates give this four distinct causes, not one: no supplier matched the sender, the supplier has no template, a template ran but a rule found nothing, or an attachment was unreadable. Skipped silently, listed with the reason, or a hard error for the whole scan?
   *Default:* listed with the specific reason, never silent — and never fatal to the scan. These four messages are how you find out which template needs fixing, so they are a feature of the templates workflow rather than noise. Worth a filter on the table for "problems only".
 - **Q1.6 — Which date does the scan window measure?** This is the one that changes behaviour rather than wording, and there are three candidates:
-  - **the date the mail arrived** — sits in the message header, so the reader can skip a message without parsing it, which is what makes a 1-month window fast;
+  - **the date the mail arrived** — sits in the message header, so the reader can skip a message without parsing it, which is what makes a 7-day window fast;
   - **the invoice issue date** — inside the document, so every message in the mbox must be fully parsed before it can be excluded, and the window stops being an optimisation;
-  - **the due date** — same cost, and it points *forwards*, so "3 months" would mean something different again.
+  - **the due date** — same cost, and it points *forwards*, so "90 days" would mean something different again.
 
-  They disagree in practice: an invoice that arrived five months ago but falls due next week is inside a 12-month window and outside a 3-month one on the first reading, and the reverse on the third.
-  *Default:* the date the mail arrived, with the picker labelled so it says that out loud ("mail received in the last 3 months") rather than leaving you to guess.
-- **Q1.7 — Which window is selected on first open, and is the choice remembered** between runs? Q5.1 puts the selected mail account in the Thunderbird integration's own store; the window is arguably the same kind of setting.
-  *Default:* 3 months, remembered alongside the selected account.
-- **Q1.8 — Is 12 months the ceiling?** You named six values topping out at a year — confirming there's no "everything" option keeps the picker honest and stops a first run from walking a decade of mail.
-  *Default:* 12 months is the maximum; no all-time option.
-- **Q1.9 — Does changing the window rescan immediately, or after a Refresh click?** Immediate is nicer until a 12-month scan over a large mbox takes noticeable seconds, at which point every click through the picker costs one.
+  They disagree in practice: an invoice that arrived 150 days ago but falls due next week is inside a 180-day window and outside a 30-day one on the first reading, and the reverse on the third.
+  *Default:* the date the mail arrived, with the picker labelled so it says that out loud ("mail received in the last 90 days") rather than leaving you to guess.
+- **Q1.9 — Does changing the window rescan immediately, or after a Refresh click?** Immediate is nicer until a 180-day scan over a large mbox takes noticeable seconds, at which point every click through the picker costs one.
   *Default:* immediate — but §3.8 changed my confidence here. With 6.2 GB in scope, "immediate" is only tenable on the back of the incremental scanning in Q4.10, and it may still want an explicit Refresh. Treat this as provisional until change #4 measures a real scan.
 
 New, opened by the answers in §1.1:
@@ -517,9 +550,18 @@ New, opened by the answers in §1.1:
 - **Q1.15 — Roughly how many invoices are we talking about** — dozens, hundreds, thousands? It doesn't change the design, but it decides whether the invoice table needs paging, and whether a full rescan is a "press it whenever" action or a "go and make tea" one.
   *Default:* assume hundreds; server-side paging only if it turns out to be needed.
 
+Opened by making the window list editable:
+
+- **Q1.16 — What is the largest window a user may add?** Making the set editable removed the ceiling that "12 months" used to provide, so `ScanWindowDays.create` needs one. This is a guard against typing 1400 as 14000, not a statement about how far back you should look — but it is also the only thing standing between a slip and a scan of the whole 16 GB store.
+  *Default:* 3650 days (ten years), with a minimum of 1. Big enough never to obstruct a real intention, small enough to catch a fat finger. If you want the guard to mean something stronger — 730 days, say, so a scan can never be more than a couple of years of mail — that is a one-line change and a better answer, but it is a policy decision rather than a safety one.
+- **Q1.17 — What can be done to the list, and what happens to a window you're using?** Add is a given. Beyond that: may the five seeded values be deleted, or are they fixed? And if you delete the window you last selected, what does the invoices page open on next time?
+  *Default:* add and delete, with no edit (a window is one number — changing it is a delete and an add) and no distinction between seeded and user-added rows, because a seeded value you never use is exactly the kind of clutter this page exists to let you remove. Deleting the last remaining window is refused. Deleting the one you had selected falls back to 14, or to the shortest window still present if 14 itself is gone — which is `ResolveScanWindowWorkflow`'s whole job and the reason the remembered choice is stored as a number rather than a foreign key.
+- **Q1.18 — Is the cutoff measured from the start of today, or from the exact moment you clicked?** They differ by up to a day. Start-of-day means "the last 14 days" names a set of dates and stays stable until midnight; exact-instant means it quietly means "the last 336 hours" and the same window covers different mail at 09:00 and at 17:00.
+  *Default:* start of day (`getCurrentTime().Date`). It is what a person means by "the last 14 days", it makes a rescan within one day genuinely idempotent, and it plays better with the per-folder watermarks in Q4.10. The cost is that a message that arrived this morning at 08:00 is inside a 1-day window all day — which is the behaviour you'd want anyway.
+
 ### 7.2 What lands on the calendar — blocking
 
-- **Q2.5 — Over what time window does the diff look?** `Events.list` needs a bound, and now there are two windows in play — the mail scan window from Q1.6 and this one. Letting them drift apart produces nonsense: query 12 months of calendar against a 1-month scan and every older event reads as "on the calendar but missing from the source".
+- **Q2.5 — Over what time window does the diff look?** `Events.list` needs a bound, and now there are two windows in play — the mail scan window from Q1.6 and this one. Letting them drift apart produces nonsense: query 180 days of calendar against a 7-day scan and every older event reads as "on the calendar but missing from the source".
   *Default:* derive this one from the invoices actually found — the range they span, padded a month either side — so the scan window drives both and they cannot disagree. The diff then only ever answers "of what I scanned, what is already up there?".
 - **Q2.6 — Insert-only, or also update and delete?** If an invoice's amount changes after upload, does the existing event get updated? If the user deletes the event by hand, does the next upload put it back?
   *Default:* insert-only for change #7; deletion by hand means it comes back on the next upload. Say so on screen.
@@ -528,7 +570,7 @@ New, opened by the answers in §1.1:
 - **Q2.8 — Partial failure mid-batch?** Stop at the first failure, or continue and report "14 of 17 uploaded, 3 failed"?
   *Default:* continue, then report per-row outcomes.
 - **Q2.9 — Does the scan window bound the import, the view, or both?** Now that invoices persist (§1.1), these come apart. The window necessarily bounds the **import** — it's what decides which mail is read. Whether it also filters the **table** is a separate choice: the store may well hold invoices from outside it.
-  *Default:* both, with the window and count stated above the table ("41 invoices, received in the last 3 months") so the list is obviously a view of a range rather than the whole ledger. Nothing is deleted when you narrow it — narrowing hides, it does not forget — and the upload button acts only on what is visible.
+  *Default:* both, with the window and count stated above the table ("41 invoices, received in the last 90 days") so the list is obviously a view of a range rather than the whole ledger. Nothing is deleted when you narrow it — narrowing hides, it does not forget — and the upload button acts only on what is visible.
 
 Opened by the answers to Q2.3 and Q2.4:
 
@@ -577,6 +619,8 @@ Nothing open. All eleven questions are answered, the plan is measured against th
   *Default:* keep `SourceMessageId`, add nothing else. A message id is a standard identifier that still means something outside Thunderbird; account and folder names are that client's vocabulary and stop making sense the moment mail is moved or the client changes. If a diagnostic view wants more, the Thunderbird integration can answer from the message id.
 - **Q5.12 — Can an invoice be corrected or deleted by hand?** Opened by Q5.7: now that the ledger is real, a mis-parsed amount is a stored wrong number rather than a transient display glitch. Is the only recourse to fix the template and rescan, or can you edit the row? And can you delete an invoice that was never really one?
   *Default:* delete yes, edit no — with a caveat. Deleting is needed because a bad template will produce junk rows before you get it right. Editing is the trap: a hand-corrected value would be silently overwritten by the next rescan under the Q5.8 key, which is worse than not offering it. If editing is wanted, it needs an "edited by hand, don't overwrite" flag on the row, and that is a real design addition rather than a checkbox.
+- **Q5.13 — Is the settings table typed, or key/value?** Opened by making the scan window a remembered choice: it is the app's first stored preference, so whatever shape it takes is the shape every later setting copies. A single-row `InvoiceSettings` table with a typed column per setting means one migration per setting and a store that says what it holds; a generic `Settings(Key, Value)` table means one migration ever, and every setting arriving as a string that some caller has to parse and validate at the point of use.
+  *Default:* typed. Migration-per-setting is already the rule for every other schema change here, and stringly-typed storage is what the rest of this codebase spends real effort avoiding — a scan window that comes back as `"fourteen"` should not be reachable. The honest counterargument is that a handful of scalar preferences is exactly the case key/value was invented for; if you expect a dozen of them, say so now rather than after six migrations.
 
 ### 7.6 Templates — the new question set, blocking for change #2
 
@@ -603,7 +647,9 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-§1.1 has closed twenty-eight questions and opened thirty-four — 34 open before, 40 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those thirty-two would otherwise have surfaced mid-implementation, when they cost more.
+§1.1 has now closed thirty questions and opened thirty-eight — 40 open before the scan-window answer, 42 after it. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those would otherwise have surfaced mid-implementation, when they cost more.
+
+**The scan-window answer is the clearest example of that so far.** "7, 14, 30, 90, 180 and let me add more" reads like a change to a list of numbers. It is not: making the set editable turns a closed union into a table, deletes a compile-time guarantee and replaces it with a validation boundary, adds a settings page and two migrations, introduces the app's first stored preference and therefore its first settings table, and forces a decision about what "the last 14 days" measures from. Four new questions, one reversed UI recommendation, and one design argument in §3.5 that had to be struck out rather than quietly edited. All of it cheap here, none of it cheap once `ScanWindow` is a union in a shipped domain.
 
 **§3.8 is the part of this document I trust most**, because it is the only part measured rather than reasoned. Two of my defaults were wrong — structural account detection and copy-then-parse — and both would have survived into code. It is worth doing the equivalent for the templates in §3.7 before change #2: two real invoices from two real suppliers, checked against the four rule kinds.
 
@@ -618,7 +664,7 @@ They are independent, so either order works, or both.
 
 **§7.6 is the one to think hardest about.** It decides change #2, which is the largest and least precedented piece of the build, and no amount of design work elsewhere will de-risk it. If you want to sanity-check the template model before committing to it, the fastest test is to take two real invoices from two different suppliers and check whether the four rule kinds in §3.7 can actually locate every field.
 
-The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6. §7.5 is down to housekeeping and blocks nothing.
+The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6. §7.5 is housekeeping apart from **Q5.13**, which change #4 needs before it writes its first migration — a settings table is easy to add and awkward to reshape once something is stored in it.
 
 **One question worth answering early even though it blocks nothing yet: Q4.8.** Which folders get scanned decides whether change #4 reads 6.2 GB or 15.2 GB, and that single choice has more effect on how the app feels than anything else in this proposal.
 
