@@ -67,6 +67,11 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q1.14** — absorb `Integrations.Pdf` | **Yes** — it becomes `MyDogsbody.Integrations.Documents` | Rename the project, move `PdfDocumentReader.fs`, keep its tests. One project per *capability* rather than per library, so the composition root binds `ReadDocumentText` once, in one place, for all four formats |
 | **Q1.15** — how many invoices | **Assume hundreds** | No server-side paging in the first pass, and `MudTable`'s client-side paging is enough. It also means a full rescan stays a "press it whenever" action rather than one you schedule — which is the assumption Q1.9 is riding on |
 | **Q1.16** — the largest window a user may add | **3650 days**, minimum 1 | A typo guard rather than a policy: big enough never to obstruct a real intention, small enough that 14000 typed for 1400 is rejected instead of walking the whole 16 GB store. The bound lives in `ScanWindowDays.create` and nowhere else |
+| **Q1.6** — which date the window measures | **The date the mail arrived**, with the picker labelled to say so | The one reading that lets the reader skip a message on its `Date` header before touching its body or attachments — which is what makes a 7-day window cheap over a 16 GB store. It also confirms why §3.2 mirrors the calendar range rather than reusing the window literally: this one looks backwards at *receipt*, the events sit forwards on *due* dates |
+| **Q1.11** — how a reader receives an attachment | **Bytes**, via a new `ReadDocumentText`. `ReadDocumentContent` and its coordinate-bearing `Word`s stay | No temp file per attachment per scan, and nothing existing breaks: `ReadDocumentLinesWorkflow`, its contract suite and the `PdfProcessing` scratch project all keep working. **§5.7 is closed** — the two types coexist and `PdfDocumentReader` satisfies both |
+| **Q1.17** — what can be done to the window list | **Add and delete, no edit**, seeded rows as deletable as any other; the last one cannot be deleted; deleting the selected one falls back to 14, or to the shortest still present | Already the design in §3.2: `CannotDeleteLastScanWindow` as a domain error rather than a UI guard, and `ResolveScanWindowWorkflow` owning the fallback in one place. Confirms why the remembered choice is a number rather than a foreign key |
+| **Q1.18** — is the cutoff measured from the start of today | **Start of day** (`getCurrentTime().Date`) | "The last 14 days" names a set of dates rather than 336 hours, so the same window scanned at 09:00 and 17:00 covers the same mail. Makes a rescan within one day genuinely idempotent, which Q4.10's watermarks also prefer |
+| **Q1.19** — do scan problems persist | **Yes** — in `ScanProblems`, keyed by source message id, cleared when that message later yields an invoice | Without it, Q4.10's incremental scanning empties the list the moment you rescan and the diagnostic is gone before you look. It also gives Q7.6.7's "reprocess this supplier" something to work from: the rows name which messages are worth re-reading after a template change, instead of a full pass over 6.2 GB. **§7.1 is now empty** |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
 
@@ -205,7 +210,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 - Dependency function types: `ListMailAccounts`, `LoadSelectedMailAccount`, `SaveSelectedMailAccount`, and
   - `ReadMailFolder = MailAccountId -> ScanCutoff -> Result<MailMessage list, InvoiceError>` — the cutoff is a parameter so the adapter stops reading rather than reading everything and discarding. On a 180-day window over a large mbox that difference is the whole responsiveness of the page.
   - **`GetCurrentTime = unit -> DateTime`** — new, and required by the rules: CLAUDE.md forbids the domain reading a clock, and "N days back from today" needs one. Production binds `fun () -> DateTime.Now` at the composition root; every test binds a fixed instant, which is what makes the cutoff arithmetic assertable at all.
-  - **`ReadDocumentText = DocumentSource -> Result<TextLine list, InvoiceError>`** — one type for all four formats, where
+  - **`ReadDocumentText = DocumentSource -> Result<TextLine list, DocumentError>`** — one type for all four formats. It is declared in `Documents/`, **beside the `ReadDocumentContent` that Q1.11 keeps**, rather than here: reading a document is that area's concern, and a reader that spoke `InvoiceError` would be a PDF reader only invoices could use. The invoice workflow maps `DocumentError → InvoiceError` as it binds, the same way it already borrows `LoadSuppliers` from a sibling area. Where
 
     ```fsharp
     type DocumentFormat = Pdf | Word | PlainText | EmailBody
@@ -262,7 +267,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 **`MyDogsbody.Integrations.Thunderbird`** (new) + `.Database.Models` (C#, if it stores anything)
 - `ThunderbirdFolderScanner.fs` — **the entry point, per Q4.2.** Given the root folder you chose, walk it recursively for `prefs.js` files; each one found is a profile root. No `profiles.ini` lookup and no `%APPDATA%` assumption. Handles the folder being one profile, a parent of several, or a backup copy.
 - `ThunderbirdAccountReader.fs` — `prefs.js` → accounts. **The authoritative list is `mail.accountmanager.accounts`, not the directory tree** — verified against the real profile in **§3.8**, where a directory walk would have found 15 IMAP accounts where 9 exist. Store paths come from `directory-rel`, never from `directory`, which was measurably stale.
-- `MailFolderReader.fs` — **mbox *and* maildir, both required per Q4.3**, though the real profile is 100% mbox, so maildir ships against synthetic fixtures only (Q4.11). Format per account comes from `storeContractID`. MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: skip a message on its `Date` header before touching its body or attachments, so a 7-day window doesn't pay for a decade of mailbox.
+- `MailFolderReader.fs` — **mbox *and* maildir, both required per Q4.3**, though the real profile is 100% mbox, so maildir ships against synthetic fixtures only (Q4.11). Format per account comes from `storeContractID`. MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: per Q1.6 the window measures the **received** date, so a message is skipped on its `Date` header before its body or attachments are touched — which is what stops a 7-day window paying for a decade of mailbox. A message whose `Date` is missing or unparseable is **included**, not skipped: excluding it would be silent data loss with nothing on screen to show for it, whereas including it produces at worst a stored row you can delete.
 - **Reads in place, never copies.** Thunderbird is running (Q4.4) and the store is 16 GB (§3.8), so `FileShare.ReadWrite` with a tolerated torn final message is the only workable read. Copy-then-parse — which I defaulted to before measuring — is off the table.
 - **Scans incrementally.** Re-reading 6.2 GB of in-scope mail on every window change is not viable, so each folder carries a watermark and a scan reads only what has been appended since. §3.8, Q4.10.
 - **Its own LiteDB store, holding everything Thunderbird-shaped**: the root folder you chose, the discovered accounts and their folder lists, the selected account, and the per-folder scan watermarks from Q4.10. Per §1.1 this is an Integration, so all of it stays here and none of it reaches the main SQLite database. The folder is no longer an "override" — after Q4.2 it is the only way the app finds anything, so the app is unusable until it is set, and the page must say so rather than showing an empty table.
@@ -329,7 +334,7 @@ And **one pair deleted**: `CredentialApiFactory.fs` + `CredentialApiMappers.fs`,
 
 Both new settings pages are the credentials page again: `MudTable` + toolbar button + `FunComponent` dialog + module creator with `cval`/`transact`. Nothing novel, which is the point — the novelty is all in §3.7.
 
-The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. **It can't be, now that the count is unknown at build time** — five looks fine as buttons and twelve does not, and the component cannot know which it will get. So: a `MudSelect` bound to `AvailableScanWindowsAval`, which renders any number of windows without the toolbar deciding how many are reasonable. The component holds no list of its own either way — that part of the original argument survives, and matters more now that the list is genuinely variable.
+The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. **It can't be, now that the count is unknown at build time** — five looks fine as buttons and twelve does not, and the component cannot know which it will get. So: a `MudSelect` bound to `AvailableScanWindowsAval`, which renders any number of windows without the toolbar deciding how many are reasonable. The component holds no list of its own either way — that part of the original argument survives, and matters more now that the list is genuinely variable. Per Q1.6 the label says what it measures — "mail received in the last 90 days", not "90 days" — because a bare number is exactly where someone assumes it means due dates.
 
 ### 3.6 Persistence — the main SQLite database, finally wired in
 
@@ -347,7 +352,7 @@ The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. 
 | `InvoiceCalendarEvents` | invoice id, google account id, calendar id, event id, last synced date |
 | `ScanWindows` | id, days — **unique**, so 14 cannot be added twice |
 | `InvoiceSettings` | a single row with its primary key fixed at 1 — the remembered scan window, in days |
-| `ScanProblems` | source message id, supplier id (nullable), cause, detail, scanned date — the messages that yielded nothing, per Q1.5. Its lifetime is **Q1.19** |
+| `ScanProblems` | source message id, supplier id (nullable), cause, detail, scanned date — the messages that yielded nothing, per Q1.5. **Persisted** (Q1.19), and a row is cleared when its message later yields an invoice |
 
 `Blog` and `Comment` stay as they are — they're scaffold, and nothing here disturbs them.
 
@@ -516,7 +521,7 @@ These are real, and each needs a decision — they are not blockers, but pretend
 4. **`.msf` index files are Mork format** — do not parse them. Either read the mail store directly, or read `global-messages-db.sqlite` (gloda), which is a SQLite index but is not guaranteed to be enabled or current.
 5. **Secrets at rest — deferred on purpose (Q5.6), not overlooked.** The existing credential store persists secrets in plaintext LiteDB, and OAuth refresh tokens are materially worse to leak than what is in there today: a refresh token is durable, silent to use, and grants calendar access until someone revokes it. The decision is to ship without encryption and say so in change #6's description, which is a legitimate call for a single-user desktop app on a machine you control. Two things follow from taking it deliberately: DPAPI (`ProtectedData`, `CurrentUser` scope) remains the low-friction retrofit if that ever changes, and it should be recorded that retrofitting means re-authorising every account, because tokens already written cannot be re-encrypted without being read first.
 6. **`Startup.fs` opens its databases at module load.** Three more stores means three more files opened in the working directory on first touch. Fine, but tests must keep away from `Startup` exactly as they do today.
-7. **The existing `Documents` area no longer fits.** `ReadDocumentContent` takes a `DocumentPath` and returns coordinate-bearing `Word`s; attachments have no path and three of the four formats have no coordinates. Something has to give, and there are consumers: `ReadDocumentLinesWorkflow`, the contract suite, and the `PdfProcessing` scratch project. Options are to widen the existing type, or to add `ReadDocumentText` beside it and let the PDF reader satisfy both. Q1.11.
+7. ~~**The existing `Documents` area no longer fits.**~~ **Closed by Q1.11** — nothing gives. `ReadDocumentText` (bytes → text lines) is added *beside* `ReadDocumentContent` (path → coordinate-bearing `Word`s), both live in `Documents/`, and `PdfDocumentReader` satisfies both. `ReadDocumentLinesWorkflow`, its contract suite and the `PdfProcessing` scratch project are untouched. The residual cost is honest and small: two dependency types that both mean "read a document", so each needs its own contract suite and the composition root must bind the right one — a `DocumentSource` carrying bytes and a `DocumentPath` are different enough types that it cannot be got wrong silently.
 8. ~~**Legacy `.doc` is a materially different problem from `.docx`.**~~ **Closed by Q1.12** — `.docx` only, so NPOI never enters the solution and this stops being a risk. What survives is one line of behaviour: a `.doc` attachment must produce a *listed* unsupported-format problem, not a silent skip. Silence here would look identical to "this supplier sends nothing", and you would never learn the difference.
 9. **A user-editable rule engine sits awkwardly with "types carry the rules".** The codebase's instinct is to make invalid states unrepresentable at compile time; a template is typed in at runtime, so the guarantee has to move to a validation boundary — `ValidTemplate`, produced when the page saves and never constructed anywhere else. That's the right answer, but it is a weaker guarantee than the rest of the domain enjoys, and the tests have to carry more of the weight. Add the regex-timeout requirement from §3.7 and this is the riskiest area in the build.
 10. **Change #5 deletes tested, working code, and coverage goes down before it goes up.** Removing `Integrations.Credentials` takes three domain workflows, a store, two mappers, a UI page and their tests out of a suite that is currently 204 green tests. That is the correct outcome — code that no longer exists needs no tests — but the change must say plainly what was removed rather than letting the total quietly drop. Characterization tests over the behaviour being *preserved* (a credential round-trips, a secret survives storage unchanged) go in first and are what the new per-provider collections must satisfy.
@@ -558,40 +563,20 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **18 questions**, down from 42 at the start of this round. **§7.3 and §7.4 are empty and §7.5 is down to one**, so **four of the seven changes are specifiable** — see §8. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **13 questions**, down from 42 at the start of this round. **§7.3 and §7.4 are empty and §7.5 is down to one**, so **four of the seven changes are specifiable** — see §8. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
-| §7.1 | which date the window measures, attachments as bytes, and three from the editable window list | 4 |
+| ~~§7.1~~ | ~~what an invoice is, and how far back to look~~ — **fully resolved** | ~~4~~ |
 | §7.2 | what lands on the calendar — four left, two of them opened by update-and-delete | 7 |
 | ~~§7.3~~ | ~~Google accounts and the credentials removal~~ — **fully resolved** | ~~6, 5~~ **both ready** |
 | ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ **ready to specify** |
-| §7.5 | **one question, and it is new** — Q5.14, opened by allowing hand-delete | 4 |
+| §7.5 | **one question, and it is new** — Q5.14, opened by allowing hand-delete. **The only thing left blocking #4** | 4 |
 | **§7.6** | **templates** — untouched, and still the largest unknown | **2** |
 
-### 7.1 What an invoice *is*, and how far back to look — blocking
+### 7.1 What an invoice *is*, and how far back to look — ✅ fully resolved
 
-- **Q1.6 — Which date does the scan window measure?** This is the one that changes behaviour rather than wording, and there are three candidates:
-  - **the date the mail arrived** — sits in the message header, so the reader can skip a message without parsing it, which is what makes a 7-day window fast;
-  - **the invoice issue date** — inside the document, so every message in the mbox must be fully parsed before it can be excluded, and the window stops being an optimisation;
-  - **the due date** — same cost, and it points *forwards*, so "90 days" would mean something different again.
-
-  They disagree in practice: an invoice that arrived 150 days ago but falls due next week is inside a 180-day window and outside a 30-day one on the first reading, and the reverse on the third.
-  *Default:* the date the mail arrived, with the picker labelled so it says that out loud ("mail received in the last 90 days") rather than leaving you to guess.
-- **Q1.11 — How does a reader receive an attachment?** It lives inside an mbox, so there is no file path. Either the domain's document dependency takes **bytes** (`DocumentSource`, §3.2) or the Thunderbird adapter spills each attachment to a temp file to reuse the existing path-based `ReadDocumentContent`. Bytes also means deciding what happens to the existing type and its contract suite (§5.7).
-  *Default:* bytes, with a new `ReadDocumentText` returning text lines; leave `ReadDocumentContent` and its coordinate-bearing `Word`s in place for anything that genuinely needs layout. Temp files for every attachment on every scan is a cleanup problem for no benefit.
-
-Opened by making the window list editable:
-
-- **Q1.17 — What can be done to the list, and what happens to a window you're using?** Add is a given. Beyond that: may the five seeded values be deleted, or are they fixed? And if you delete the window you last selected, what does the invoices page open on next time?
-  *Default:* add and delete, with no edit (a window is one number — changing it is a delete and an add) and no distinction between seeded and user-added rows, because a seeded value you never use is exactly the kind of clutter this page exists to let you remove. Deleting the last remaining window is refused. Deleting the one you had selected falls back to 14, or to the shortest window still present if 14 itself is gone — which is `ResolveScanWindowWorkflow`'s whole job and the reason the remembered choice is stored as a number rather than a foreign key.
-- **Q1.18 — Is the cutoff measured from the start of today, or from the exact moment you clicked?** They differ by up to a day. Start-of-day means "the last 14 days" names a set of dates and stays stable until midnight; exact-instant means it quietly means "the last 336 hours" and the same window covers different mail at 09:00 and at 17:00.
-  *Default:* start of day (`getCurrentTime().Date`). It is what a person means by "the last 14 days", it makes a rescan within one day genuinely idempotent, and it plays better with the per-folder watermarks in Q4.10. The cost is that a message that arrived this morning at 08:00 is inside a 1-day window all day — which is the behaviour you'd want anyway.
-
-Opened by Q1.5's answer:
-
-- **Q1.19 — Do scan problems persist, or are they only ever about the scan you just ran?** Q1.5 lists the messages that yielded nothing, so that you can see which template needs fixing. Q4.10 then makes scanning **incremental** — the second run reads only what has been appended since the watermark. Put those together and a transient list is empty the moment you rescan: the message that failed is not re-read, so its problem is not re-reported, and the diagnostic you were relying on to fix the template has vanished by the time you go looking.
-  *Default:* persist them in `ScanProblems` (§3.6), keyed by source message id, and clear a row when that message later yields an invoice. It also gives the "reprocess this supplier" idea in Q7.6.7 something to work from — the problem rows name exactly which messages are worth re-reading after a template change, which is much cheaper than a full rescan of 6.2 GB.
+Nothing open. Every question in this set is answered and recorded in §1.1 — including Q1.19, the last one, which this round opened and closed. Two of the answers here closed friction items outright: §5.7 (the `Documents` area) and §5.8 (legacy `.doc`).
 
 ### 7.2 What lands on the calendar — blocking
 
@@ -651,14 +636,14 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-**18 questions remain, down from 42 at the start of this round.** §7.3 and §7.4 are empty, §7.5 is down to a single new one, and §7.1 to five. Only §7.6 is untouched.
+**13 questions remain, down from 42 at the start of this round.** §7.1, §7.3 and §7.4 are all empty. Every question this document originally asked has now been answered — **what is left is entirely what the answers exposed**, plus §7.6, which has not been touched. Only §7.6 is untouched.
 
-**Two of the questions still open were not asked before this round — they exist because two separately reasonable answers combined into a hole.** Both are worth more attention than their size suggests:
+**The two most valuable things this round produced were not answers — they were holes that two separately reasonable answers opened between them.** One is now closed, one is not:
 
-- **Q5.14.** Q5.12 allows you to delete an invoice by hand. Q5.8 makes (supplier, invoice reference) the natural key and `UpsertInvoices` the write path. Together, **the next scan finds the deleted invoice again and puts it back** — and under Q2.13 then uploads it to your calendar. Delete currently means "hide until the next scan", which is exactly the failure mode that ruled out hand-*editing* in Q5.12. A tombstone fixes it in one table and one filter.
-- **Q1.19.** Q1.5 lists the messages that yielded nothing so you can see which template to fix. Q4.10 makes scanning incremental, so the second run does not re-read those messages. A transient problem list is therefore **empty by the time you go looking for it**. Persisting the problems fixes it, and pays for itself again in Q7.6.7 — the rows name precisely which messages are worth re-reading after a template change, which beats rescanning 6.2 GB.
+- **Q1.19 — found and closed in the same round.** Q1.5 lists the messages that yielded nothing so you can see which template to fix. Q4.10 makes scanning incremental, so the second run does not re-read those messages. A transient problem list would therefore have been **empty by the time you went looking for it**. Persisting the rows fixes it and pays for itself again in Q7.6.7 — they name precisely which messages are worth re-reading after a template change, which beats rescanning 6.2 GB.
+- **Q5.14 — still open, and it is the last thing blocking change #4.** Q5.12 allows you to delete an invoice by hand. Q5.8 makes (supplier, invoice reference) the natural key and `UpsertInvoices` the write path. Together, **the next scan finds the deleted invoice again and puts it back** — and under Q2.13 then uploads it to your calendar. As it stands "delete" means "hide until the next scan", which is exactly the failure mode that ruled out hand-*editing* in Q5.12. A tombstone on the same key fixes it: one small table, one filter in `UpsertInvoices`.
 
-Neither is expensive. Both would have been found in change #4, after the code was written.
+Neither would have been visible from any single answer. Both would have surfaced in change #4, after the code was written.
 
 **Four changes are specifiable, three of them today:**
 
@@ -671,6 +656,6 @@ Neither is expensive. Both would have been found in change #4, after the code wa
 
 **§7.6 is now the largest thing standing.** Eight questions, all of them about change #2, which is the biggest and least precedented piece of the build — and §3.7 is the one part of this proposal with no equivalent of §3.8's measurement behind it. The fastest way to de-risk it has not changed: take two real invoices from two different suppliers and check whether `AfterLabel`, `LinesAfterLabel`, `RegexCapture` and `FixedValue` can actually locate every field. If they can't, better to learn it now than after the rule editor is built.
 
-What remains blocks exactly three changes: **§7.1's five plus Q5.14 → #4**, **§7.2's four → #7**, **§7.6's eight → #2**.
+What remains blocks exactly three changes: **Q5.14 alone → #4**, **§7.2's four → #7**, **§7.6's eight → #2**.
 
 Requirements in EARS notation, agreed before any `design.md`, per CLAUDE.md.
