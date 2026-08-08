@@ -35,6 +35,8 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q4.4** — is Thunderbird running | **Yes** | The store must be read without a clean lock |
 | **Q4.5** — how the folder is chosen | **Native folder dialog** | `Microsoft.Win32.OpenFolderDialog` on the WPF side, injected as a `ChooseFolder` function. First change to touch the host — §5.12 |
 | **Q4.6 / Q4.7** — how accounts are found, and may we read in place | **Settled by measuring the real profile** — see §3.8 | `prefs.js` is the mechanism, not a fallback; and at **16 GB**, copy-then-parse is impossible. Both were guesses before; neither is now |
+| **Q4.8–Q4.11** — folders scanned, duplicates, incremental scanning, maildir | **All four as proposed** | Scan excludes Trash/Deleted/Junk/Sent/Drafts (6.2 GB, not 15.2); duplicate profiles listed qualified by path; per-folder watermarks with a full-rescan escape; maildir built against synthetic fixtures only. **§7.4 is now fully resolved** |
+| **Thunderbird data retrieval** | **It is an Integration** | The mirror of the invoice/supplier rule. Accounts, folder lists, watermarks and the chosen root folder are Thunderbird's own facts, in Thunderbird's own store — never in the main database. §3.3 |
 | **Q5.1** — which storage tier | **Invoices are MyDogsbody items, not Integration items.** So are **suppliers** | The main SQLite database stops being theoretical: suppliers, templates and invoices all persist there, behind FluentMigrator migrations. §3.6 |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
@@ -48,6 +50,7 @@ Invoices and suppliers are the application's own concepts with their own lifecyc
 - `Integrations.Google` owns only Google's own facts: registered accounts, their default invoice calendar, and — per §3.9 — their **credentials**, in a `Credentials` collection in its own database.
 - **An invoice outlives both.** Removing the Google account, or switching the Thunderbird account, does not delete invoices or suppliers.
 - Reading a PDF is still an *integration* — it's an adapter for a capability the domain declares. Don't read this as moving `PdfDocumentReader` inward; the reading is infrastructure, the invoice is not.
+- **Thunderbird data retrieval is an Integration, explicitly** — the mirror image of the rule above, and the two together draw the line cleanly. A Thunderbird *account* is not a MyDogsbody item: it is a fact about someone else's mail client, discovered by reading their files, meaningless if you uninstall Thunderbird. An *invoice* extracted from it is a MyDogsbody item and survives. So `Integrations.Thunderbird` owns the root folder, the discovered accounts, the folder lists and the scan watermarks, in its own LiteDB — and **none of those go anywhere near the main SQLite database**, which holds only suppliers, templates and invoices.
 
 The one place this may overshoot is **persistence**. If you meant only "the concept belongs to the domain", and you're happy for the table to be a live view of your mailbox recomputed on each scan and stored nowhere, say so — it is a materially smaller build. Note that templates push hard the other way: a template you typed has to be saved somewhere regardless, so at least part of the ledger is now unavoidable. See **Q5.7**.
 
@@ -198,7 +201,16 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
 - `MailFolderReader.fs` — **mbox *and* maildir, both required per Q4.3**, though the real profile is 100% mbox, so maildir ships against synthetic fixtures only (Q4.11). Format per account comes from `storeContractID`. MIME parsing (MimeKit is the realistic pick) for attachments. **Takes the cutoff and honours it while reading**: skip a message on its `Date` header before touching its body or attachments, so a 1-month window doesn't pay for a 12-month mailbox.
 - **Reads in place, never copies.** Thunderbird is running (Q4.4) and the store is 16 GB (§3.8), so `FileShare.ReadWrite` with a tolerated torn final message is the only workable read. Copy-then-parse — which I defaulted to before measuring — is off the table.
 - **Scans incrementally.** Re-reading 6.2 GB of in-scope mail on every window change is not viable, so each folder carries a watermark and a scan reads only what has been appended since. §3.8, Q4.10.
-- Its own small LiteDB store for **the root folder you chose** and the selected account. Those are Thunderbird's own facts, so under §1.1 they stay here rather than going to the main database. The folder is no longer an "override" — after Q4.2 it is the only way the app finds anything, so the app is unusable until it is set, and the page has to say so rather than showing an empty table.
+- **Its own LiteDB store, holding everything Thunderbird-shaped**: the root folder you chose, the discovered accounts and their folder lists, the selected account, and the per-folder scan watermarks from Q4.10. Per §1.1 this is an Integration, so all of it stays here and none of it reaches the main SQLite database. The folder is no longer an "override" — after Q4.2 it is the only way the app finds anything, so the app is unusable until it is set, and the page must say so rather than showing an empty table.
+
+As an integration it follows the same rules as `Integrations.Credentials` does today, and there is nothing novel to invent:
+
+- A context record of `unit -> ILiteCollection<T>` getters from a `ThunderbirdDatabaseContextModule.getDatabaseContext`, with a `Dispose` that closes the `LiteDatabase`.
+- Entities as mutable **C# classes** in `MyDogsbody.Integrations.Thunderbird.Database.Models`, because LiteDB needs settable properties.
+- **A `BsonMapper.Global.ToDocument` warm-up per entity before the context is returned** — non-negotiable; CLAUDE-project.md records this as a 6-in-10 intermittent failure when it was missed, and a scan running on an `Async.Start` thread is exactly the reachable case.
+- Adapters returning `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames.MyDogsbody.Integrations.Thunderbird.*` entry per function.
+- The collection getter stops at the integration boundary. `MyDogsbody.Domain` never names `ILiteCollection`, a profile path, an mbox offset or a `prefs.js` key — it names `ListMailAccounts` and `ReadMailFolder`, and this project satisfies them.
+- It references `Domain` and nothing else outward. It does not know that invoices exist.
 - **Hands over bytes, not paths.** An attachment is extracted from the message in memory and passed on as a `DocumentSource`; nothing is spilled to disk. Q1.11.
 
 **`MyDogsbody.Integrations.Documents`** — the four readers behind `ReadDocumentText`
@@ -347,7 +359,7 @@ Resolve `[ProfD]` against **the folder the user chose**, never against the recor
 
 **3. At 16 GB, copy-then-parse is impossible.** That was my default for Q4.4 and it is simply wrong at this scale — a single 2.5 GB mbox cannot be copied per scan, let alone 16 GB. The reader **must** open with `FileShare.ReadWrite` and read in place, tolerating a torn final message. There is no fallback to argue about.
 
-It also makes **Q4.8's folder exclusions load-bearing rather than tidy**: dropping Trash, Deleted, Junk, Sent and Drafts removes 9.0 GB of 15.2 GB. That is the difference between a scan that is feasible and one that is not.
+It also made **the folder exclusions load-bearing rather than tidy** — dropping Trash, Deleted, Junk, Sent and Drafts removes 9.0 GB of 15.2 GB, the difference between a scan that is feasible and one that is not. That is now decided (Q4.8): **the scan covers 6.2 GB, not 15.2.**
 
 And it forces something not previously in this proposal — **incremental scanning**. Re-reading 6.2 GB every time the window picker changes is not viable, so each folder needs a watermark (file size and mtime at last scan, plus the offset reached) and a scan must read only what has been appended since. mbox is append-only in normal operation, which is what makes this sound; a compact or a repair resets the watermark and forces a full re-read of that folder. **Q4.10.**
 
@@ -455,14 +467,14 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **48 questions**, of which §7.6 and Q5.7 are the two sets standing between here and a first `requirements.md`. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **45 questions**, of which §7.6 and Q5.7 are the two sets standing between here and a first `requirements.md`. **§7.4 is empty** — Thunderbird is fully specified. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
 | §7.1 | what an invoice is, the scan window, document formats | 4 |
 | §7.2 | what lands on the calendar | 7 |
 | §7.3 | Google accounts (Q3.1–Q3.6) and the credentials removal (Q3.7–Q3.10) | 6, and **5** |
-| §7.4 | Thunderbird accounts | 3 |
+| ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ ready to specify |
 | §7.5 | storage, testing, process | 1 (via Q5.7, Q5.9) |
 | **§7.6** | **templates — the new set** | **2** |
 
@@ -543,16 +555,9 @@ Opened by removing the credentials integration (§3.9) — these block change #5
 - **Q3.10 — Does `/settings/credentials` disappear entirely?** Once each provider owns its credentials, the Google accounts page *is* Google's credential page. A generic page listing everything would have to reach into every provider's database, which is exactly the coupling §3.9 removes.
   *Default:* it goes, along with `CredentialsComponents`, `CredentialsBrowserModule` and their tests. The nav entry is replaced by the per-provider pages.
 
-### 7.4 Thunderbird accounts — blocking
+### 7.4 Thunderbird accounts — ✅ fully resolved
 
-- **Q4.8 — Which folders within the chosen account get scanned?** Inbox only, every folder, or a set you nominate? Templates decide *whether a message is an invoice*; nothing yet decides *where to look*. §3.8 turned this from a tidiness question into a load-bearing one: `Trash`, `Deleted`, `Junk`, `Sent` and `Drafts` hold **9.0 GB of the 15.2 GB**, and Sent in particular produces plausible false matches because invoices get forwarded.
-  *Default:* everything except those five, cutting the scan to 6.2 GB. Exclusions shown on the page rather than hidden in code — and one of your accounts has a 2.5 GB `[Gmail]/Trash`, so this is worth getting right rather than making configurable-and-forgotten.
-- **Q4.10 — Is incremental scanning acceptable, and what should invalidate it?** §3.8 makes it necessary: 6.2 GB cannot be re-read per window change. The scheme is a per-folder watermark — byte offset reached, plus file size and mtime at that point — with a scan reading only what was appended since. It relies on mbox being append-only, which holds in normal use but not across a Thunderbird compact or repair.
-  *Default:* watermark per folder; if size shrank or mtime moved without size growing, discard it and re-read that folder in full. A visible "rescan everything" action for when you don't trust it. The alternative — full read every time — is honest but means a coffee break per click.
-- **Q4.11 — Maildir has no real data to test against.** Q4.3 requires it, but all ten accounts in your profile are mbox, so the maildir reader would ship verified only against hand-built fixtures. Is that acceptable, or is maildir better deferred until an account actually uses it?
-  *Default:* build it with synthetic fixtures and say plainly in the change description that no real maildir store was exercised. Deferring is also reasonable — it would take real work out of change #3 for a format you demonstrably don't use yet.
-- **Q4.9 — What if the folder contains several profiles, or the same account twice?** A backup copy sitting next to a live profile would produce duplicate accounts with identical names.
-  *Default:* list them all, qualified by the path they were found at, and let you pick. Silently de-duplicating would hide the fact that you pointed at something unexpected.
+Nothing open. All eleven questions are answered, the plan is measured against the real profile in §3.8, and **change #3 can be specified as soon as you want it.** Alongside change #1 it is one of the two pieces of this build that is ready to write requirements for today.
 
 ### 7.5 Storage and process — decide during design
 
@@ -574,6 +579,8 @@ Opened by removing the credentials integration (§3.9) — these block change #5
   *Default:* in `MyDogsbody.Database`. It is already the main-database tier, the reference points inward so it breaks no rule, and a separate project per store is more ceremony than this earns.
 - **Q5.10 — Do templates need export/import?** They will represent real effort to get right, and they'd currently live only in a SQLite file in `bin\Debug\net9.0\`. A JSON export would make them backup-able and reproducible after a clean rebuild.
   *Default:* not in the first pass, but keep the template model serialisable so adding it later is a page, not a redesign. Worth saying out loud that a `dotnet clean` should never be able to destroy a morning's template work.
+- **Q5.11 — How much provenance does an invoice keep, now that its source is an Integration?** `SourceMessageId` is already on the invoice — a Thunderbird-shaped fact sitting on a MyDogsbody item. Should the invoice also record the account and folder it came from, which would help answer "why did this appear?", or is that leaking integration vocabulary into the ledger?
+  *Default:* keep `SourceMessageId`, add nothing else. A message id is a standard identifier that still means something outside Thunderbird; account and folder names are that client's vocabulary and stop making sense the moment mail is moved or the client changes. If a diagnostic view wants more, the Thunderbird integration can answer from the message id.
 
 ### 7.6 Templates — the new question set, blocking for change #2
 
@@ -600,18 +607,20 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-§1.1 has closed eighteen questions and opened thirty-two — 34 open before, 48 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those thirty-two would otherwise have surfaced mid-implementation, when they cost more.
+§1.1 has closed twenty-two questions and opened thirty-three — 34 open before, 45 now. That is normal for a pre-proposal, and it is exactly why this file exists rather than a `requirements.md`: most of those thirty-two would otherwise have surfaced mid-implementation, when they cost more.
 
 **§3.8 is the part of this document I trust most**, because it is the only part measured rather than reasoned. Two of my defaults were wrong — structural account detection and copy-then-parse — and both would have survived into code. It is worth doing the equivalent for the templates in §3.7 before change #2: two real invoices from two real suppliers, checked against the four rule kinds.
 
-**Two independent starting points, either of which can begin now:**
+**Change #3 is ready now, with nothing left to ask.** §7.4 is empty and §3.8 is measured against your actual profile, so `docs/changes/thunderbird-account-selection/requirements.md` can be written today. It is also the change that produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
 
-- **Q5.7 → change #1.** Confirm invoices really persist, and `docs/changes/invoice-ledger-foundation/requirements.md` can be written immediately. Small change, no external dependency, and it proves the main SQLite database, its migrations and its store shape all work — which everything else leans on.
+**Two more starting points, each one question away:**
+
+- **Q5.7 → change #1.** Confirm invoices really persist and `invoice-ledger-foundation` can be specified. Small, no external dependency, and it proves the main SQLite database, its migrations and its store shape — which everything else leans on.
 - **Q3.7–Q3.10 → change #5.** The credentials refactor depends on nothing and blocks the Google work. It is also the only change that makes the codebase *smaller*, so it is a good one to have behind you.
 
 **§7.6 is the one to think hardest about.** It decides change #2, which is the largest and least precedented piece of the build, and no amount of design work elsewhere will de-risk it. If you want to sanity-check the template model before committing to it, the fastest test is to take two real invoices from two different suppliers and check whether the four rule kinds in §3.7 can actually locate every field.
 
-The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6, §7.4 → #3. Everything in §7.5 apart from Q5.7 can be settled during design.
+The rest stay blocking only for the change that needs them: §7.1 → #4, §7.2 → #7, §7.3 → #6. Everything in §7.5 apart from Q5.7 can be settled during design.
 
 **One question worth answering early even though it blocks nothing yet: Q4.8.** Which folders get scanned decides whether change #4 reads 6.2 GB or 15.2 GB, and that single choice has more effect on how the app feels than anything else in this proposal.
 
