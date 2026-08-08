@@ -72,6 +72,11 @@ Everything below is a proposed shape for that, plus the decisions that have to b
 | **Q1.17** — what can be done to the window list | **Add and delete, no edit**, seeded rows as deletable as any other; the last one cannot be deleted; deleting the selected one falls back to 14, or to the shortest still present | Already the design in §3.2: `CannotDeleteLastScanWindow` as a domain error rather than a UI guard, and `ResolveScanWindowWorkflow` owning the fallback in one place. Confirms why the remembered choice is a number rather than a foreign key |
 | **Q1.18** — is the cutoff measured from the start of today | **Start of day** (`getCurrentTime().Date`) | "The last 14 days" names a set of dates rather than 336 hours, so the same window scanned at 09:00 and 17:00 covers the same mail. Makes a rescan within one day genuinely idempotent, which Q4.10's watermarks also prefer |
 | **Q1.19** — do scan problems persist | **Yes** — in `ScanProblems`, keyed by source message id, cleared when that message later yields an invoice | Without it, Q4.10's incremental scanning empties the list the moment you rescan and the diagnostic is gone before you look. It also gives Q7.6.7's "reprocess this supplier" something to work from: the rows name which messages are worth re-reading after a template change, instead of a full pass over 6.2 GB. **§7.1 is now empty** |
+| **Q2.9** — does the window bound import, view, or both | **Both**, with the window and count stated above the table | Narrowing hides, it does not forget — nothing is deleted from the ledger, and the sync button acts only on what is visible. That sentence is now load-bearing rather than tidy: §5.18's first hazard is exactly what happens if it stops being true |
+| **Q2.10** — what goes inside the extended property | **Supplier id + invoice reference**, under one well-known property name, with the local invoice id alongside for diagnostics only | The Q5.8 natural key rather than the database id, so rebuilding the ledger from scratch does not make every event read as missing. That key now appears in three places — see `InvoiceSyncKey` in §3.2 |
+| **Q2.13** — what makes an event eligible for deletion | **The invoice left the ledger**, and the delete happens **on the next sync**, visible in the plan before you press it | Deleting a row in one app does not silently reach into another. A plan you can see before it runs is the difference between trusting this feature with delete permission and not |
+| **Q2.14** — does a sync overwrite a hand-edited event | **Yes — the event is app-owned and always wins.** Title and date are rewritten | The honest cost of Q2.6: Q2.4 chose the extended property so a rename would not cause a duplicate, and it now also means a rename gets reverted. Justified because a title disagreeing with the ledger is worse than a lost edit — but the page should not pretend otherwise |
+| **Q5.14** — does a hand-deleted invoice stay deleted | **Yes** — a **tombstone** on the natural key, which the scan skips. Visible and reversible | Without it "delete" meant "hide until the next scan", which is the failure mode that ruled out hand-editing in Q5.12. **§7.2 and §7.5 are now empty, and §7.6 is all that remains** |
 
 #### What "MyDogsbody items, not Integration items" is taken to mean
 
@@ -227,7 +232,7 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
   From the `Suppliers` and `InvoiceTemplates` areas the invoice workflows also take `LoadSuppliers` and `LoadTemplatesForSupplier`. A workflow taking a dependency declared in a sibling area is fine — they are all inside `MyDogsbody.Domain`, and the alternative is duplicating the type.
 
 **`Calendar/CalendarTypes.fs`**
-- `GoogleAccountId`, `CalendarId`, `CalendarEventId`, `CalendarEvent`, and `InvoiceSyncKey` — the idempotency key, now settled as the value stamped into a private extended property (Q2.4). It is a domain type precisely because both sides of the diff have to derive it the same way.
+- `GoogleAccountId`, `CalendarId`, `CalendarEventId`, `CalendarEvent`, and `InvoiceSyncKey` — the idempotency key, settled by Q2.4 as the value stamped into a private extended property and by Q2.10 as **supplier id + invoice reference**, the Q5.8 natural key. It is a domain type precisely because both sides of the diff have to derive it the same way — and that now matters three times over, because the same key identifies a row in the unique index, an event on the calendar, and a tombstone (Q5.14). **One function derives it, and everything else calls that function.** Three hand-rolled derivations of the same key would agree right up until one of them didn't.
 - `AllDayEvent` — start date and title/description only. Q2.1 makes every invoice event all-day on the due date, so there is no reason for the domain to carry times, time zones or durations it never sets. Keeping them out means the mapper cannot accidentally invent one.
 - `RegisteredGoogleAccount` carries its **default invoice calendar** (Q2.3): `{ Id; EmailAddress; DefaultInvoiceCalendar: CalendarId option }`. The `option` is not laziness — a freshly authorised account genuinely has no calendar chosen yet, and per Q2.11 that state renders as *not ready* with the sync button disabled, rather than as a failure at the API.
 - **`CalendarDateRange`** — the bound `Events.list` needs, `private CalendarDateRange of DateTime * DateTime`. Q2.5 ties it to the scan window, which needs saying carefully, because the obvious reading is wrong: the scan window looks **backwards** at when mail arrived, while an invoice event sits on its **due date**, which is normally ahead of that. Querying `[today - N, today]` would therefore miss the event for every invoice not yet due, read it as absent, and create a second one. So the same N drives both, mirrored: `[today - N, today + N]`, **stretched forward if any invoice in view falls due later than that** — a supplier on 60-day terms inside a 14-day window is not exotic. One number, one setting, no second knob on the page; it just cannot be applied in one direction only.
@@ -236,12 +241,12 @@ Keeping the matcher on the **supplier** rather than on the template is deliberat
   ```fsharp
   type SyncAction =
       | CreateEvent of UploadableInvoice
-      | UpdateEvent of CalendarEventId * UploadableInvoice   // the invoice changed since upload
+      | UpdateEvent of CalendarEventId * UploadableInvoice   // event disagrees with the ledger
       | DeleteEvent of CalendarEventId                       // the invoice is gone from the ledger
       | LeaveAlone  of CalendarEventId                       // identical - no API call at all
   ```
 
-  `LeaveAlone` is a case rather than an absence on purpose: it is what makes "sync twice, second one does nothing" assertable, and with update enabled that is no longer free the way it was under insert-only.
+  Per Q2.14 an `UpdateEvent` rewrites the title and the date unconditionally: the event is app-owned, so "disagrees with the ledger" covers both an invoice that changed and an event somebody edited by hand, and the workflow does not try to tell those apart. `LeaveAlone` is a case rather than an absence on purpose: it is what makes "sync twice, second one does nothing" assertable, and with update enabled that is no longer free the way it was under insert-only.
 - Error DU: `CalendarError` — `CalendarUnreachable`, `NotAuthorised`, `AccountNotRegistered`, `NoDefaultCalendar of GoogleAccountId`, `CalendarNoLongerExists of CalendarId`, `EventRejected`, and now `EventNoLongerExists of CalendarEventId` — an update or delete aimed at an event somebody already removed by hand, which is expected rather than exceptional and must not fail the batch.
 - Dependency function types: `ListGoogleAccounts`, `RegisterGoogleAccount`, `SetDefaultInvoiceCalendar`, `ListCalendars`, `ListCalendarEvents` (now taking a `CalendarDateRange`), `CreateCalendarEvent`, and per Q2.6 **`UpdateCalendarEvent`** and **`DeleteCalendarEvent`**.
 
@@ -325,7 +330,7 @@ And **one pair deleted**: `CredentialApiFactory.fs` + `CredentialApiMappers.fs`,
 
 | Page | Route | Contents |
 | --- | --- | --- |
-| Invoices | `/invoices` (top-level, not settings) | **Scan-window picker, rendering whatever windows the store holds and opening on the remembered choice**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column (**four states now, not two** — up to date, missing, changed, orphaned) and **a per-row checkbox** (Q2.7), a "Sync to calendar" button that acts on the ticked rows or on everything outstanding when none are ticked and shows that count, per-row outcomes after a partial failure (Q2.8), **a per-row delete** (Q5.12 — delete only, no inline edit), a **"problems" view** listing the messages that yielded nothing and why (Q1.5), and `MudAlert` from `ErrorAval` |
+| Invoices | `/invoices` (top-level, not settings) | **Scan-window picker, rendering whatever windows the store holds and opening on the remembered choice**, Google-account picker — **no calendar picker**, the account carries its own (Q2.3), shown read-only beside it — refresh, invoice table with a per-row sync-status column (**four states now, not two** — up to date, missing, changed, orphaned) and **a per-row checkbox** (Q2.7), a "Sync to calendar" button that acts on the ticked rows or on everything outstanding when none are ticked and shows that count, per-row outcomes after a partial failure (Q2.8), **a per-row delete** (Q5.12 — delete only, no inline edit), a **"problems" view** listing the messages that yielded nothing and why (Q1.5), the window and count stated above the table so the list reads as a range rather than the whole ledger (Q2.9), a view of **tombstoned invoices** with an un-delete (Q5.14), and `MudAlert` from `ErrorAval` |
 | Google accounts | `/settings/google-accounts` | Table of registered accounts, "Add account" → consent flow, **the default invoice calendar for each account, picked from a dropdown of that account's own calendars**, remove / re-authorise |
 | Thunderbird accounts | `/settings/mail-accounts` | **The root folder to search** (Q4.2) with a Browse button, a "scan for accounts" action, the table of accounts the recursive walk found — name, email, store format, message count — and a radio to pick the one to import from |
 | **Suppliers** | `/settings/suppliers` | Table of suppliers with their match rules; add / edit / delete via dialog; each row opens that supplier's templates |
@@ -353,6 +358,7 @@ The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. 
 | `ScanWindows` | id, days — **unique**, so 14 cannot be added twice |
 | `InvoiceSettings` | a single row with its primary key fixed at 1 — the remembered scan window, in days |
 | `ScanProblems` | source message id, supplier id (nullable), cause, detail, scanned date — the messages that yielded nothing, per Q1.5. **Persisted** (Q1.19), and a row is cleared when its message later yields an invoice |
+| `InvoiceTombstones` | supplier id, invoice reference, when it was deleted — the Q5.14 record that keeps a hand-deleted invoice deleted |
 
 `Blog` and `Comment` stay as they are — they're scaffold, and nothing here disturbs them.
 
@@ -365,6 +371,8 @@ The scan-window picker was going to be a `MudToggleGroup` of six fixed buttons. 
 Q2.6 sharpens that. A delete clears the row (`ClearSyncRecord`), an update refreshes its date, and neither is allowed to become the thing the diff consults — if this table and the calendar disagree, the calendar is right and this table is out of date. Its actual job is diagnostic: *when did we last touch this event, and on whose calendar?*, which is the first question worth asking when a sync did something unexpected.
 
 **The store functions live in `MyDogsbody.Database`** (Q5.9): it gains `SupplierStore.fs`, `TemplateStore.fs`, `InvoiceStore.fs`, `ScanWindowStore.fs` and their record ⇄ domain mappers, plus a `ProjectReference` to `MyDogsbody.Domain`. No new project. It is outer-ring code, so it keeps the outer-ring shape: dependencies first, input last, `Result<'T, MyDogsbodyException>`, written with `handleError`, one `ActionNames` entry per function.
+
+**`InvoiceTombstones` needs to be visible on screen, not just present** (Q5.14). It is a filter applied inside `UpsertInvoices`, so a tombstoned key is silently skipped by every later scan — which is exactly right for junk from a marketing email that matched a supplier, and exactly wrong the day you delete a row because the *template* was broken, fix the template, and the corrected invoice under that same reference is then skipped too. A list you can see and un-tombstone costs one small page and removes the only way this feature can lie to you.
 
 **`Invoices` carries a unique index on (supplier id, invoice reference)** (Q5.8). That pair is the natural key, so a rescan of an overlapping window updates rather than duplicates, and the database refuses a duplicate even when the code is wrong. `SourceMessageId` rides along for traceability but is not the key — one message can carry more than one invoice.
 
@@ -498,7 +506,7 @@ The answers in §1.1 roughly doubled the original four, and **Q5.4 confirms all 
 | 1 | `invoice-ledger-foundation` | **The main SQLite database wired into the app for the first time**: `Suppliers` + `SupplierMatchers` migrations, store functions, `SupplierApi`, suppliers page. No invoices, no mail, no calendar | — |
 | 2 | `invoice-templates` | The template model (§3.7), `ApplyTemplateWorkflow`, template migrations, templates page with the rule editor and the test panel. Ask #6 | 1 |
 | 3 | `thunderbird-account-selection` | Thunderbird accounts page, native folder picker (first host change), recursive `prefs.js` discovery per §3.8, both mbox and maildir, selection persisted. Grew with the Q4.2–Q4.4 answers. Ask #5 | — |
-| 4 | `invoice-extraction` | The four document readers (`Integrations.Documents`, absorbing `Integrations.Pdf`), the `Invoices` and `ScanProblems` migrations, the scan pipeline, the invoice table with per-row delete and a problems view — **and the whole scan-window apparatus**: the `ScanWindows` and `InvoiceSettings` migrations with their seed, the settings page, the picker, the remembered choice. **The largest change after #2**, and the one to split first if it gets unwieldy. Ask #2 | 1, 2, 3 |
+| 4 | `invoice-extraction` | The four document readers (`Integrations.Documents`, absorbing `Integrations.Pdf`), the `Invoices`, `ScanProblems` and `InvoiceTombstones` migrations, the scan pipeline, the invoice table with per-row delete and a problems view — **and the whole scan-window apparatus**: the `ScanWindows` and `InvoiceSettings` migrations with their seed, the settings page, the picker, the remembered choice. **The largest change after #2**, and the one to split first if it gets unwieldy. Ask #2 | 1, 2, 3 |
 | 5 | `credentials-per-provider` | **Pure refactor, no new feature.** Deletes `Integrations.Credentials`; each provider integration gains a `Credentials` collection in its own LiteDB. Characterization tests before anything moves. §3.9 | — |
 | 6 | `google-account-integration` | Google accounts page, OAuth registration, calendar listing, **and the per-account default invoice calendar** — Q2.3 moved that here from #7. Ask #4 | 5 |
 | 7 | `invoice-calendar-sync` | The diff as a four-action plan — create, update, delete, leave alone (Q2.6) — the sync-status column, per-row selection plus a bulk button (Q2.7), `InvoiceCalendarEvents`. **The only change here that can destroy data outside the app**, so §5.18's guard is its headline test. Asks #1 and #3 | 4, 6 |
@@ -563,37 +571,24 @@ These are real, and each needs a decision — they are not blockers, but pretend
 
 Answer the **blocking** ones before the `requirements.md` for the change they block. The rest can be decided during design, but earlier is cheaper. Each carries my recommendation — "default" is what I'd write if you just said "use your judgement".
 
-**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **13 questions**, down from 42 at the start of this round. **§7.3 and §7.4 are empty and §7.5 is down to one**, so **four of the seven changes are specifiable** — see §8. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
+**Answered questions are removed from this section** — the decisions they became are recorded in §1.1 and built into §3. What is left below is only what is still open: **8 questions, all of them in §7.6**, down from 42 at the start of this round. **§7.3 and §7.4 are empty and §7.5 is down to one**, so **four of the seven changes are specifiable** — see §8. Numbering is not contiguous; gaps are answered questions, and numbers are never reused.
 
 | Set | Covers | Blocks change |
 | --- | --- | --- |
 | ~~§7.1~~ | ~~what an invoice is, and how far back to look~~ — **fully resolved** | ~~4~~ |
-| §7.2 | what lands on the calendar — four left, two of them opened by update-and-delete | 7 |
-| ~~§7.3~~ | ~~Google accounts and the credentials removal~~ — **fully resolved** | ~~6, 5~~ **both ready** |
-| ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ **ready to specify** |
-| §7.5 | **one question, and it is new** — Q5.14, opened by allowing hand-delete. **The only thing left blocking #4** | 4 |
-| **§7.6** | **templates** — untouched, and still the largest unknown | **2** |
+| ~~§7.2~~ | ~~what lands on the calendar~~ — **fully resolved** | ~~7~~ |
+| ~~§7.3~~ | ~~Google accounts and the credentials removal~~ — **fully resolved** | ~~6, 5~~ |
+| ~~§7.4~~ | ~~Thunderbird accounts~~ — **fully resolved**, §3.8 | ~~3~~ |
+| ~~§7.5~~ | ~~storage and process~~ — **fully resolved** | ~~4~~ |
+| **§7.6** | **templates — the only set left, and the one never yet touched** | **2** |
 
 ### 7.1 What an invoice *is*, and how far back to look — ✅ fully resolved
 
 Nothing open. Every question in this set is answered and recorded in §1.1 — including Q1.19, the last one, which this round opened and closed. Two of the answers here closed friction items outright: §5.7 (the `Documents` area) and §5.8 (legacy `.doc`).
 
-### 7.2 What lands on the calendar — blocking
+### 7.2 What lands on the calendar — ✅ fully resolved
 
-- **Q2.9 — Does the scan window bound the import, the view, or both?** Now that invoices persist (§1.1), these come apart. The window necessarily bounds the **import** — it's what decides which mail is read. Whether it also filters the **table** is a separate choice: the store may well hold invoices from outside it.
-  *Default:* both, with the window and count stated above the table ("41 invoices, received in the last 90 days") so the list is obviously a view of a range rather than the whole ledger. Nothing is deleted when you narrow it — narrowing hides, it does not forget — and the sync button acts only on what is visible. **Q2.6 raises the stakes on that sentence**: with deletes bound, "hides, does not forget" has to hold in the diff as well as in the table, which is §5.18's first hazard and Q2.13's safe rule.
-
-Opened by the answers to Q2.3 and Q2.4:
-
-- **Q2.10 — What value goes inside the private extended property?** Q2.4 settled the *mechanism*; this is the string it carries. It has to be stable across rescans and unique per invoice — which argues for the Q5.8 natural key (supplier + invoice reference) rather than the local database id, since that id would change if you ever rebuilt the ledger from scratch and every event would then read as missing.
-  *Default:* a composite of supplier id and invoice reference under a single well-known property name, with the local invoice id stored alongside for diagnostics only.
-
-Opened by Q2.6 — both are about the same thing, which is that the app can now change and remove events rather than only add them:
-
-- **Q2.13 — What makes an event eligible for deletion?** The safe rule is *the invoice left the ledger* and nothing else — §5.18 explains why anything looser is dangerous. That still leaves the trigger: when you delete an invoice by hand (Q5.12), does its calendar event go **immediately**, on the **next sync**, or only if you say so?
-  *Default:* on the next sync, as a `DeleteEvent` in the plan, shown in the count on the button before you press it. Deleting a row in one app should not silently reach into another; and a plan you can see before it runs is the difference between a feature you trust with delete permission and one you don't.
-- **Q2.14 — Does a sync overwrite an event you edited by hand?** Q2.4 chose the extended property because it survives you renaming or moving the event. Under insert-only that meant *we won't duplicate it*; under Q2.6 it also means *we can rename it back*. So: is an invoice event app-owned data that always wins, or does a hand edit stand?
-  *Default:* app-owned, it always wins — with the title and date treated as ours and rewritten, because the whole point of the event is to say "£420 due on the 14th" accurately, and a stale title that disagrees with the ledger is worse than a lost edit. The alternative worth considering is narrower: rewrite only the **date** (which is the fact that matters) and leave the title alone once created, which keeps hand-annotation possible at the cost of a title that can drift out of date.
+Nothing open. Q2.13 and Q2.14 were opened by the update-and-delete answer earlier in this same round and closed by the end of it. The two that matter most downstream: the sync plan is **visible before it runs** (Q2.13), and an invoice event is **app-owned data that always wins** (Q2.14) — which is the honest cost of Q2.6 and should be said on screen rather than discovered.
 
 ### 7.3 Google accounts and the credentials removal — ✅ fully resolved
 
@@ -603,17 +598,13 @@ Nothing open. Q3.1–Q3.6 settle the OAuth flow and Q3.7–Q3.10 settle what the
 
 Nothing open. All eleven questions are answered, the plan is measured against the real profile in §3.8, and **change #3 can be specified as soon as you want it.** Alongside change #1 it is one of the two pieces of this build that is ready to write requirements for today.
 
-### 7.5 Storage and process — one left, and it is new
+### 7.5 Storage and process — ✅ fully resolved
 
-Everything previously here is answered and recorded in §1.1. Q5.12's answer opened one thing it did not itself resolve:
+Nothing open. Q5.14 — the hole between "you may delete an invoice" and "the scan upserts on a natural key" — is closed with a tombstone, and §3.6 says why that list has to be visible rather than merely present.
 
-- **Q5.14 — Does a hand-deleted invoice stay deleted?** Q5.12 allows delete precisely because a bad template will produce junk rows. But Q5.8 makes (supplier, invoice reference) the natural key and `UpsertInvoices` the write path, so **the next scan of a window covering that message will simply find the same invoice again and put it back** — and under Q2.13 then upload it to your calendar. Deleting the junk row from a marketing email that happens to match a supplier is exactly the case, and it recurs on every scan forever.
-  *Default:* deletion writes a **tombstone** on the same natural key, and the scan skips any invoice matching one. It is one small table and one filter in `UpsertInvoices`, and without it "delete" means "hide until the next scan", which is worse than not offering it — the same reasoning that ruled out hand-editing in Q5.12. The tombstone list wants to be visible and reversible somewhere, or you have built a trap for the day a supplier reuses an invoice number.
-  The alternative, if a tombstone table feels like too much: delete is offered only for invoices whose source message is **outside** every window you can currently select, so a rescan cannot resurrect them. That is cheaper and considerably more confusing to explain.
+### 7.6 Templates — the only set left, blocking change #2
 
-### 7.6 Templates — the new question set, blocking for change #2
-
-This is the part with no precedent in the codebase, and the answers decide how big change #2 is.
+This is the part with no precedent in the codebase, and the answers decide how big change #2 is. It is also, now, the whole of what is unanswered.
 
 - **Q7.6.1 — Which rule kinds does the first version need?** §3.7 proposes four: `AfterLabel`, `LinesAfterLabel`, `RegexCapture`, `FixedValue`. Every kind is an editor to build and a concept to learn, so fewer is genuinely better if it covers your suppliers.
   *Default:* all four. `AfterLabel` will do most of the work, `RegexCapture` is the escape hatch for when it doesn't.
@@ -636,26 +627,34 @@ This is the part with no precedent in the codebase, and the answers decide how b
 
 ## 8. Next step
 
-**13 questions remain, down from 42 at the start of this round.** §7.1, §7.3 and §7.4 are all empty. Every question this document originally asked has now been answered — **what is left is entirely what the answers exposed**, plus §7.6, which has not been touched. Only §7.6 is untouched.
+**8 questions remain, down from 42 at the start of this round, and all eight are §7.6.** §7.1 through §7.5 are empty. Every question this document originally asked has been answered, and so has every question those answers opened — **except templates, which have not been touched since they were first written down.**
 
-**The two most valuable things this round produced were not answers — they were holes that two separately reasonable answers opened between them.** One is now closed, one is not:
+**Six of the seven changes now have no open questions. Only change #2 does, and everything downstream needs it.**
 
-- **Q1.19 — found and closed in the same round.** Q1.5 lists the messages that yielded nothing so you can see which template to fix. Q4.10 makes scanning incremental, so the second run does not re-read those messages. A transient problem list would therefore have been **empty by the time you went looking for it**. Persisting the rows fixes it and pays for itself again in Q7.6.7 — they name precisely which messages are worth re-reading after a template change, which beats rescanning 6.2 GB.
-- **Q5.14 — still open, and it is the last thing blocking change #4.** Q5.12 allows you to delete an invoice by hand. Q5.8 makes (supplier, invoice reference) the natural key and `UpsertInvoices` the write path. Together, **the next scan finds the deleted invoice again and puts it back** — and under Q2.13 then uploads it to your calendar. As it stands "delete" means "hide until the next scan", which is exactly the failure mode that ruled out hand-*editing* in Q5.12. A tombstone on the same key fixes it: one small table, one filter in `UpsertInvoices`.
-
-Neither would have been visible from any single answer. Both would have surfaced in change #4, after the code was written.
-
-**Four changes are specifiable, three of them today:**
+### Ready to specify now
 
 - **Change #1, `invoice-ledger-foundation`.** Small, no external dependency, proves the main SQLite database, its migrations and its store shape. **Start here.**
 - **Change #3, `thunderbird-account-selection`.** §3.8 is measured against your actual profile, and it produces something you can look at — a page listing your ten real accounts — without touching Google, SQLite or templates.
 - **Change #5, `credentials-per-provider`.** Two projects fewer, one domain area gone, `/settings/credentials` off the nav. Its risk is regression rather than design, so the characterization tests go in first.
-- **Change #6, `google-account-integration`** has no open questions of its own; it waits only on #5.
+- **Change #6, `google-account-integration`.** Waits only on #5 landing.
+- **Changes #4 and #7** have no open questions either, but cannot be built until #2 and #6 exist. Their requirements could be written today; there is limited value in doing so before §7.6 is settled, because a template model that turns out to be too weak changes what #4 extracts.
 
 #1, #3 and #5 are mutually independent, so any order works, or all three.
 
-**§7.6 is now the largest thing standing.** Eight questions, all of them about change #2, which is the biggest and least precedented piece of the build — and §3.7 is the one part of this proposal with no equivalent of §3.8's measurement behind it. The fastest way to de-risk it has not changed: take two real invoices from two different suppliers and check whether `AfterLabel`, `LinesAfterLabel`, `RegexCapture` and `FixedValue` can actually locate every field. If they can't, better to learn it now than after the rule editor is built.
+### The one thing left
 
-What remains blocks exactly three changes: **Q5.14 alone → #4**, **§7.2's four → #7**, **§7.6's eight → #2**.
+**§7.6 is now the entire remaining question set, and change #2 is the largest and least precedented piece of the build.** It is also the only part of this proposal with nothing like §3.8's measurement behind it — and §3.8 is where two of my confident defaults turned out to be wrong.
+
+The fastest way to de-risk it has not changed, and it does not require writing any code: **take two real invoices from two different suppliers and check whether `AfterLabel`, `LinesAfterLabel`, `RegexCapture` and `FixedValue` can actually locate the reference, the amount, the currency and the due date in each.** If they can, §3.7 is sound and the eight questions are mostly about scope. If they can't, better to find out now than after the rule editor is built — that is the same lesson §3.8 already paid for once.
+
+### What this round produced besides answers
+
+Three holes that no single answer revealed, each one sitting between two separately reasonable decisions:
+
+- **Q1.19** — an incremental scan would have emptied the problem list before you could read it. Closed: problems persist.
+- **Q5.14** — an upsert on a natural key would have resurrected every hand-deleted invoice on the next scan. Closed: tombstones.
+- **§5.18** — update-and-delete turned a pure diff into something that can remove entries from a calendar the app does not own. Not a question but a standing guard: deletion follows *ledger* absence, never *window* absence, and a failed read must abort the plan rather than produce one.
+
+All three would have surfaced during change #4 or #7, after the code was written.
 
 Requirements in EARS notation, agreed before any `design.md`, per CLAUDE.md.
