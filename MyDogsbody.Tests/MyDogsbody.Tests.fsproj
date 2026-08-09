@@ -27,6 +27,8 @@
     <Compile Include="Database\MigrationsTests.fs" />
     <Compile Include="Database\SupplierMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
+    <Compile Include="Database\SupplierRecordMappersTests.fs" />
+    <Compile Include="Database\SupplierStoreTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
@@ -34,6 +36,7 @@
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\CredentialApiContractTests.fs" />
     <Compile Include="Contracts\PersistedShapeTests.fs" />
+    <Compile Include="Contracts\SupplierPersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="E2E\BlazorTestHarness.fs" />
