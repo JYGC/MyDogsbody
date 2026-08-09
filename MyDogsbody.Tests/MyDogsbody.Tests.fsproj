@@ -31,11 +31,15 @@
     <Compile Include="Database\SupplierStoreTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
+    <Compile Include="Startup\SupplierApiMappersTests.fs" />
+    <Compile Include="Startup\SupplierApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
     <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\CredentialApiContractTests.fs" />
     <Compile Include="Contracts\PersistedShapeTests.fs" />
+    <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
+    <Compile Include="Contracts\SupplierApiContractTests.fs" />
     <Compile Include="Contracts\SupplierPersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />

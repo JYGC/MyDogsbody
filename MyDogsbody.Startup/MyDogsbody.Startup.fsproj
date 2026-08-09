@@ -8,6 +8,8 @@
   <ItemGroup>
     <Compile Include="CredentialApiMappers.fs" />
     <Compile Include="CredentialApiFactory.fs" />
+    <Compile Include="SupplierApiMappers.fs" />
+    <Compile Include="SupplierApiFactory.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>
 
@@ -20,6 +22,8 @@
     <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Database\MyDogsbody.Database.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Database.Migrations\MyDogsbody.Database.Migrations.fsproj" />
   </ItemGroup>
 
 </Project>
