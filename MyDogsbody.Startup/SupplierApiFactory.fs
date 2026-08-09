@@ -72,8 +72,10 @@ let createSupplierApi
         AddSupplier =
             fun uiType ->
                 uiType
+                // Result.bind, not |>: the mapper rejects an unrecognised matcher kind rather
+                // than raising on it, so its failure joins the workflow's on the same track.
                 |> SupplierApiMappers.toUnvalidatedSupplier
-                |> AddSupplierWorkflow.addSupplier loadSuppliers saveSupplier
+                |> Result.bind (AddSupplierWorkflow.addSupplier loadSuppliers saveSupplier)
                 // The UI does not need the stored supplier back - a write reloads.
                 |> Result.map ignore
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.SupplierApi.addSupplier)
@@ -82,7 +84,7 @@ let createSupplierApi
             fun uiType ->
                 uiType
                 |> SupplierApiMappers.toUnvalidatedSupplierEdit
-                |> EditSupplierWorkflow.editSupplier loadSuppliers updateSupplier
+                |> Result.bind (EditSupplierWorkflow.editSupplier loadSuppliers updateSupplier)
                 |> Result.map ignore
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.SupplierApi.editSupplier)
 

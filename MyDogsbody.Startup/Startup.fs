@@ -1,9 +1,14 @@
 /// The composition root.
 ///
 /// This is the one file in the application that owns process-lifetime resources: the module
-/// level bindings below open Logging.db and Credentials.db the moment anything in this module
-/// is touched. Nothing else belongs here — everything with behaviour worth testing lives in
-/// CredentialApiMappers.fs and CredentialApiFactory.fs, which this file only partially applies.
+/// level bindings below open Logging.db, Credentials.db and MyDogsbody.db - and run the main
+/// database's migrations - the moment anything in this module is touched. Nothing else belongs
+/// here — everything with behaviour worth testing lives in the *ApiMappers.fs and *ApiFactory.fs
+/// files, which this file only partially applies.
+///
+/// Because they share one module they share one type initializer: if any of them throws, every
+/// later access to this module raises TypeInitializationException, not only the one that failed.
+/// That was already true of the two LiteDB contexts; the main database adds a third way in.
 module MyDogsbody.Startup.Startup
 
 open System
@@ -82,5 +87,6 @@ let supplierApi: SupplierApi =
 /// The host's entire share of the wiring. Every registration is expressed here, in F#, so
 /// MainWindow.xaml.cs states which services exist without stating how they are built.
 let registerServices (services: IServiceCollection) : IServiceCollection =
-    services.AddSingleton<CredentialApi>(credentialApi)
-    |> fun s -> s.AddSingleton<SupplierApi>(supplierApi)
+    services
+        .AddSingleton<CredentialApi>(credentialApi)
+        .AddSingleton<SupplierApi>(supplierApi)
