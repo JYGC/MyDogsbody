@@ -25,6 +25,11 @@
     <Compile Include="Credentials\ListCredentialsWorkflow.fs" />
     <Compile Include="Documents\DocumentsTypes.fs" />
     <Compile Include="Documents\ReadDocumentLinesWorkflow.fs" />
+    <Compile Include="Suppliers\SuppliersTypes.fs" />
+    <Compile Include="Suppliers\ListSuppliersWorkflow.fs" />
+    <Compile Include="Suppliers\AddSupplierWorkflow.fs" />
+    <Compile Include="Suppliers\EditSupplierWorkflow.fs" />
+    <Compile Include="Suppliers\DeleteSupplierWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">
