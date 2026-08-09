@@ -11,6 +11,7 @@
     <Compile Include="Modules\CredentialsBrowserModule.fs" />
     <Compile Include="SupplierUiType.fs" />
     <Compile Include="SupplierApi.fs" />
+    <Compile Include="Modules\SuppliersBrowserModule.fs" />
   </ItemGroup>
 
   <ItemGroup>
