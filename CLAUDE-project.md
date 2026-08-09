@@ -63,7 +63,7 @@ dotnet build MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj   # fastest loop w
 dotnet run --project MyDogsbody\MyDogsbody.csproj   # launches the WPF app (Windows only, net9.0-windows)
 ```
 
-`Logging.db` and `Credentials.db` are created relative to the process working directory — under `dotnet run` that is `bin\Debug\net9.0\`.
+`Logging.db`, `Credentials.db` and `MyDogsbody.db` are created relative to the process working directory. Measured directly while closing `invoice-ledger-foundation`: running the command above from the repository root (as written) puts all three **at the repository root**, not under `bin\Debug\net9.0-windows\` — `dotnet run` does not change directory into the build output before launching the app. They are gitignore'd nowhere in particular, so delete them after a manual test rather than leaving them for `git status` to trip over.
 
 ### Migrate (main database)
 
@@ -97,6 +97,8 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 `dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **204 tests — 72 Unit, 45 Integration, 80 Contract, 7 E2E**, zero skips. If the build breaks now, assume you broke it.
 
 The suite was run eight times consecutively while closing the `architecture-compliance` change to confirm it is not flaky. If you see an intermittent failure, do not re-run until it passes — see the note on LiteDB's global `BsonMapper` under *Per-integration databases*.
+
+`MyDogsbody.Startup.fsproj` pins `Microsoft.Extensions.DependencyInjection.Abstractions` explicitly — keep that pin at or above whatever `FluentMigrator` (via `MyDogsbody.Database.Migrations`) resolves to. Falling behind turns into an `NU1605` package-downgrade error on the WPF host (`MyDogsbody.csproj`) specifically — `dotnet build MyDogsbody.sln` only reports it as a warning, so it can look harmless until someone runs the app.
 
 ## Testing in this codebase
 

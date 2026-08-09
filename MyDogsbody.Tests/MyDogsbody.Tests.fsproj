@@ -20,6 +20,8 @@
     <Compile Include="Integrations\Pdf\PdfDocumentReaderTests.fs" />
     <Compile Include="Logging\ExceptionStoreTests.fs" />
     <Compile Include="Database\MigrationsTests.fs" />
+    <Compile Include="Database\SupplierMigrationsTests.fs" />
+    <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
