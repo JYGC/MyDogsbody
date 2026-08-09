@@ -6,6 +6,7 @@
 /// only translates, so it can be asserted field-for-field without a database.
 module MyDogsbody.Database.SupplierRecordMappers
 
+open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Database.Models
 
@@ -37,40 +38,30 @@ let toStoredSupplier
     (row: SupplierRecord)
     (matcherRows: SupplierMatcherRecord list)
     : Result<StoredSupplier, string> =
-    match SupplierId.create (string row.Id) with
-    | Error reason -> Error reason
-    | Ok id ->
-
-    match SupplierName.create row.Name with
-    | Error reason -> Error reason
-    | Ok name ->
-
-    match PaymentTermDays.create row.PaymentTermDays with
-    | Error reason -> Error reason
-    | Ok paymentTermDays ->
-
     let rec mapMatchers remaining acc =
         match remaining with
         | [] -> Ok (List.rev acc)
         | (matcherRow: SupplierMatcherRecord) :: rest ->
-            match fromMatcherKindString matcherRow.Kind with
-            | Error reason -> Error reason
-            | Ok kind ->
+            result {
+                let! kind = fromMatcherKindString matcherRow.Kind
+                let! matcher = SupplierMatcher.create kind matcherRow.Value
+                return! mapMatchers rest (matcher :: acc)
+            }
 
-            match SupplierMatcher.create kind matcherRow.Value with
-            | Error reason -> Error reason
-            | Ok matcher -> mapMatchers rest (matcher :: acc)
+    result {
+        let! id = SupplierId.create (string row.Id)
+        let! name = SupplierName.create row.Name
+        let! paymentTermDays = PaymentTermDays.create row.PaymentTermDays
+        let! matchers = mapMatchers matcherRows []
 
-    match mapMatchers matcherRows [] with
-    | Error reason -> Error reason
-    | Ok matchers ->
-        Ok
+        return
             {
                 Id = id
                 Name = name
                 PaymentTermDays = paymentTermDays
                 Matchers = matchers
             }
+    }
 
 /// Domain -> persistence, for a row the store has not seen before. Id is a placeholder - the
 /// insert excludes that column so SQLite assigns it.
