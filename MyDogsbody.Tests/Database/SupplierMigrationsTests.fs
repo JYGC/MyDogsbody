@@ -96,6 +96,18 @@ let ``the unique index on Suppliers Name refuses a second row with the same name
     )
 
 [<Fact; Trait("Level", "Integration")>]
+let ``the unique index on Suppliers Name refuses a second row differing only by case`` () =
+    withTempDatabase (fun connectionString ->
+        MigrationSetup.setupMigrations connectionString
+        exec connectionString "INSERT INTO Suppliers (Name, PaymentTermDays) VALUES ('Acme', 30);"
+
+        let duplicate () =
+            exec connectionString "INSERT INTO Suppliers (Name, PaymentTermDays) VALUES ('acme', 14);"
+
+        Assert.Throws<SqliteException>(duplicate) |> ignore
+    )
+
+[<Fact; Trait("Level", "Integration")>]
 let ``deleting a supplier removes its matchers when foreign keys are enforced`` () =
     withTempDatabase (fun connectionString ->
         MigrationSetup.setupMigrations connectionString
