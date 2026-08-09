@@ -26,6 +26,13 @@ module MyDogsbody =
             let addCredential = $"{credentialApi}.addCredential"
             let editCredential = $"{credentialApi}.editCredential"
 
+        module SupplierApi =
+            let private supplierApi = $"{startup}.SupplierApi"
+            let getAllSuppliers = $"{supplierApi}.getAllSuppliers"
+            let addSupplier = $"{supplierApi}.addSupplier"
+            let editSupplier = $"{supplierApi}.editSupplier"
+            let deleteSupplier = $"{supplierApi}.deleteSupplier"
+
     /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
     /// it - MyDogsbody.Database is the application's main store, not an integration, so its
     /// entries do not go under Integrations.

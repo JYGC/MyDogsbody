@@ -13,6 +13,8 @@ open MyDogsbody.Integrations.Credentials.Database
 open MyDogsbody.Logging.Database
 open MyDogsbody.Logging.Types
 open MyDogsbody.Logging.UseCases
+open MyDogsbody.Database
+open MyDogsbody.Database.Migrations
 open MyDogsbody.UI.Types
 
 let private loggingDatabasePath = "Logging.db"
@@ -65,7 +67,20 @@ let credentialApi: CredentialApi =
         handleError
         credentialDatabaseContext.GetCredentialCollection
 
+let private mainDatabasePath = "MyDogsbody.db"
+
+// Migrations run before the context is created, so a store function can never see a table that
+// does not exist yet. This is the main database's first ever caller (friction #11) -
+// MigrationSetup.setupMigrations had none before this.
+do MigrationSetup.setupMigrations $"Data Source={mainDatabasePath}"
+
+let private mainDatabaseContext = DatabaseContextSetup.createDatabaseContext mainDatabasePath
+
+let supplierApi: SupplierApi =
+    SupplierApiFactory.createSupplierApi handleError mainDatabaseContext
+
 /// The host's entire share of the wiring. Every registration is expressed here, in F#, so
 /// MainWindow.xaml.cs states which services exist without stating how they are built.
 let registerServices (services: IServiceCollection) : IServiceCollection =
     services.AddSingleton<CredentialApi>(credentialApi)
+    |> fun s -> s.AddSingleton<SupplierApi>(supplierApi)
