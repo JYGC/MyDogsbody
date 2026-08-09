@@ -32,6 +32,7 @@ type Shell() =
             HomePage.getRoute()
             SettingsPage.getRoute()
             CredentialsPage.getRoute()
+            SuppliersPage.getRoute()
             ExceptionLogsPage.getRoute()
         ]
         |> MainLayout.view

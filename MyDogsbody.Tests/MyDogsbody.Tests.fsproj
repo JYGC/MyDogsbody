@@ -43,8 +43,11 @@
     <Compile Include="Contracts\SupplierPersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
+    <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="E2E\BlazorTestHarness.fs" />
     <Compile Include="E2E\CredentialsFlowTests.fs" />
+    <Compile Include="E2E\SuppliersTestHarness.fs" />
+    <Compile Include="E2E\SuppliersFlowTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

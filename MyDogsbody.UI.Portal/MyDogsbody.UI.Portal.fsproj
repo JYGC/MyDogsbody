@@ -7,11 +7,14 @@
 
   <ItemGroup>
     <Compile Include="ModuleCreators\CredentialsBrowserModuleCreators.fs" />
+    <Compile Include="ModuleCreators\SuppliersBrowserModuleCreators.fs" />
     <Compile Include="components\HomeComponents.fs" />
     <Compile Include="Components\CredentialsComponents.fs" />
+    <Compile Include="Components\SuppliersComponents.fs" />
     <Compile Include="Components\SettingsComponents.fs" />
     <Compile Include="Pages\Settings\ExceptionLogsPage.fs" />
     <Compile Include="Pages\Settings\CredentialsPage.fs" />
+    <Compile Include="Pages\Settings\SuppliersPage.fs" />
     <Compile Include="Pages\SettingsPage.fs" />
     <Compile Include="Pages\HomePage.fs" />
     <Compile Include="Layout\MainLayout.fs" />

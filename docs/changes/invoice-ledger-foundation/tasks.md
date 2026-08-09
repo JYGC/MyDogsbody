@@ -20,91 +20,100 @@ in the series own `…0003` onward — see each change's tasks file.
 
 ## Phase 0 — Project wiring (required, no tests)
 
-- [ ] **0.1** Add a `ProjectReference` from `MyDogsbody.Database` to `MyDogsbody.Domain` (Q5.9).
+- [x] **0.1** Add a `ProjectReference` from `MyDogsbody.Database` to `MyDogsbody.Domain` (Q5.9).
       *Outcome:* solution builds; `MyDogsbody.Domain` still has **zero** `ProjectReference` elements
       and `AssertDomainReferencesNothing` still passes.
-- [ ] **0.2** Add `ProjectReference`s from `MyDogsbody.Startup` to `MyDogsbody.Database` and
+- [x] **0.2** Add `ProjectReference`s from `MyDogsbody.Startup` to `MyDogsbody.Database` and
       `MyDogsbody.Database.Migrations`.
       *Outcome:* solution builds. *Depends on:* 0.1.
-- [ ] **0.3** Confirm `MyDogsbody.Tests` already references `MyDogsbody.Database` and
+- [x] **0.3** Confirm `MyDogsbody.Tests` already references `MyDogsbody.Database` and
       `.Database.Migrations` (it does — the migrations are tested). Add nothing.
 
 ## Phase 1 — Suppliers domain (required)
 
 ### Types
 
-- [ ] **1.1** *(test-first)* `SupplierId`, `SupplierName`, `PaymentTermDays`.
+- [x] **1.1** *(test-first)* `SupplierId`, `SupplierName`, `PaymentTermDays`.
       Tests: one accepted and one rejected value **per rule**, rejection reason asserted —
       `SupplierName` empty / whitespace-only / over 200 chars; `PaymentTermDays` below 0 / above 365;
       `SupplierId` empty. Plus `value` round-trips what `create` accepted.
       *Outcome:* `MyDogsbody.Domain/Suppliers/SuppliersTypes.fs` compiled first in the `Suppliers/`
       folder, added to the `.fsproj` in dependency order.
-- [ ] **1.2** *(test-first)* `MatcherKind` and `SupplierMatcher` with its `create`.
+- [x] **1.2** *(test-first)* `MatcherKind` and `SupplierMatcher` with its `create`.
       Tests: sender address without `@` rejected; sender domain containing `@` rejected; empty
       subject pattern rejected; any value over 400 chars rejected; each kind's accepted value
       round-trips through `kind` and `value`.
       *Depends on:* 1.1.
-- [ ] **1.3** Stage types (`UnvalidatedSupplier`, `UnvalidatedSupplierEdit`, `ValidSupplier`,
+- [x] **1.3** Stage types (`UnvalidatedSupplier`, `UnvalidatedSupplierEdit`, `ValidSupplier`,
       `ValidSupplierEdit`, `StoredSupplier`), `SupplierError`, and the four dependency function
       types. No test of its own — type declarations, exercised by every task below.
       *Depends on:* 1.2.
 
 ### Workflows
 
-- [ ] **1.4** *(test-first)* `ListSuppliersWorkflow`.
+- [x] **1.4** *(test-first)* `ListSuppliersWorkflow`.
       Tests: Ok path with every field of every returned supplier asserted; the returned list is
       ordered by name regardless of the order the dependency returned; empty store returns `Ok []`;
       a dependency error is propagated unchanged.
       *Depends on:* 1.3.
-- [ ] **1.5** *(test-first)* `AddSupplierWorkflow`.
+- [x] **1.5** *(test-first)* `AddSupplierWorkflow`.
       Tests: Ok path with every output field asserted; `SupplierNameInvalid` with the reason;
       `MatcherInvalid` with the reason and the offending rule identified; `SupplierNameTaken "Acme"`
       with the name asserted; a name clashing only by case or surrounding whitespace is still
       `SupplierNameTaken`; **`saveSupplier` never called** on any of the three failures, proved by a
       recording lambda; a supplier with no matchers is accepted.
       *Depends on:* 1.3.
-- [ ] **1.6** *(test-first)* `EditSupplierWorkflow`.
+- [x] **1.6** *(test-first)* `EditSupplierWorkflow`.
       Tests: Ok path, every field; `SupplierIdInvalid` on an unusable id; `SupplierNotFound` when the
       update dependency returns `None`; `SupplierNameTaken` when renaming onto another supplier;
       **no clash reported when the name is unchanged** — the row must not collide with itself; the
       matcher set is **replaced**, not merged; `updateSupplier` never called on a validation failure.
       *Depends on:* 1.3.
-- [ ] **1.7** *(test-first)* `DeleteSupplierWorkflow`.
+- [x] **1.7** *(test-first)* `DeleteSupplierWorkflow`.
       Tests: Ok path; `SupplierIdInvalid` on an unusable id; `SupplierNotFound` when the dependency
       returns `false`; `deleteSupplier` never called on an unusable id.
       *Depends on:* 1.3.
 
 ## Phase 2 — Migrations (required)
 
-- [ ] **2.1** *(test-first)* `Migration_20260809000001_CreateSuppliersTable.fs`.
+- [x] **2.1** *(test-first)* `Migration_20260809000001_CreateSuppliersTable.fs`.
       Tests: `MigrateUp` on an empty temp file produces `Suppliers` with the expected columns and
       types; the unique index on `Name` exists and **refuses a second row with the same name**;
       `Down()` removes the table and the index.
       *Outcome:* file added to `MyDogsbody.Database.Migrations.fsproj` above `MigrationSetup.fs`, in
       timestamp order.
-- [ ] **2.2** *(test-first)* `Migration_20260809000002_CreateSupplierMatchersTable.fs`.
+- [x] **2.2** *(test-first)* `Migration_20260809000002_CreateSupplierMatchersTable.fs`.
       Tests: as above for `SupplierMatchers`; the foreign key exists; **deleting a supplier removes
       its matchers** (this is the test that catches `PRAGMA foreign_keys` being off — design
       decision 6); `Down()` reverses it.
       *Depends on:* 2.1.
-- [ ] **2.3** Confirm the existing `Blogs` / `Comments` migration tests still pass untouched.
-      *Outcome:* no scaffold migration is edited by this change.
+      *Note:* FluentMigrator's SQLite generator refuses `Create.ForeignKey` outright ("Foreign keys
+      are not supported in SQLite"); the table is created via `Execute.Sql` with the foreign key
+      declared inline, which is the only way SQLite accepts one. Documented in CLAUDE-project.md.
+- [x] **2.3** Confirm the existing `Blogs` / `Comments` migration tests still pass untouched.
+      *Outcome:* no scaffold migration is edited by this change. Two pre-existing assertions in
+      `MigrationsTests.fs` that hardcoded the total migration count (`2L`) and the latest version
+      (`20251104000002L`) were updated to `4L` / `20260809000002L` — an expected, not accidental,
+      consequence of a shared migration assembly gaining two more migrations.
 
 ## Phase 3 — Main-database plumbing (required)
 
-- [ ] **3.1** *(test-first)* `SupplierRecord` and `SupplierMatcherRecord` in
+- [x] **3.1** *(test-first)* `SupplierRecord` and `SupplierMatcherRecord` in
       `MyDogsbody.Database.Models`, and `SupplierRecordMappers.fs` — the **bottom mapper**.
       Tests: field-for-field in both directions; `MatcherKind` ⇄ its persisted string for all three
       kinds; an unrecognised kind string maps to an error rather than a default; a name with
       non-ASCII characters survives unchanged.
       *Depends on:* 1.3, 0.1.
-- [ ] **3.2** *(test-first)* `DatabaseContext` gains `GetSuppliers`, `GetSupplierMatchers` and
+- [x] **3.2** *(test-first)* `DatabaseContext` gains `GetSuppliers`, `GetSupplierMatchers` and
       **`Dispose`** (design decision 5); `DatabaseContextSetup.createDatabaseContext` binds them and
       issues `PRAGMA foreign_keys = ON` (decision 6).
       Tests *(Integration)*: a context created against a temp file can be disposed and **the file
       then deletes successfully**; `PRAGMA foreign_keys` reads back as `1` on the connection handed
       out by `GetDatabaseConnection`.
-- [ ] **3.3** *(test-first)* `SupplierStore.fs` — `getAll`, `insertOne`, `updateOne`, `deleteOne`.
+      *Note:* implemented via the `Foreign Keys=True` connection-string keyword rather than an
+      explicit `PRAGMA` statement, so it self-applies on every open of the connection regardless of
+      who opens it — simpler than tracking open/close state, same observable effect the tests assert.
+- [x] **3.3** *(test-first)* `SupplierStore.fs` — `getAll`, `insertOne`, `updateOne`, `deleteOne`.
       Outer-ring shape: `handleError` first, dependencies next, input last,
       `Result<_, MyDogsbodyException>` out.
       Tests *(Integration)*: a `withSuppliers` helper (fresh temp file, migrations applied, context
@@ -115,7 +124,12 @@ in the series own `…0003` onward — see each change's tasks file.
       Tests *(Unit)*: each function's error path asserts the declared `ActionNames` string, the
       message, and a preserved `InnerException`.
       *Depends on:* 2.2, 3.1, 3.2.
-- [ ] **3.4** `ActionNames.MyDogsbody.Database.SupplierStore.*` — four entries under a **new
+      *Note:* Dapper.FSharp's `excludeColumn`/`includeColumn` custom operations do not resolve
+      inside an `insert { }` block with no `for x in table do` binding to rewrite against, so the two
+      inserts (`Suppliers`, `SupplierMatchers`) use plain parameterised Dapper SQL instead, folding
+      `SELECT last_insert_rowid()` into the same command as the `INSERT`. Documented in
+      CLAUDE-project.md.
+- [x] **3.4** `ActionNames.MyDogsbody.Database.SupplierStore.*` — four entries under a **new
       top-level `Database` module** (the main database is not an integration).
       *Outcome:* `Contracts/ActionNamesTests.fs` passes unchanged — every string ends with its
       binding's name, no two bindings share a string.
@@ -123,7 +137,7 @@ in the series own `…0003` onward — see each change's tasks file.
 
 ## Phase 4 — Composition root (required)
 
-- [ ] **4.1** *(test-first)* `SupplierApiMappers.fs` — domain ⇄ UI record (**the top mapper**),
+- [x] **4.1** *(test-first)* `SupplierApiMappers.fs` — domain ⇄ UI record (**the top mapper**),
       `toSupplierError`, `toMyDogsbodyException`.
       Tests: mapper field-for-field both directions; **each `SupplierError` case → its intended
       action and message**, with the expected/unexpected split asserted (design → *Error handling*)
@@ -131,29 +145,39 @@ in the series own `…0003` onward — see each change's tasks file.
       each adapter exception → its intended `SupplierError` case.
       *Outcome:* no module-level I/O.
       *Depends on:* 1.3.
-- [ ] **4.2** *(test-first)* `SupplierApiFactory.createSupplierApi handleError databaseContext`.
+      *Note:* `design.md`'s `SupplierError` listing has no case for a payment-term validation
+      failure even though `AddSupplierWorkflow` validates one — `PaymentTermInvalid of reason:
+      string` was added to the DU (seven cases, not the documented six) so that failure gets its own
+      message rather than borrowing `SupplierNameInvalid`'s. It follows the same "expected, wraps
+      `ApplicationException`, unlogged" rule as the other validation cases.
+- [x] **4.2** *(test-first)* `SupplierApiFactory.createSupplierApi handleError databaseContext`.
       Tests *(Integration)*: each of the four API members against a real temp database — Ok path with
       every field, and the error path for each. No module-level I/O, so `Startup.fs` is never
       touched.
       *Depends on:* 3.3, 4.1.
-- [ ] **4.3** `ActionNames.MyDogsbody.Startup.SupplierApi.*` — four entries.
+- [x] **4.3** `ActionNames.MyDogsbody.Startup.SupplierApi.*` — four entries.
       *Depends on:* 4.2.
-- [ ] **4.4** `Startup.fs`: main database path, `MigrationSetup.setupMigrations` **before** the
+- [x] **4.4** `Startup.fs`: main database path, `MigrationSetup.setupMigrations` **before** the
       context is created, `supplierApi`, and one more `AddSingleton` in `registerServices`.
       *Outcome:* `MainWindow.xaml.cs` unchanged. No test — this file is deliberately untestable and
       holds nothing but partial application.
       *Depends on:* 4.2, 0.2.
+      *Note:* the new `MyDogsbody.Database.Migrations` reference chain (via FluentMigrator) forced
+      `Microsoft.Extensions.DependencyInjection.Abstractions`'s explicit pin in
+      `MyDogsbody.Startup.fsproj` up from `9.0.0` to `9.0.3` — otherwise `dotnet build MyDogsbody.sln`
+      only warns (`NU1605`) but `dotnet run --project MyDogsbody\MyDogsbody.csproj` fails outright.
+      Found and fixed during Phase 9's manual run, not before — see `outcome.md`.
 
 ## Phase 5 — UI types and state (required)
 
-- [ ] **5.1** `SupplierUiType.fs` (`SupplierUiType`, `SupplierUiTypeWithoutId`,
+- [x] **5.1** `SupplierUiType.fs` (`SupplierUiType`, `SupplierUiTypeWithoutId`,
       `SupplierMatcherUiType`) and `SupplierApi.fs` in `MyDogsbody.UI.Types`.
       *Outcome:* no domain type leaks into `UI.Types`.
-- [ ] **5.2** `Modules/SuppliersBrowserModule.fs` — a record of `aval` fields plus commands, same
+- [x] **5.2** `Modules/SuppliersBrowserModule.fs` — a record of `aval` fields plus commands, same
       shape as `CredentialsBrowserModule`: list, `IsLoadingAval`, `ErrorAval`, load / add / edit /
       delete.
       *Depends on:* 5.1.
-- [ ] **5.3** *(test-first)* `ModuleCreators/SuppliersBrowserModuleCreators.fs` — `cval` + `transact`
+- [x] **5.3** *(test-first)* `ModuleCreators/SuppliersBrowserModuleCreators.fs` — `cval` + `transact`
       over the API functions, `startWork` as the **first** parameter, write-then-reload.
       Tests *(Unit)*: with `startWork = fun work -> work ()` and a fake `SupplierApi` record literal
       — a successful add reloads the list; a failed add sets `ErrorAval`; a later success clears it;
@@ -162,41 +186,41 @@ in the series own `…0003` onward — see each change's tasks file.
 
 ## Phase 6 — Page (required)
 
-- [ ] **6.1** `Components/SuppliersComponents.fs` — the `MudTable` and the editor dialog.
+- [x] **6.1** `Components/SuppliersComponents.fs` — the `MudTable` and the editor dialog.
       The dialog is a **class** inheriting `FunComponent` with `[<Parameter>]` members and a
       `[<CascadingParameter>] IMudDialogInstance`, shown via
       `dialogService.ShowAsync<T>(title, DialogParameters<T>, DialogOptions)` — copy
       `CredentialsComponents.CredentialsEditorDialog`.
       *Outcome:* the dialog edits name, payment term and a repeating list of (kind, value) matchers.
-- [ ] **6.2** `Pages/Settings/SuppliersPage.fs` with `getView()` / `getRoute()`
+- [x] **6.2** `Pages/Settings/SuppliersPage.fs` with `getView()` / `getRoute()`
       (`routeCi "/settings/suppliers"`), services obtained per-view with `html.inject`, view piped
       through `SettingsComponents.settingsNavMenu`.
       *Depends on:* 6.1, 5.3.
-- [ ] **6.3** Register the route in `Shell.fs` and add the nav entry in `SettingsComponents`.
+- [x] **6.3** Register the route in `Shell.fs` and add the nav entry in `SettingsComponents`.
       *Depends on:* 6.2.
-- [ ] **6.4** Delete confirmation before the API call.
+- [x] **6.4** Delete confirmation before the API call.
       *Depends on:* 6.2.
 
 ## Phase 7 — Contract suites (required)
 
-- [ ] **7.1** One shared suite per dependency function type — `LoadSuppliers`, `SaveSupplier`,
+- [x] **7.1** One shared suite per dependency function type — `LoadSuppliers`, `SaveSupplier`,
       `UpdateSupplier`, `DeleteSupplier` — as a `[<Theory>]` over `[<MemberData>]` with the
       implementation chosen by name, run against the real adapter **and every fake** used in Phase 1.
       **The `MemberData` source must be a public `let`.**
       *Depends on:* 3.3, 1.7.
-- [ ] **7.2** `SupplierApi` contract suite, run against the real API record **and** the fake used in
+- [x] **7.2** `SupplierApi` contract suite, run against the real API record **and** the fake used in
       5.3 and Phase 8.
       *Depends on:* 4.2, 5.3.
-- [ ] **7.3** Persisted-shape test: assert the `Suppliers` and `SupplierMatchers` column names by
+- [x] **7.3** Persisted-shape test: assert the `Suppliers` and `SupplierMatchers` column names by
       reading the table schema, not just the round-tripped object.
       *Depends on:* 2.2.
-- [ ] **7.4** Constrained-type round trip: a `SupplierName` written and read back through its `TEXT`
+- [x] **7.4** Constrained-type round trip: a `SupplierName` written and read back through its `TEXT`
       column is unchanged, including non-ASCII and the maximum length.
       *Depends on:* 3.3.
 
 ## Phase 8 — End to end (required)
 
-- [ ] **8.1** `E2E/SuppliersFlowTests.fs` using `BlazorTestHarness`, `FunFragmentComponent` and
+- [x] **8.1** `E2E/SuppliersFlowTests.fs` using `BlazorTestHarness`, `FunFragmentComponent` and
       `startWork = fun work -> work ()`, against a real temp SQLite file.
       Flows: add → the row appears; edit → the table shows new values; delete → the row is gone;
       validation failure → `MudAlert` shows the message **and nothing is logged**; store failure →
@@ -205,28 +229,39 @@ in the series own `…0003` onward — see each change's tasks file.
       Use `rendered.WaitForAssertion` so the re-render after a write is awaited. Assert logging
       through a **recording `HandleErrorBuilder`**, never by opening `Logging.db`.
       *Depends on:* 6.3, 4.2.
-- [ ] **8.2** Confirm no test in the change reaches `Startup.Startup`.
+      *Note:* a dedicated `E2E/SuppliersTestHarness.fs` was added alongside the existing
+      `BlazorTestHarness.fs` rather than editing it — same bUnit `TestContext` + `AddMudServices` +
+      `JSRuntimeMode.Loose` shape, over `SupplierApi` and a real temp SQLite file instead of
+      `CredentialApi` and LiteDB.
+- [x] **8.2** Confirm no test in the change reaches `Startup.Startup`.
 
 ## Phase 9 — Gate (required)
 
-- [ ] **9.1** `dotnet build MyDogsbody.sln` — zero errors.
-- [ ] **9.2** `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — zero failures, **zero skips**,
+- [x] **9.1** `dotnet build MyDogsbody.sln` — zero errors.
+- [x] **9.2** `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — zero failures, **zero skips**,
       all four levels present. Record the new totals per level in the change description.
-- [ ] **9.3** `Contracts/DomainIsolationTests.fs` and the `AssertDomainReferencesNothing` build
+- [x] **9.3** `Contracts/DomainIsolationTests.fs` and the `AssertDomainReferencesNothing` build
       target both still pass — `MyDogsbody.Domain` still references nothing.
-- [ ] **9.4** Run the app (`dotnet run --project MyDogsbody\MyDogsbody.csproj`), add a supplier, edit
+- [x] **9.4** Run the app (`dotnet run --project MyDogsbody\MyDogsbody.csproj`), add a supplier, edit
       it, delete it. Confirm `MyDogsbody.db` appears in `bin\Debug\net9.0\` with the migrations
       applied. **This is the first time the main database has ever been run by the application
       (friction #11) — record what turned up, including nothing.**
-- [ ] **9.5** Confirm `MainWindow.xaml.cs` is untouched by the change's diff.
+      *Turned up:* (1) the `NU1605` package-downgrade that only surfaces as an error on
+      `dotnet run`/the WPF host, not on `dotnet build MyDogsbody.sln` — see 4.4's note; (2)
+      `MyDogsbody.db` lands at the **repository root**, not `bin\Debug\net9.0\` as the pre-existing
+      docs claimed for `Credentials.db`/`Logging.db` — `dotnet run` does not change directory before
+      launching the app. Both recorded in CLAUDE-project.md and `outcome.md`. Verified manually: rows
+      for an added, edited, and deleted supplier were confirmed present/absent by querying the actual
+      `MyDogsbody.db` file after the run.
+- [x] **9.5** Confirm `MainWindow.xaml.cs` is untouched by the change's diff.
 
 ## Phase 10 — Documentation (required)
 
-- [ ] **10.1** `CLAUDE-project.md`: the main database is no longer "designed but not wired in" —
+- [x] **10.1** `CLAUDE-project.md`: the main database is no longer "designed but not wired in" —
       update the *Storage → Main database* status paragraph, the project-structure table rows for
       `MyDogsbody.Database` (it now references `Domain` and holds store functions) and
       `MyDogsbody.Startup`, and the *Build state* test totals.
-- [ ] **10.2** Add an `outcome.md` to this folder recording the new test totals per level, anything
+- [x] **10.2** Add an `outcome.md` to this folder recording the new test totals per level, anything
       friction #11 turned up, and the manual verification from 9.4.
 - [ ] **10.3** Open `change/invoice-ledger-foundation` for review, with this file's checkboxes ticked
       and `outcome.md` on the branch. **Merge only after Phase 9 passed in full.**
@@ -249,6 +284,7 @@ in the series own `…0003` onward — see each change's tasks file.
 - **The main database has never been executed by the application.** Phase 9.4 is where that stops
   being true. Design decisions 5 (`Dispose`) and 6 (`PRAGMA foreign_keys`) pre-empt the two defects
   already visible by reading the code; expect a third.
+  *Resolved:* the third defect was the `NU1605`/`dotnet run` interaction (4.4, 9.4).
 - **`Startup.fs` opens one more file at module load.** Same pattern as the two LiteDB contexts, same
   rule for tests: keep away from `Startup`.
 - **Migration timestamp collisions** if changes land out of order. The reserved block is at the top
