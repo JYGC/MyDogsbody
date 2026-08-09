@@ -94,10 +94,10 @@ let ``MigrateUp records the applied migrations in the version table`` () =
         // add migrations - see docs/changes/invoice-to-calendar/background.md for the reserved
         // timestamp blocks each change owns.
         let applied = queryScalar connectionString "SELECT COUNT(*) FROM VersionInfo"
-        Assert.Equal(4L, Convert.ToInt64 applied)
+        Assert.Equal(5L, Convert.ToInt64 applied)
 
         let latest = queryScalar connectionString "SELECT MAX(Version) FROM VersionInfo"
-        Assert.Equal(20260809000002L, Convert.ToInt64 latest)
+        Assert.Equal(20260810000001L, Convert.ToInt64 latest)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -109,7 +109,7 @@ let ``MigrateUp is idempotent when run twice against the same database`` () =
 
         // Assert - the second run applies nothing new
         let applied = queryScalar connectionString "SELECT COUNT(*) FROM VersionInfo"
-        Assert.Equal(4L, Convert.ToInt64 applied)
+        Assert.Equal(5L, Convert.ToInt64 applied)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -169,7 +169,7 @@ let ``MigrateUp after a full rollback rebuilds the schema`` () =
             columnNames connectionString "Blogs"
         )
 
-        Assert.Equal(4L, Convert.ToInt64(queryScalar connectionString "SELECT COUNT(*) FROM VersionInfo"))
+        Assert.Equal(5L, Convert.ToInt64(queryScalar connectionString "SELECT COUNT(*) FROM VersionInfo"))
     )
 
 [<Fact; Trait("Level", "Integration")>]
