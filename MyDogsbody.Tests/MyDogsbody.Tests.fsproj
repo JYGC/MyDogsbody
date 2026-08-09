@@ -14,6 +14,11 @@
     <Compile Include="Domain\Credentials\ListCredentialsWorkflowTests.fs" />
     <Compile Include="Domain\Documents\DocumentsTypesTests.fs" />
     <Compile Include="Domain\Documents\ReadDocumentLinesWorkflowTests.fs" />
+    <Compile Include="Domain\Suppliers\SuppliersTypesTests.fs" />
+    <Compile Include="Domain\Suppliers\ListSuppliersWorkflowTests.fs" />
+    <Compile Include="Domain\Suppliers\AddSupplierWorkflowTests.fs" />
+    <Compile Include="Domain\Suppliers\EditSupplierWorkflowTests.fs" />
+    <Compile Include="Domain\Suppliers\DeleteSupplierWorkflowTests.fs" />
     <Compile Include="Contracts\DomainIsolationTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialsDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
