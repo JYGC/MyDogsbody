@@ -48,11 +48,43 @@ let private withFakeApi (test: SupplierApi -> unit) =
         elif name.Trim().Length > 200 then Some "Supplier name must be 200 characters or fewer."
         else None
 
+    /// Mirrors PaymentTermDays.create.
+    let validatePaymentTerm (days: int) =
+        if days < 0 || days > 365 then Some "Payment term days must be between 0 and 365."
+        else None
+
+    /// Mirrors SupplierApiMappers.toMatcherKind followed by SupplierMatcher.create - the kind
+    /// string is resolved first, then the rule that kind implies.
+    let validateMatcher (matcher: SupplierMatcherUiType) =
+        let value = if isNull matcher.Value then "" else matcher.Value
+
+        match matcher.Kind with
+        | "Sender" when not (value.Contains "@") -> Some "A sender address must contain '@'."
+        | "Domain" when value.Contains "@" ->
+            Some "A sender domain must not contain '@' - enter a domain, not an address."
+        | "Subject" when String.IsNullOrWhiteSpace value -> Some "A subject pattern must not be empty."
+        | "Sender" | "Domain" | "Subject" ->
+            if value.Length > 400 then Some "Match values must be 400 characters or fewer." else None
+        | unknown -> Some $"Matcher kind '{unknown}' has no domain equivalent."
+
+    /// Name, then payment term, then matchers - the order the workflows apply them, so the first
+    /// message a caller sees is the same one the real API would have produced.
+    let validate (name: string) (paymentTermDays: int) (matchers: SupplierMatcherUiType list) =
+        match validateName name with
+        | Some reason -> Some reason
+        | None ->
+            match validatePaymentTerm paymentTermDays with
+            | Some reason -> Some reason
+            | None -> matchers |> List.tryPick validateMatcher
+
+    /// Returns the name already stored, not the one submitted - the workflows report the existing
+    /// row's spelling, which differs whenever the clash is only a difference of case.
     let nameTaken (excludingId: string option) (name: string) =
         rows
-        |> Seq.exists (fun row ->
+        |> Seq.tryFind (fun row ->
             (excludingId |> Option.forall (fun id -> id <> row.Id))
             && String.Equals(row.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))
+        |> Option.map (fun row -> row.Name)
 
     test
         {
@@ -60,14 +92,15 @@ let private withFakeApi (test: SupplierApi -> unit) =
 
             AddSupplier =
                 fun supplier ->
-                    match validateName supplier.Name with
+                    match validate supplier.Name supplier.PaymentTermDays supplier.Matchers with
                     | Some reason -> fail ActionNames.MyDogsbody.Startup.SupplierApi.addSupplier reason
                     | None ->
-                        if nameTaken None supplier.Name then
+                        match nameTaken None supplier.Name with
+                        | Some storedName ->
                             fail
                                 ActionNames.MyDogsbody.Startup.SupplierApi.addSupplier
-                                $"The supplier name '{supplier.Name.Trim()}' is already in use."
-                        else
+                                $"The supplier name '{storedName}' is already in use."
+                        | None ->
                             nextId <- nextId + 1
 
                             rows.Add
@@ -82,7 +115,7 @@ let private withFakeApi (test: SupplierApi -> unit) =
 
             EditSupplier =
                 fun supplier ->
-                    match validateName supplier.Name with
+                    match validate supplier.Name supplier.PaymentTermDays supplier.Matchers with
                     | Some reason -> fail ActionNames.MyDogsbody.Startup.SupplierApi.editSupplier reason
                     | None ->
                         match rows |> Seq.tryFindIndex (fun row -> row.Id = supplier.Id) with
@@ -91,11 +124,12 @@ let private withFakeApi (test: SupplierApi -> unit) =
                                 ActionNames.MyDogsbody.Startup.SupplierApi.editSupplier
                                 $"No supplier was found with id '{supplier.Id}'."
                         | Some index ->
-                            if nameTaken (Some supplier.Id) supplier.Name then
+                            match nameTaken (Some supplier.Id) supplier.Name with
+                            | Some storedName ->
                                 fail
                                     ActionNames.MyDogsbody.Startup.SupplierApi.editSupplier
-                                    $"The supplier name '{supplier.Name.Trim()}' is already in use."
-                            else
+                                    $"The supplier name '{storedName}' is already in use."
+                            | None ->
                                 rows.[index] <- { supplier with Name = supplier.Name.Trim() }
                                 Ok ()
 
@@ -242,6 +276,53 @@ let ``DeleteSupplier reports not found for an unknown identifier`` (implementati
         let actual = api.DeleteSupplier "9999" |> errorOrFail "DeleteSupplier"
 
         Assert.Equal("No supplier was found with id '9999'.", actual.Message)
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``AddSupplier rejects a payment term above the maximum`` (implementation: string) =
+    withImplementation implementation (fun api ->
+        let actual =
+            api.AddSupplier { aSupplier with PaymentTermDays = 366 } |> errorOrFail "AddSupplier"
+
+        Assert.Equal("Payment term days must be between 0 and 365.", actual.Message)
+        Assert.Empty(api.GetAllSuppliers() |> okOrFail "GetAllSuppliers")
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``AddSupplier rejects a sender matcher with no at sign`` (implementation: string) =
+    withImplementation implementation (fun api ->
+        let actual =
+            api.AddSupplier { aSupplier with Matchers = [ { Kind = "Sender"; Value = "acme.example" } ] }
+            |> errorOrFail "AddSupplier"
+
+        Assert.Equal("A sender address must contain '@'.", actual.Message)
+        Assert.Empty(api.GetAllSuppliers() |> okOrFail "GetAllSuppliers")
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``a name taken report names the spelling already stored, not the one submitted`` (implementation: string) =
+    withImplementation implementation (fun api ->
+        api.AddSupplier aSupplier |> okOrFail "AddSupplier"
+
+        let actual = api.AddSupplier { aSupplier with Name = "ACME" } |> errorOrFail "AddSupplier"
+
+        Assert.Equal("The supplier name 'Acme' is already in use.", actual.Message)
+        Assert.Single(api.GetAllSuppliers() |> okOrFail "GetAllSuppliers") |> ignore
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``AddSupplier reports an unrecognised matcher kind as an Error rather than raising`` (implementation: string) =
+    withImplementation implementation (fun api ->
+        let actual =
+            api.AddSupplier { aSupplier with Matchers = [ { Kind = "Nonsense"; Value = "acme.example" } ] }
+            |> errorOrFail "AddSupplier"
+
+        Assert.False(String.IsNullOrWhiteSpace actual.Message)
+        Assert.Empty(api.GetAllSuppliers() |> okOrFail "GetAllSuppliers")
     )
 
 [<Theory; Trait("Level", "Contract")>]

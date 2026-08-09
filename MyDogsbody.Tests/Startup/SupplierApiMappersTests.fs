@@ -1,4 +1,4 @@
-module MyDogsbody.Tests.Startup.SupplierApiMappersTests
+﻿module MyDogsbody.Tests.Startup.SupplierApiMappersTests
 
 open System
 open Xunit
@@ -14,6 +14,13 @@ let private valueOrFail (result: Result<'T, string>) =
     match result with
     | Ok value -> value
     | Error reason -> failwith $"Test setup built an invalid value: {reason}"
+
+/// The two inbound mappers return Result because an unrecognised matcher kind is reachable
+/// input, not an impossible one - see SupplierApiMappers.toMatcherKind.
+let private mappedOrFail (result: Result<'T, SupplierError>) =
+    match result with
+    | Ok value -> value
+    | Error error -> failwith $"Expected the mapping to succeed, but got: {error}"
 
 let private storedSupplier id name termDays matchers : StoredSupplier =
     {
@@ -36,7 +43,7 @@ let ``toUnvalidatedSupplier carries every field of the UI record`` () =
             Matchers = [ { Kind = "Domain"; Value = "acme.example" } ]
         }
 
-    let actual = SupplierApiMappers.toUnvalidatedSupplier entered
+    let actual = SupplierApiMappers.toUnvalidatedSupplier entered |> mappedOrFail
 
     Assert.Equal("Acme", actual.Name)
     Assert.Equal(30, actual.PaymentTermDays)
@@ -52,7 +59,7 @@ let ``toUnvalidatedSupplierEdit carries every field of the UI record including t
             Matchers = [ { Kind = "Sender"; Value = "billing@acme.example" } ]
         }
 
-    let actual = SupplierApiMappers.toUnvalidatedSupplierEdit entered
+    let actual = SupplierApiMappers.toUnvalidatedSupplierEdit entered |> mappedOrFail
 
     Assert.Equal("7", actual.Id)
     Assert.Equal("Acme", actual.Name)
@@ -81,7 +88,7 @@ let ``a UI record survives the round trip through the domain unchanged`` () =
             Matchers = [ { Kind = "Domain"; Value = "acme.example" } ]
         }
 
-    let unvalidated = SupplierApiMappers.toUnvalidatedSupplierEdit entered
+    let unvalidated = SupplierApiMappers.toUnvalidatedSupplierEdit entered |> mappedOrFail
 
     let stored : StoredSupplier =
         {
@@ -108,7 +115,7 @@ let ``every matcher kind string round trips through the domain unchanged`` (kind
     let entered: SupplierUiTypeWithoutId =
         { Name = "Acme"; PaymentTermDays = 0; Matchers = [ { Kind = kindString; Value = matcherValue } ] }
 
-    let unvalidated = SupplierApiMappers.toUnvalidatedSupplier entered
+    let unvalidated = SupplierApiMappers.toUnvalidatedSupplier entered |> mappedOrFail
 
     let stored : StoredSupplier =
         {
@@ -123,6 +130,50 @@ let ``every matcher kind string round trips through the domain unchanged`` (kind
     let actual = SupplierApiMappers.toUiType stored
 
     Assert.Equal<SupplierMatcherUiType list>([ { Kind = kindString; Value = matcherValue } ], actual.Matchers)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toUnvalidatedSupplier rejects an unrecognised matcher kind as MatcherInvalid`` () =
+    let entered: SupplierUiTypeWithoutId =
+        { Name = "Acme"; PaymentTermDays = 30; Matchers = [ { Kind = "Nonsense"; Value = "acme.example" } ] }
+
+    match SupplierApiMappers.toUnvalidatedSupplier entered with
+    | Error (MatcherInvalid reason) ->
+        Assert.Equal("Matcher kind 'Nonsense' has no domain equivalent.", reason)
+    | other -> Assert.Fail($"Expected Error (MatcherInvalid ...), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toUnvalidatedSupplierEdit rejects an unrecognised matcher kind as MatcherInvalid`` () =
+    let entered: SupplierUiType =
+        {
+            Id = "7"
+            Name = "Acme"
+            PaymentTermDays = 30
+            Matchers = [ { Kind = "Nonsense"; Value = "acme.example" } ]
+        }
+
+    match SupplierApiMappers.toUnvalidatedSupplierEdit entered with
+    | Error (MatcherInvalid reason) ->
+        Assert.Equal("Matcher kind 'Nonsense' has no domain equivalent.", reason)
+    | other -> Assert.Fail($"Expected Error (MatcherInvalid ...), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toUnvalidatedSupplier reports the first unrecognised kind and stops there`` () =
+    let entered: SupplierUiTypeWithoutId =
+        {
+            Name = "Acme"
+            PaymentTermDays = 30
+            Matchers =
+                [
+                    { Kind = "Domain"; Value = "acme.example" }
+                    { Kind = "First bad"; Value = "a" }
+                    { Kind = "Second bad"; Value = "b" }
+                ]
+        }
+
+    match SupplierApiMappers.toUnvalidatedSupplier entered with
+    | Error (MatcherInvalid reason) ->
+        Assert.Equal("Matcher kind 'First bad' has no domain equivalent.", reason)
+    | other -> Assert.Fail($"Expected Error (MatcherInvalid ...), but got {other}")
 
 // ---------- error translation ----------
 
@@ -172,7 +223,7 @@ let ``SupplierNotFound becomes an unlogged exception naming the identifier`` () 
     Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
 
 [<Fact; Trait("Level", "Contract")>]
-let ``SupplierStoreFailed becomes a logged exception carrying the store's message`` () =
+let ``SupplierStoreFailed carries the store's message and is left unmarked, having already been logged by the adapter`` () =
     let actual = SupplierApiMappers.toMyDogsbodyException anAction (SupplierStoreFailed "database is locked")
 
     Assert.Equal(anAction, actual.ActionName)
