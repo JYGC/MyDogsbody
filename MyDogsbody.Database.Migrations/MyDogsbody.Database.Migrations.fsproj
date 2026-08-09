@@ -8,6 +8,8 @@
   <ItemGroup>
     <Compile Include="Migrations\Migration_20251104000001_CreateBlogTable.fs" />
     <Compile Include="Migrations\Migration_20251104000002_CreateCommentTable.fs" />
+    <Compile Include="Migrations\Migration_20260809000001_CreateSuppliersTable.fs" />
+    <Compile Include="Migrations\Migration_20260809000002_CreateSupplierMatchersTable.fs" />
     <Compile Include="MigrationSetup.fs" />
     <None Include="INSTALL.md" />
   </ItemGroup>
