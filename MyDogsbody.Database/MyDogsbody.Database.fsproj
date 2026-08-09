@@ -8,6 +8,8 @@
   <ItemGroup>
     <Compile Include="DatabaseContext.fs" />
     <Compile Include="DatabaseContextSetup.fs" />
+    <Compile Include="SupplierRecordMappers.fs" />
+    <Compile Include="SupplierStore.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,6 +19,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Database.Models\MyDogsbody.Database.Models.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
   </ItemGroup>
 
 </Project>

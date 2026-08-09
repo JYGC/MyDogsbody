@@ -24,6 +24,11 @@ let settingsNavMenu(body: NodeRenderFragment) =
                         Icon Icons.Material.TwoTone.LockPerson
                         "Credentials"
                     }
+                    MudNavLink'' {
+                        Href "/settings/suppliers"
+                        Icon Icons.Material.TwoTone.Store
+                        "Suppliers"
+                    }
                     MudNavGroup'' {
                         Title "Logs"
                         Icon Icons.Material.TwoTone.MonitorHeart

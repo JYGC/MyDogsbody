@@ -18,14 +18,14 @@ One solution, `MyDogsbody.sln`. Every project targets `net9.0` except the WPF ho
 
 | Ring | Project | Holds |
 | --- | --- | --- |
-| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/` and `Documents/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
+| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/`, `Documents/` and `Suppliers/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
 | Outer ring | `MyDogsbody.Integrations.Credentials` (+ `.Database.Models`, C#) | LiteDB context, `CredentialEntityMappers.fs` (the bottom mapper), `CredentialStore.fs` (the adapter), `Credential` entity. An integration is an **adapter**: it implements the function types the domain declares |
 | Outer ring | `MyDogsbody.Integrations.Pdf` | `PdfDocumentReader.fs` — PdfPig behind the domain's `ReadDocumentContent` |
-| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` (`createCredentialApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
+| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` / `SupplierApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` / `SupplierApiFactory.fs` (`createCredentialApi` / `createSupplierApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, the main SQLite context, migration run, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
 | Host | `MyDogsbody` (C#) | WPF `MainWindow` + `BlazorWebView`, `Frame.razor` (MudBlazor providers + theme), the DI registration, `wwwroot/` |
 | UI | `MyDogsbody.UI.Portal` | `Shell.fs` (routes), `Pages/`, `Components/`, `ModuleCreators/`, `Layout/` |
-| UI | `MyDogsbody.UI.Types` | UI-facing records (`IntegrationCredentialUiType*`) and `Modules/` adaptive-state records |
-| Main database | `MyDogsbody.Database` (+ `.Database.Models`, F#) | The **main** store: SQLite `DatabaseContext` — a `SqliteConnection` plus a Dapper.FSharp `QuerySource<_>` per table; `Blog`/`Comment` records. Not consumed by the app yet |
+| UI | `MyDogsbody.UI.Types` | UI-facing records (`IntegrationCredentialUiType*`, `SupplierUiType*`, `SupplierApi`) and `Modules/` adaptive-state records |
+| Main database | `MyDogsbody.Database` (+ `.Database.Models`, F#) | The **main** store: SQLite `DatabaseContext` — a `SqliteConnection` plus a Dapper.FSharp `QuerySource<_>` per table, and a `Dispose`; `Blog`/`Comment`/`SupplierRecord`/`SupplierMatcherRecord` records; `SupplierRecordMappers.fs` (the bottom mapper) and `SupplierStore.fs` (the adapter). References `MyDogsbody.Domain` and `MyDogsbody.Builders`. `Blog`/`Comment` remain scaffold; `Suppliers`/`SupplierMatchers` is the first table pair actually consumed by the app |
 | Main database | `MyDogsbody.Database.Migrations` | FluentMigrator migrations — **the schema source of truth for the main database**. Runner instructions in its `INSTALL.md` |
 | Cross-cutting | `MyDogsbody.Builders` | `HandleErrorBuilder` — the outer ring's `Result` computation expression. The domain does **not** use it; see *Architecture → Errors* |
 | Cross-cutting | `MyDogsbody.Exceptions` / `.Exceptions.Types` | `ExceptionHelpers`, `MyDogsbodyException`, `ActionNames` |
@@ -40,9 +40,9 @@ Reference direction, enforced by project references. **Dependencies point inward
 - **Because it references nothing, the domain cannot use `MyDogsbody.Enums.InfrastructureType`** — it declares its own `Infrastructure` union instead, and the two edge mappers translate. Do not "fix" this by referencing `Enums`.
 - **Integrations reference `Domain`** and implement the function types it declares. They never reference each other, and they never reference `Startup` or the UI.
 - **`MyDogsbody.UI.Portal` references `UI.Types`, `Enums` and (transitively) `Exceptions.Types` — nothing else.** `Domain` and the integrations stay unreachable from the screen. Do not add a `Domain` reference to the UI to save a mapper; see *Architecture → The two mapping points*.
-- **`Startup` references everything it wires** — `Domain`, the integrations, `Builders`, `Logging`, `UI.Types` — and nothing references `Startup` except the C# host and a throwaway smoke harness.
+- **`Startup` references everything it wires** — `Domain`, the integrations, `Builders`, `Logging`, `UI.Types`, and now `Database` + `Database.Migrations` — and nothing references `Startup` except the C# host and a throwaway smoke harness.
 - The C# projects sit at the bottom (entities, enum) and reference nothing upward.
-- Nothing references `MyDogsbody.Database` outside the test project, and the sole other reference to `.Database.Migrations` is from the scratch project `TestMsGraphToEmails`, which never calls it. Don't read that as "unused" — it is the main database, just not wired into the app yet (see *Storage*). `MyDogsbody.Tests` references both, because the migrations are tested.
+- **`MyDogsbody.Database` references `MyDogsbody.Domain` and `MyDogsbody.Builders`**, and is itself referenced by `MyDogsbody.Startup` and `MyDogsbody.Tests` — the `invoice-ledger-foundation` change wired it in. It sits in the outer ring like an integration (same `handleError` / `Result<_, MyDogsbodyException>` shape, same bottom-mapper convention) without being one: it is the application's *main* store, not a per-integration one, so its `ActionNames` entries live under a `Database` module rather than `Integrations.*`. The sole other reference to `.Database.Migrations` remains the scratch project `TestMsGraphToEmails`, which never calls it.
 
 Watch the name collision: `MyDogsbody.Database.Models` is **F# records for the main SQLite database**, while `MyDogsbody.Integrations.*.Database.Models` are **C# classes for that integration's LiteDB store**. Same suffix, different tier, different language. `MyDogsbody.Logging.Database.Models` is a third thing again — the log store's entities, C# for the same LiteDB reason, but belonging to no integration.
 
@@ -63,7 +63,7 @@ dotnet build MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj   # fastest loop w
 dotnet run --project MyDogsbody\MyDogsbody.csproj   # launches the WPF app (Windows only, net9.0-windows)
 ```
 
-`Logging.db` and `Credentials.db` are created relative to the process working directory — under `dotnet run` that is `bin\Debug\net9.0\`.
+`Logging.db`, `Credentials.db` and `MyDogsbody.db` are created relative to the process working directory. Measured directly while closing `invoice-ledger-foundation`: running the command above from the repository root (as written) puts all three **at the repository root**, not under `bin\Debug\net9.0-windows\` — `dotnet run` does not change directory into the build output before launching the app. They are gitignore'd nowhere in particular, so delete them after a manual test rather than leaving them for `git status` to trip over.
 
 ### Migrate (main database)
 
@@ -94,9 +94,11 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **204 tests — 72 Unit, 45 Integration, 80 Contract, 7 E2E**, zero skips. If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **386 tests — 159 Unit, 74 Integration, 138 Contract, 15 E2E**, zero skips. If the build breaks now, assume you broke it.
 
 The suite was run eight times consecutively while closing the `architecture-compliance` change to confirm it is not flaky. If you see an intermittent failure, do not re-run until it passes — see the note on LiteDB's global `BsonMapper` under *Per-integration databases*.
+
+`MyDogsbody.Startup.fsproj` pins `Microsoft.Extensions.DependencyInjection.Abstractions` explicitly — keep that pin at or above whatever `FluentMigrator` (via `MyDogsbody.Database.Migrations`) resolves to. Falling behind turns into an `NU1605` package-downgrade error on the WPF host (`MyDogsbody.csproj`) specifically — `dotnet build MyDogsbody.sln` only reports it as a warning, so it can look harmless until someone runs the app.
 
 ## Testing in this codebase
 
@@ -149,7 +151,7 @@ Covers the outer ring against real storage: adapters/repositories, `*DatabaseCon
 **LiteDB stores (each integration's, and the log store):**
 
 - Fresh temp database per test — `Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")`, `connection=direct`, deleted in `try/finally`. `CredentialStoreTests.withStore` demonstrates the shape. Production uses `shared`; if a change touches concurrent access, pin that mode explicitly.
-- **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db` and `Credentials.db` in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways: test `CredentialApiMappers` and `CredentialApiFactory` — both are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
+- **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db`, `Credentials.db` and `MyDogsbody.db` (and run its migrations) in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways per API: test `CredentialApiMappers`/`SupplierApiMappers` and `CredentialApiFactory`/`SupplierApiFactory` — all four are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
 - **Both context records carry a `Dispose`**, so call it before deleting the temp file — Windows keeps a LiteDB file locked until the handle is released. `CredentialsDatabaseContextModuleTests` asserts the delete actually succeeds afterwards.
 - Required round-trips: insert → `getAll` returns the row with `ObjectId` surfaced as the `Id` string; update → re-read reflects the new values.
 - `MyDogsbody.Tests` **does** reference `MyDogsbody.Logging`, because the log store's repository and use cases are tested against a temp file like any other LiteDB store. Nothing reaches the `Logging.db` in the working directory; a test that wants to prove *whether something was logged* passes a recording `HandleErrorBuilder` instead.
@@ -205,13 +207,13 @@ The migration is **done**. The `architecture-compliance` change created `MyDogsb
 
 | | Specified | Built today |
 | --- | --- | --- |
-| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/` and `Documents/` |
+| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/`, `Documents/` and `Suppliers/` |
 | `MyDogsbody.Spine` | Gone — pipeline moves to `Domain`, wiring to `Startup` | ✅ deleted |
-| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 — `CredentialEntityMappers` and `CredentialApiMappers` |
-| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError` |
+| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 per area — `CredentialEntityMappers`/`CredentialApiMappers`, `SupplierRecordMappers`/`SupplierApiMappers` |
+| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError`, `SupplierError` |
 | Store in a core signature | Never | ✅ never — the domain names no store type |
 
-What is **not** built, and is a status rather than a violation: the main SQLite database is designed and migrated but not wired into the app (see *Storage*), and only the error log type exists in the log database (see *Log database*).
+What is **not** built, and is a status rather than a violation: only the error log type exists in the log database (see *Log database*). The main SQLite database's own "designed but not wired in" gap closed with `invoice-ledger-foundation` — see *Storage → Main database*.
 
 So: **write new work in the shape below**, and don't reintroduce a layer chain to "match the existing code" — there is no longer any existing code in that shape to match.
 
@@ -379,7 +381,7 @@ let linkAccount (input: UnlinkedAccount) : Result<LinkedAccount, MyDogsbodyExcep
     |> Result.mapError toMyDogsbodyException                          // out: domain error -> exception
 ```
 
-`Startup.fs` holds module-level `let` bindings created once per process. Paths are relative, so the `.db` files land in the process working directory (`bin\Debug\net9.0\` under `dotnet run`). **Everything with behaviour worth testing belongs in the other two files** — that split is what makes the composition root testable at all, so keep it when adding a second API.
+`Startup.fs` holds module-level `let` bindings created once per process. Paths are relative, so the `.db` files land in the process working directory — the repository root under the documented `dotnet run` invocation (*Commands → Run*), not `bin\Debug\net9.0-windows\`. **Everything with behaviour worth testing belongs in the other two files** — that split is what makes the composition root testable at all, so keep it when adding a second API.
 
 **`Result` is not collapsed here.** `CredentialApi` returns `Result<_, MyDogsbodyException>` and the UI decides what a failure looks like (`CredentialsBrowserModule.ErrorAval` → `MudAlert`). Do not reintroduce `|> ignore` on writes or `failwith` on reads.
 
@@ -405,11 +407,16 @@ Three tiers, kept deliberately separate: one main database, a private store per 
 
 #### Main database — SQLite
 
-`MyDogsbody.Database` is the application's main store. `DatabaseContextSetup.createDatabaseContext databaseFilePath` registers Dapper.FSharp's `OptionTypes`, opens a `SqliteConnection` (`Data Source={path}`) and returns a `DatabaseContext` record of getters — `GetDatabaseConnection`, plus one `unit -> QuerySource<'T>` per table, each bound to its table name via `table'<Blog> "Blogs"`. Models are F# `[<CLIMutable>]` records in `MyDogsbody.Database.Models`. Same context-record-of-getters shape as the integrations use, so it partially applies into an outer-ring function the same way — and stops at the same boundary: a `QuerySource<'T>` is no more allowed in a domain signature than an `ILiteCollection<T>` is.
+`MyDogsbody.Database` is the application's main store. `DatabaseContextSetup.createDatabaseContext databaseFilePath` registers Dapper.FSharp's `OptionTypes`, opens a `SqliteConnection` (`Data Source={path};Foreign Keys=True` — the connection-string keyword, not a runtime `PRAGMA`, so it self-applies on every open regardless of who opens the connection) and returns a `DatabaseContext` record of getters — `GetDatabaseConnection`, plus one `unit -> QuerySource<'T>` per table, each bound to its table name via `table'<Blog> "Blogs"` — and a `Dispose` that closes the connection. Models are F# `[<CLIMutable>]` records in `MyDogsbody.Database.Models`. Same context-record-of-getters shape as the integrations use, so it partially applies into an outer-ring function the same way — and stops at the same boundary: a `QuerySource<'T>` is no more allowed in a domain signature than an `ILiteCollection<T>` is.
 
-**The schema belongs to `MyDogsbody.Database.Migrations` and nothing else.** The FluentMigrator classes under its `Migrations/` folder are the source of truth: never create or alter a table at runtime, from `DatabaseContextSetup`, or by hand in a SQLite tool. Adding a column means adding a migration. `MigrationSetup.setupMigrations` wires `AddSQLite` + `ScanIn(...).For.Migrations()` and calls `MigrateUp()`; CLI equivalent under *Commands → Migrate*.
+**The schema belongs to `MyDogsbody.Database.Migrations` and nothing else.** The FluentMigrator classes under its `Migrations/` folder are the source of truth: never create or alter a table at runtime, from `DatabaseContextSetup`, or by hand in a SQLite tool. Adding a column means adding a migration. `MigrationSetup.setupMigrations` wires `AddSQLite` + `ScanIn(...).For.Migrations()` and calls `MigrateUp()`; CLI equivalent under *Commands → Migrate*. **FluentMigrator's SQLite generator refuses `Create.ForeignKey` outright** ("Foreign keys are not supported in SQLite") because SQLite has no `ALTER TABLE ADD CONSTRAINT` — a foreign key has to be declared inline in `CREATE TABLE`, which the fluent `Create.Table()` builder cannot express either. `Migration_20260809000002_CreateSupplierMatchersTable.fs` is the pattern to copy: `this.Execute.Sql("CREATE TABLE ... FOREIGN KEY (...) REFERENCES ... ON DELETE CASCADE")` for the table, then the fluent builder again for anything that doesn't involve the constraint (indexes, `Down()`).
 
-Status: the main database is **designed but not wired in**. Nothing references `MyDogsbody.Database`, nothing calls `setupMigrations`, and `Blog`/`Comment` are scaffold sample tables rather than domain tables — treat both as the shape to follow, not as finished schema. There is no composition-root binding either; the first change that needs the main database adds one in `Startup/Startup.fs` alongside the LiteDB contexts, writes store functions against it, and binds those to the dependency function types a workflow declares — never reaching it from the UI, and never handing a `DatabaseContext` inward.
+Status: the main database is **wired in as of `invoice-ledger-foundation` (change #1 of the invoice-to-calendar series)**, with suppliers as its first real consumer end to end — migrations, `SupplierStore.fs`, `SupplierApiFactory.fs`, and `/settings/suppliers`. `Startup.fs` calls `MigrationSetup.setupMigrations` before constructing the context, exactly the pattern below always intended. `Blog`/`Comment` remain scaffold sample tables, deliberately untouched by that change — treat them as the shape to follow, not as finished schema, and the next feature needing the main database adds its own migrations, store functions and dependency-type bindings the same way `Suppliers`/`SupplierMatchers` did — never reaching it from the UI, and never handing a `DatabaseContext` inward.
+
+Two things worth knowing before adding a second table pair:
+
+- **`InsertAsync`/`UpdateAsync`/`DeleteAsync`/`SelectAsync` on `Dapper.FSharp.SQLite`'s `IDbConnection` are async-only** — there is no synchronous overload. `SupplierStore.fs`'s private `runSync` (`Async.AwaitTask >> Async.RunSynchronously`) is the bridge every store function uses to keep the established synchronous `Result<'T, MyDogsbodyException>` outer-ring shape; copy it rather than inventing another one.
+- **Dapper.FSharp's `excludeColumn`/`includeColumn` custom operations don't resolve inside an `insert { }` block that has no `for x in table do`** — the CE rewrites the selector against a bound loop variable that isn't there, and the compiler error (`Expression<Func<'0,'1>>` vs. a stray `unit -> ...`) doesn't point at the real cause. `SupplierStore.fs` inserts via plain parameterised Dapper SQL instead (`insertSupplierRow` / `insertMatcherRow`), folding a `SELECT last_insert_rowid()` into the same command text as the `INSERT` so the assigned id comes back in the same round trip regardless of the connection's open/closed state. Reuse that shape for a new identity-column insert rather than re-fighting the CE.
 
 #### Per-integration databases — LiteDB today
 
