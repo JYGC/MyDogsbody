@@ -117,6 +117,45 @@ templates need a rule kind nobody has built, because no mail or calendar code ex
 - **#5 alongside either**, once #1 has landed.
 - **#4, #6 and #7 are join points** and are best done one at a time.
 
+### One branch per change
+
+> **Every change in this series is developed on its own branch and merged only when its gate passes.
+> No two changes share a branch, and nothing in this series is developed on `main`.**
+
+| | |
+| --- | --- |
+| **Branch name** | `change/<change-folder-name>` — `change/invoice-ledger-foundation`, `change/invoice-templates`, and so on. The name matches the folder under `docs/changes/` exactly, so a reviewer can find the specs from the branch and the branch from the specs |
+| **Cut from** | `main`, when every change it depends on has merged. Otherwise from the dependency's branch, rebased onto `main` once that lands |
+| **Carries** | The code, the tests, the ticked checkboxes in that change's `tasks.md`, and its `outcome.md` |
+| **Merges when** | Its gate phase has passed **in full** — zero build errors, zero test failures, **zero skips**, tests present at all four levels |
+
+#### Why, concretely
+
+- **A gate is a statement about one diff.** *"Builds clean, suite green, zero skips at all four
+  levels"* means nothing about a working tree with three changes half-finished in it. One branch per
+  change is what makes the CLAUDE.md gate checkable at all.
+- **Two of these are large.** #2 and #4 are the biggest in the series, and #4 has a designated split
+  point precisely because size hurts review. Neither should share a diff with anything else.
+- **One of them is destructive by design.** #5 deletes three projects and thirteen test files, and
+  its success criterion is literally *"the suite is still green and two fewer projects exist"*. That
+  is only checkable if nothing else is in the diff — mixed with other work, a dropped test count
+  becomes impossible to attribute.
+- **One of them can destroy data outside the application.** #7's two guard tests are the headline of
+  its review. They deserve a reviewer's whole attention, not a scroll past four other features.
+- **The specs travel with the code.** A reviewer opening the branch sees the requirements, the
+  design, the tasks that were ticked and the code that ticked them, in one place.
+
+#### How it interacts with the rest of this section
+
+- The **parallel-work** note above becomes two branches off `main` at once — `change/invoice-templates`
+  and `change/thunderbird-account-selection`. They share no domain area and no migration timestamps;
+  the conflicts are confined to the six append-only files every change touches, resolved once at
+  merge rather than continuously. Separate git worktrees suit this well.
+- **If #4 is split**, the scan-window piece gets its own branch and its own gate, like any other
+  change. A split that stays on one branch has not been split.
+- **The checkpoints** at the end of #2 and #4 are read from the merged result, not from a branch in
+  progress — the numbers only mean something once the gate has passed.
+
 ### Migration timestamps, reserved across the series
 
 So the seven changes stay ordered even if they land out of sequence. Each change's `tasks.md` repeats

@@ -3,6 +3,11 @@
 Change **#1 of 7**. [`requirements.md`](requirements.md) · [`design.md`](design.md) ·
 [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/invoice-ledger-foundation`, cut from `main`.** Everything in this file lands on it,
+and it merges **only** when Phase 9 has passed in full — zero build errors, zero test failures, zero
+skips, all four levels. No other change shares this branch, and none of this work happens on `main`.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **The ordering rule, per task:** where a task produces production code, its unit test is written
 first, run, and confirmed to fail *for the reason expected* before the implementation is written.
 Integration, contract and E2E tests may follow the implementation. Tasks marked *(test-first)* carry
@@ -223,6 +228,9 @@ in the series own `…0003` onward — see each change's tasks file.
       `MyDogsbody.Startup`, and the *Build state* test totals.
 - [ ] **10.2** Add an `outcome.md` to this folder recording the new test totals per level, anything
       friction #11 turned up, and the manual verification from 9.4.
+- [ ] **10.3** Open `change/invoice-ledger-foundation` for review, with this file's checkboxes ticked
+      and `outcome.md` on the branch. **Merge only after Phase 9 passed in full.**
+      *This is the change every later one leans on, so it is the one worth reviewing most carefully.*
 
 ---
 

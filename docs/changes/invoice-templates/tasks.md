@@ -3,6 +3,13 @@
 Change **#2 of 7**. Depends on **#1**. [`requirements.md`](requirements.md) ·
 [`design.md`](design.md) · [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/invoice-templates`, cut from `main` once #1 has merged.** Everything in this file
+lands on it, and it merges **only** when Phase 12 has passed in full — zero build errors, zero test
+failures, zero skips, all four levels. No other change shares this branch, and none of this work
+happens on `main`. This is one of the two largest changes in the series, which is exactly why it does
+not share a diff with anything else.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **The ordering rule, per task:** where a task produces production code, its unit test is written
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
@@ -259,6 +266,10 @@ until normalization is correct, so it goes first.
 - [ ] **13.2** `outcome.md`: totals per level, which of the four measured fixtures passed first time,
       and **the measured due-date coverage the fixtures actually achieve** — the number friction #19
       says change #7's value depends on.
+- [ ] **13.3** Open `change/invoice-templates` for review, with this file's checkboxes ticked and
+      `outcome.md` on the branch. **Merge only after Phase 12 passed in full.**
+      *Point the reviewer at Phase 1 and task 4.3 first: silent normalization failures and the
+      12% → 39% rule are where this change is either right or quietly wrong.*
 
 ---
 

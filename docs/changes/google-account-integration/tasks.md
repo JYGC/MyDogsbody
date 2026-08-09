@@ -3,6 +3,12 @@
 Change **#6 of 7**. Depends on **#5**. [`requirements.md`](requirements.md) ·
 [`design.md`](design.md) · [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/google-account-integration`, cut from `main` once #5 has merged.** Everything in
+this file lands on it, and it merges **only** when Phase 10 has passed in full — zero build errors,
+zero test failures, zero skips, all four levels. No other change shares this branch, and none of this
+work happens on `main`.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **The ordering rule, per task:** where a task produces production code, its unit test is written
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
@@ -181,6 +187,11 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       (Q5.6) — a refresh token is durable, silent to use, and valid until revoked; DPAPI
       (`ProtectedData`, `CurrentUser`) is the retrofit, and **retrofitting means re-authorising every
       account**, because tokens already written cannot be re-encrypted without being read first.
+- [ ] **11.3** Open `change/google-account-integration` for review, with this file's checkboxes ticked
+      and `outcome.md` on the branch. **Merge only after Phase 10 passed in full.**
+      *Point the reviewer at task 7.3 and at `outcome.md`'s two entries: this is the first change
+      whose contract level leans on recorded manual coverage, and the first to write a durable
+      credential to disk.*
 
 ---
 

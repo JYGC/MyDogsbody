@@ -3,6 +3,14 @@
 Change **#7 of 7**. Depends on **#4 and #6**. [`requirements.md`](requirements.md) ·
 [`design.md`](design.md) · [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/invoice-calendar-sync`, cut from `main` once #4 and #6 have merged.** Everything in
+this file lands on it, and it merges **only** when Phase 11 has passed in full — zero build errors,
+zero test failures, zero skips, all four levels. No other change shares this branch, and none of this
+work happens on `main`. **This is the only change in the series that can destroy data outside the
+application**, so its two guard tests deserve a reviewer's whole attention rather than a scroll past
+other features.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **The ordering rule, per task:** where a task produces production code, its unit test is written
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
@@ -218,6 +226,11 @@ type; every test binds a lambda or a stubbed HTTP handler.
       delete**; the series acceptance checks from 11.6; and **the real due-date coverage achieved**,
       against the 12% → 39% the measurement predicted (friction #19) — this is the number that says
       whether the calendar this change builds is actually full.
+- [ ] **12.3** Open `change/invoice-calendar-sync` for review, with this file's checkboxes ticked and
+      `outcome.md` on the branch. **Merge only after Phase 11 passed in full.**
+      *Point the reviewer at Phase 2 before anything else. Tasks 2.1, 2.2 and 2.3 are the whole
+      reason this branch is reviewable on its own: they are what stop a defect in a pure function
+      from deleting a calendar the application neither owns nor can restore.*
 
 ---
 

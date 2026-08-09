@@ -3,6 +3,14 @@
 Change **#5 of 7**. [`requirements.md`](requirements.md) · [`design.md`](design.md) ·
 [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/credentials-per-provider`, cut from `main` once #1 has merged** (see the sequencing
+constraint below). Everything in this file lands on it, and it merges **only** when Phase 5 has passed
+in full — zero build errors, zero test failures, zero skips, all four levels. No other change shares
+this branch, and none of this work happens on `main`. **This matters more here than anywhere else in
+the series:** the success criterion is *"the suite is still green and two fewer projects exist"*, and
+a dropped test count is impossible to attribute if anything else is in the diff.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **This is a refactor with no new feature.** The success criterion is *"the suite is still green and
 two fewer projects exist"*.
 
@@ -149,6 +157,10 @@ before you change anything near it."*
       tests**; that the rows in `Credentials.db` were **discarded, not migrated** (Q3.9); and that
       **secrets remain unencrypted at rest as a deliberate, accepted risk** (Q5.6), to be repeated in
       change #6's description where OAuth refresh tokens start being written.
+- [ ] **6.3** Open `change/credentials-per-provider` for review, with this file's checkboxes ticked
+      and `outcome.md` on the branch. **Merge only after Phase 5 passed in full.**
+      *The review question for this branch is not "does it work" but "is anything gone that should
+      not be" — which is only answerable because nothing else is in the diff.*
 
 ---
 

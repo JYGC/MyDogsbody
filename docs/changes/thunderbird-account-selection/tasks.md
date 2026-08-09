@@ -3,6 +3,13 @@
 Change **#3 of 7**. Depends on nothing. [`requirements.md`](requirements.md) ·
 [`design.md`](design.md) · [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/thunderbird-account-selection`, cut from `main`.** Everything in this file lands on
+it, and it merges **only** when Phase 11 has passed in full — zero build errors, zero test failures,
+zero skips, all four levels. No other change shares this branch, and none of this work happens on
+`main`. If this runs alongside `change/invoice-templates`, expect conflicts only in the six
+append-only files every change touches.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **The ordering rule, per task:** where a task produces production code, its unit test is written
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
@@ -239,6 +246,10 @@ written against the format documentation instead — which is what the measureme
 - [ ] **12.2** `outcome.md`: totals per level, the manual numbers from 11.4, and — **stated plainly**
       — that maildir ships verified against **synthetic fixtures only**, because the measured profile
       contains none.
+- [ ] **12.3** Open `change/thunderbird-account-selection` for review, with this file's checkboxes
+      ticked and `outcome.md` on the branch. **Merge only after Phase 11 passed in full.**
+      *Point the reviewer at Phase 7 — this is the only change in the series that touches the WPF
+      host, and the diff there should be one function and one registration.*
 
 ---
 

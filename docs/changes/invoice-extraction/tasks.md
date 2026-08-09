@@ -3,6 +3,13 @@
 Change **#4 of 7**. Depends on **#1, #2, #3**. [`requirements.md`](requirements.md) ·
 [`design.md`](design.md) · [decision record](../invoice-to-calendar/background.md)
 
+**Branch: `change/invoice-extraction`, cut from `main` once #1, #2 and #3 have merged.** Everything in
+this file lands on it, and it merges **only** when Phase 12 has passed in full — zero build errors,
+zero test failures, zero skips, all four levels. No other change shares this branch, and none of this
+work happens on `main`. **If this change is split** (see below), the piece that comes out gets its own
+branch and its own gate — a split that stays on one branch has not been split.
+See [background → *One branch per change*](../invoice-to-calendar/background.md#one-branch-per-change).
+
 **The ordering rule, per task:** where a task produces production code, its unit test is written
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
@@ -258,6 +265,10 @@ one file.
       **a sentence recording that migrations may now carry seed data**; the *Build state* totals.
 - [ ] **13.2** `outcome.md`: totals per level, the scan timings from 12.4, the due-date coverage from
       12.5, and whether the immediate rescan survived.
+- [ ] **13.3** Open `change/invoice-extraction` for review, with this file's checkboxes ticked and
+      `outcome.md` on the branch. **Merge only after Phase 12 passed in full.**
+      *Read 12.5's due-date number off the merged result before starting #7 — if it stays near 12%,
+      the sync is not the highest-value next change (friction #19).*
 
 ---
 
