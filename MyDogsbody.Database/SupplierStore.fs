@@ -31,19 +31,29 @@ let private runSync (task: System.Threading.Tasks.Task<'T>) : 'T =
 /// sidesteps that, and folding the SELECT last_insert_rowid() into the same command text means it
 /// runs in the same connection open/close cycle as the INSERT, which is what makes the returned
 /// id reliable regardless of whether the caller's connection was already open.
-let private insertSupplierRow (connection: SqliteConnection) (record: SupplierRecord) : int =
+let private insertSupplierRow
+    (connection: SqliteConnection)
+    (transaction: SqliteTransaction)
+    (record: SupplierRecord)
+    : int =
     connection.ExecuteScalarAsync<int64>(
         "INSERT INTO Suppliers (Name, PaymentTermDays) VALUES (@Name, @PaymentTermDays);
          SELECT last_insert_rowid();",
-        {| Name = record.Name; PaymentTermDays = record.PaymentTermDays |}
+        {| Name = record.Name; PaymentTermDays = record.PaymentTermDays |},
+        transaction
     )
     |> runSync
     |> int
 
-let private insertMatcherRow (connection: SqliteConnection) (record: SupplierMatcherRecord) : unit =
+let private insertMatcherRow
+    (connection: SqliteConnection)
+    (transaction: SqliteTransaction)
+    (record: SupplierMatcherRecord)
+    : unit =
     connection.ExecuteAsync(
         "INSERT INTO SupplierMatchers (SupplierId, Kind, Value) VALUES (@SupplierId, @Kind, @Value);",
-        {| SupplierId = record.SupplierId; Kind = record.Kind; Value = record.Value |}
+        {| SupplierId = record.SupplierId; Kind = record.Kind; Value = record.Value |},
+        transaction
     )
     |> runSync
     |> ignore
@@ -55,27 +65,20 @@ let private mapOrRaise (mapResult: Result<StoredSupplier, string>) =
     | Ok stored -> stored
     | Error reason -> raise (InvalidOperationException $"Stored supplier is unusable: {reason}")
 
-let private matchersFor
-    (connection: SqliteConnection)
-    (getSupplierMatchers: unit -> QuerySource<SupplierMatcherRecord>)
-    (supplierId: int)
-    : SupplierMatcherRecord list =
-    select {
-        for m in getSupplierMatchers () do
-        where (m.SupplierId = supplierId)
-    }
-    |> connection.SelectAsync<SupplierMatcherRecord>
-    |> runSync
-    |> Seq.toList
+/// Runs `work` with the connection open and inside a transaction, committing on success. Any
+/// exception - including one raised deliberately by mapOrRaise - unwinds without a Commit, so the
+/// transaction's own Dispose rolls it back: a write in the middle of a multi-statement sequence
+/// (a supplier row plus its matcher rows) never survives a later statement's failure.
+let private inTransaction (connection: SqliteConnection) (work: SqliteTransaction -> 'T) : 'T =
+    connection.Open()
 
-let private toStored
-    (connection: SqliteConnection)
-    (getSupplierMatchers: unit -> QuerySource<SupplierMatcherRecord>)
-    (row: SupplierRecord)
-    : StoredSupplier =
-    matchersFor connection getSupplierMatchers row.Id
-    |> SupplierRecordMappers.toStoredSupplier row
-    |> mapOrRaise
+    try
+        use transaction = connection.BeginTransaction()
+        let result = work transaction
+        transaction.Commit()
+        result
+    finally
+        connection.Close()
 
 let getAll
     (handleError: HandleErrorBuilder)
@@ -99,7 +102,24 @@ let getAll
                 |> runSync
                 |> Seq.toList
 
-            return supplierRows |> List.map (toStored connection getSupplierMatchers)
+            // One query for every matcher, grouped in memory, rather than one query per supplier -
+            // getAll runs on every page load and after every write.
+            let matchersBySupplierId =
+                select {
+                    for m in getSupplierMatchers () do
+                    selectAll
+                }
+                |> connection.SelectAsync<SupplierMatcherRecord>
+                |> runSync
+                |> Seq.toList
+                |> List.groupBy (fun m -> m.SupplierId)
+                |> Map.ofList
+
+            return
+                supplierRows
+                |> List.map (fun row ->
+                    let matchers = matchersBySupplierId |> Map.tryFind row.Id |> Option.defaultValue []
+                    SupplierRecordMappers.toStoredSupplier row matchers |> mapOrRaise)
         with ex ->
             return! MyDogsbodyException(action, "Failed to retrieve all suppliers.", ex)
     }
@@ -117,25 +137,27 @@ let insertOne
         try
             let connection = getConnection ()
             let newRecord = SupplierRecordMappers.toNewSupplierRecord supplier
-            let insertedId = insertSupplierRow connection newRecord
 
-            // List.iter, not a CE `for` loop: HandleErrorBuilder defines no Combine, so a `for`
-            // here could not be sequenced with the `return` that follows it.
-            supplier.Matchers
-            |> List.iter (fun matcher ->
-                SupplierRecordMappers.toNewMatcherRecord insertedId matcher
-                |> insertMatcherRow connection)
+            let insertedId =
+                inTransaction connection (fun transaction ->
+                    let insertedId = insertSupplierRow connection transaction newRecord
 
-            let insertedRow =
-                select {
-                    for s in getSuppliers () do
-                    where (s.Id = insertedId)
-                }
-                |> connection.SelectAsync<SupplierRecord>
-                |> runSync
-                |> Seq.exactlyOne
+                    // List.iter, not a CE `for` loop: HandleErrorBuilder defines no Combine, so a
+                    // `for` here could not be sequenced with the `return` that follows it.
+                    supplier.Matchers
+                    |> List.iter (fun matcher ->
+                        SupplierRecordMappers.toNewMatcherRecord insertedId matcher
+                        |> insertMatcherRow connection transaction)
 
-            return toStored connection getSupplierMatchers insertedRow
+                    insertedId)
+
+            // Every field is already known from the input plus the id the insert assigned - no
+            // need to read back what was just written.
+            return
+                SupplierRecordMappers.toStoredSupplier
+                    { newRecord with Id = insertedId }
+                    (supplier.Matchers |> List.map (SupplierRecordMappers.toNewMatcherRecord insertedId))
+                |> mapOrRaise
         with ex ->
             return! MyDogsbodyException(action, "Failed to insert new supplier.", ex)
     }
@@ -168,41 +190,47 @@ let updateOne
             match existing with
             | None -> return None
             | Some _ ->
-                update {
-                    for s in getSuppliers () do
-                    setColumn s.Name (SupplierName.value edit.Name)
-                    setColumn s.PaymentTermDays (PaymentTermDays.value edit.PaymentTermDays)
-                    where (s.Id = rowId)
-                }
-                |> connection.UpdateAsync
-                |> runSync
-                |> ignore
-
-                // The matcher set is replaced, not merged - every existing row is removed and
-                // the submitted list inserted fresh.
-                delete {
-                    for m in getSupplierMatchers () do
-                    where (m.SupplierId = rowId)
-                }
-                |> connection.DeleteAsync
-                |> runSync
-                |> ignore
-
-                edit.Matchers
-                |> List.iter (fun matcher ->
-                    SupplierRecordMappers.toNewMatcherRecord rowId matcher
-                    |> insertMatcherRow connection)
-
-                let updatedRow =
-                    select {
+                inTransaction connection (fun transaction ->
+                    update {
                         for s in getSuppliers () do
+                        setColumn s.Name (SupplierName.value edit.Name)
+                        setColumn s.PaymentTermDays (PaymentTermDays.value edit.PaymentTermDays)
                         where (s.Id = rowId)
                     }
-                    |> connection.SelectAsync<SupplierRecord>
+                    |> fun query -> connection.UpdateAsync(query, transaction)
                     |> runSync
-                    |> Seq.exactlyOne
+                    |> ignore
 
-                return Some (toStored connection getSupplierMatchers updatedRow)
+                    // The matcher set is replaced, not merged - every existing row is removed and
+                    // the submitted list inserted fresh.
+                    delete {
+                        for m in getSupplierMatchers () do
+                        where (m.SupplierId = rowId)
+                    }
+                    |> fun query -> connection.DeleteAsync(query, transaction)
+                    |> runSync
+                    |> ignore
+
+                    edit.Matchers
+                    |> List.iter (fun matcher ->
+                        SupplierRecordMappers.toNewMatcherRecord rowId matcher
+                        |> insertMatcherRow connection transaction))
+
+                // Every field is already known from the input plus the row id already confirmed
+                // to exist above - no need to read back what was just written.
+                let updatedRecord =
+                    {
+                        Id = rowId
+                        Name = SupplierName.value edit.Name
+                        PaymentTermDays = PaymentTermDays.value edit.PaymentTermDays
+                    }
+
+                return
+                    SupplierRecordMappers.toStoredSupplier
+                        updatedRecord
+                        (edit.Matchers |> List.map (SupplierRecordMappers.toNewMatcherRecord rowId))
+                    |> mapOrRaise
+                    |> Some
         with ex ->
             return! MyDogsbodyException(action, "Failed to update existing supplier.", ex)
     }
