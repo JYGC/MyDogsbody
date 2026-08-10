@@ -1,4 +1,4 @@
-# Outcome — Invoice ledger foundation
+﻿# Outcome — Invoice ledger foundation
 
 Change **#1 of 7**. See [`requirements.md`](requirements.md), [`design.md`](design.md),
 [`tasks.md`](tasks.md).
@@ -8,16 +8,20 @@ Change **#1 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **386 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **399 tests, 0 failures, 0 skips**, all
   four levels present:
 
   | Level | Before | After | Added |
   | --- | --- | --- | --- |
-  | Unit | 72 | 159 | +87 |
+  | Unit | 72 | 162 | +90 |
   | Integration | 45 | 74 | +29 |
-  | Contract | 80 | 138 | +58 |
-  | E2E | 7 | 15 | +8 |
-  | **Total** | **204** | **386** | **+182** |
+  | Contract | 80 | 146 | +66 |
+  | E2E | 7 | 17 | +10 |
+  | **Total** | **204** | **399** | **+195** |
+
+  The counts above include the tests added while reviewing this change as a stacked split: the
+  supplier-store transaction fixes, the SupplierApi contract fixes, and the editor dialog's
+  match-rule fixes each landed with the tests that caught them.
 
 - `Contracts/DomainIsolationTests.fs` (3 tests) and the `AssertDomainReferencesNothing` build
   target both still pass — `MyDogsbody.Domain` gained `Suppliers/` and still has zero
