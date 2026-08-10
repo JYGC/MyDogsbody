@@ -136,6 +136,17 @@ WHEN a template is persisted THE SYSTEM SHALL store it as **relational rows**, n
 WHEN a rule kind is added in future THE SYSTEM SHALL gain a column, not a serialised field smuggled into an existing one.
 WHEN each new migration's `Down()` is run THE SYSTEM SHALL remove exactly what its `Up()` created.
 
+### Writes are all-or-nothing
+
+Saving a template writes several rows — the template, then one per field rule — and reordering writes
+one per template. Change #1 shipped the un-transactioned form of exactly this, so it is stated as a
+requirement rather than left to the store's implementation.
+
+WHEN a template is saved and any statement in that save fails THE SYSTEM SHALL store no part of it, leaving neither a template row without its rules nor a rule set without its template.
+WHEN a template is edited and any statement in that edit fails THE SYSTEM SHALL leave the stored template exactly as it was before the edit, with its original rule set intact.
+WHEN templates are reordered and any statement in that reorder fails THE SYSTEM SHALL leave the original order intact, never a partially applied one.
+WHEN a write fails partway THE SYSTEM SHALL report the failure to the caller, and the state the caller then reads back SHALL agree with what it was told.
+
 ---
 
 ## User interface

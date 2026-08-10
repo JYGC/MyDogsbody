@@ -14,7 +14,14 @@ See [background → *One branch per change*](../invoice-to-calendar/background.m
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
 
-**Reserved migration timestamps for this change: `20260809000003`–`20260809000004`.**
+**Reserved migration timestamps for this change: `20260810000002`–`20260810000003`.** Renumbered from
+`20260809000003`–`…0004`: change #1 shipped a sixth migration (`20260810000001`, the case-insensitive
+name index, PR #8) that sorts above the whole `20260809` block. See
+[background → *Migration timestamps*](../invoice-to-calendar/background.md#migration-timestamps-reserved-across-the-series).
+
+**Read [`design.md` → *Carried over from change #1's review*](design.md) before Phase 7.** Four
+defects found reviewing change #1 recur in this change's code, three of them under green tests. The
+tasks below name them where they land, but the reasoning is there.
 
 **Build order note.** Phases 1–4 are pure domain work and can be done before any UI exists. That is
 deliberate: this is the riskiest area in the series (friction #9) and the engine should be proven by
@@ -52,7 +59,11 @@ until normalization is correct, so it goes first.
       Tests: one accepted and one rejected value per rule, reason asserted.
 - [ ] **2.2** `DocumentPart`, `FieldRule`, `TargetField`, `ParseHint`, `TemplateFieldRule`,
       `UnvalidatedTemplate`, `ValidTemplate` (private constructor), `StoredTemplate`,
-      `TemplateError`, and the five dependency function types.
+      `TemplateError`, and the **six** dependency function types — the five template ones plus
+      `LoadSuppliersForTemplates`, this area's own supplier-loading type. It is declared here rather
+      than reusing `Suppliers.LoadSuppliers`, which returns `Result<_, SupplierError>`: reusing it
+      would put a `Result.mapError` at every call site and make one dependency type span two error
+      DUs, owing a contract suite in both areas.
       *Outcome:* `ValidTemplate` exposes accessors and **no constructor**. Added to the `.fsproj` in
       the compile order in `design.md`.
       *Depends on:* 2.1, 1.1.
@@ -162,10 +173,15 @@ until normalization is correct, so it goes first.
 
 ## Phase 7 — Migrations and store (required)
 
-- [ ] **7.1** *(test-first)* `Migration_20260809000003_CreateInvoiceTemplatesTable.fs`.
+- [ ] **7.1** *(test-first)* `Migration_20260810000002_CreateInvoiceTemplatesTable.fs`.
+      **`Execute.Sql` for the `CREATE TABLE`** — it carries a foreign key, and FluentMigrator's SQLite
+      generator refuses `Create.ForeignKey` while the fluent builder cannot express an inline one.
+      Fluent builder for the index and `Down()`. Copy
+      `Migration_20260809000002_CreateSupplierMatchersTable.fs`.
       Tests: `MigrateUp` produces the expected columns; the `(SupplierId, Position)` index exists;
       **deleting a supplier deletes its templates**; `Down()` reverses it.
-- [ ] **7.2** *(test-first)* `Migration_20260809000004_CreateTemplateFieldRulesTable.fs`.
+- [ ] **7.2** *(test-first)* `Migration_20260810000003_CreateTemplateFieldRulesTable.fs`. Same
+      `Execute.Sql` treatment — this table has a foreign key too.
       Tests: as above; the unique index on `(TemplateId, TargetField)` refuses a duplicate;
       **deleting a template deletes its rules**; deleting a **supplier** deletes templates *and*
       rules; `Down()` reverses it.
@@ -177,8 +193,20 @@ until normalization is correct, so it goes first.
       *Depends on:* 2.2, 7.2.
 - [ ] **7.4** *(test-first)* `TemplateStore.fs` — `getForSupplier`, `insertOne`, `updateOne`,
       `deleteOne`, `reorder`. Outer-ring shape, `handleError`, `Result<_, MyDogsbodyException>`.
+      **Copy four shapes from `SupplierStore.fs` rather than re-deriving them:** `runSync` (the
+      Dapper.FSharp async-only bridge); `inTransaction`; plain parameterised SQL with
+      `SELECT last_insert_rowid()` folded into the same command for the two identity inserts (the
+      `insert { }` CE cannot resolve `excludeColumn` without a `for … in table do`); and `List.iter`
+      rather than a CE `for` loop when writing N rule rows, because `HandleErrorBuilder` defines no
+      `Combine`. Load a supplier's templates and **all** their rules in two queries grouped in
+      memory — not one query per template.
       Tests *(Integration)*: round trip for **every** rule kind, target field and parse hint;
       reorder persists; both cascades fire.
+      Tests *(Integration, atomicity)*: **one per multi-row write** — `insertOne`, `updateOne` and
+      `reorder` each leave no trace when a statement partway through fails. A rule row violating the
+      `(TemplateId, TargetField)` unique index is the cheapest trigger. **Each must fail if
+      `inTransaction` is removed** — confirm that by removing it, watching the test fail, and putting
+      it back. Change #1 shipped this defect and its fix is still unasserted; this is where that stops.
       Tests *(Unit)*: each error path asserts the declared `ActionNames` string, the message and a
       preserved inner exception.
       *Depends on:* 7.3.
@@ -189,9 +217,16 @@ until normalization is correct, so it goes first.
 
 - [ ] **8.1** *(test-first)* `TemplateApiMappers.fs` — domain ⇄ UI, `toTemplateError`,
       `toMyDogsbodyException`.
-      Tests: mapper field-for-field both directions over every union case; each `TemplateError` case
-      → its intended action and message, with the **expected/unexpected split** asserted (everything
-      but `TemplateStoreFailed` wraps an `ApplicationException` and is not logged).
+      **Every string → union conversion returns `Result<_, TemplateError>` — none raises.** Four
+      unions arrive from the UI as plain strings (`DocumentPart`, the `FieldRule` kind, `TargetField`,
+      `ParseHint`), and an unrecognised value is a named refusal, never a default and never a
+      `failwith`. Change #1's `toMatcherKind` raised, outside any `handleError` block, on a path the
+      UI calls from `Async.Start` — no alert, no log, and the write silently never happened. Do not
+      copy `CredentialApiMappers.toInfrastructure`: it is sound only because it takes a C# **enum**.
+      Tests: mapper field-for-field both directions over every union case; **an unrecognised string
+      per union returns its error case rather than raising**; each `TemplateError` case → its intended
+      action and message, with the **expected/unexpected split** asserted (everything but
+      `TemplateStoreFailed` wraps an `ApplicationException` and is not logged).
 - [ ] **8.2** *(test-first)* `TemplateApiFactory.createTemplateApi handleError databaseContext`,
       including a `TestTemplate` member that runs `ValidateTemplateWorkflow` then
       `ApplyTemplateWorkflow` over a pasted-text `ScannedMessage` and returns the per-field results.
@@ -211,6 +246,12 @@ until normalization is correct, so it goes first.
       later success clears it; a reorder reloads.
 - [ ] **9.3** `Components/TemplatesComponents.fs` — the template editor dialog (a **class**
       inheriting `FunComponent`) and the per-kind rule editors.
+      **Two traps that cost change #1, both in the rule list this dialog renders:** a `MudListItem`
+      given both a `Text` property and child content renders one or the other, so put the label in the
+      child content or every rule shows as an unlabelled button; and remove entries **by index**
+      (`List.indexed` + `List.removeAt`), never by value — F# records compare structurally, so
+      filtering by value deletes every identical rule at once, and two rules may legitimately be
+      identical.
       **Build the rule editors in this order**, cheapest and most-used first:
       `LinesAfterLabel` → `AfterLabel` → `FixedValue` → `AttachmentName` → `SubjectCapture` →
       `DateFromField` → **`RegexCapture` last** (Q7.6.2 — it fired once in 1,199 candidates).
@@ -230,9 +271,14 @@ until normalization is correct, so it goes first.
 ## Phase 10 — Contract suites (required)
 
 - [ ] **10.1** One shared suite per dependency function type — `LoadTemplatesForSupplier`,
-      `SaveTemplate`, `UpdateTemplate`, `DeleteTemplate`, `ReorderTemplates` — real adapter **and**
-      every fake. **`MemberData` source must be a public `let`.**
-- [ ] **10.2** `TemplateApi` contract suite: real record **and** every fake.
+      `SaveTemplate`, `UpdateTemplate`, `DeleteTemplate`, `ReorderTemplates` and
+      `LoadSuppliersForTemplates` — real adapter **and** every fake. **`MemberData` source must be a
+      public `let`.**
+- [ ] **10.2** `TemplateApi` contract suite: real record **and** every fake. **The suite pins
+      behaviour, not shape:** every refusal in `requirements.md` is asserted with its message, not
+      merely that a `Result` came back. Change #1's fake passed its suite while missing two whole
+      validations and quoting the wrong spelling in a third message — a suite constrains a fake only
+      on the axes it actually asserts.
 - [ ] **10.3** **Exhaustiveness guards.** A reflection-driven test over `FieldRule`, `TargetField`,
       `ParseHint` and `DocumentPart` that fails if any case lacks a mapper entry, a UI editor and a
       fixture. *Adding a rule kind should break this test until it is finished — that is its job.*
@@ -245,13 +291,27 @@ until normalization is correct, so it goes first.
       reorder → the new order shown and used; delete → gone; a validation failure → `MudAlert` with
       the **specific** reason and **nothing logged**; a store failure → `MudAlert` and **exactly one
       entry logged**; success after failure clears the alert.
+      **Render the dialog, do not stub it.** Drive it through `MudDialogProvider` +
+      `IDialogService.ShowAsync`, per `E2E/SuppliersFlowTests.renderEditor` — a `MudDialog` rendered
+      standalone emits no markup, so a stubbed callback makes an empty assertion look like a passing
+      one. That gap hid two user-visible bugs for the whole of change #1.
+- [ ] **11.1a** *(E2E)* The two rendering assertions 9.3 exists to satisfy: **every rule editor
+      renders its own label**, and **deleting one of two identical rules removes exactly one**.
+      Confirm each fails against the defective form before fixing it.
 - [ ] **11.2** *(E2E)* A test-panel run: paste text containing a non-breaking space between label and
       value, confirm the panel shows the **normalized** text and that the rule extracts the value.
 - [ ] **11.3** Confirm no test reaches `Startup.Startup`.
 
 ## Phase 12 — Gate (required)
 
-- [ ] **12.1** `dotnet build MyDogsbody.sln` — zero errors.
+- [ ] **12.0** **Take the baseline before writing anything.** Run the build and the full suite on
+      `main` as cut, and record the per-level totals. `CLAUDE-project.md` currently claims *399 — 162
+      Unit, 74 Integration, 146 Contract, 17 E2E*, which was measured on `split/5-suppliers-ui`
+      before PR #8 merged; nobody has run the suite on the merged `main`. A before/after count against
+      an unverified before is not a measurement.
+- [ ] **12.1** `dotnet build MyDogsbody.sln` — zero errors. **Then also
+      `dotnet build MyDogsbody\MyDogsbody.csproj`**: `NU1605` is a warning on the solution build and a
+      hard error on the WPF host, so the solution build alone does not prove the app compiles.
 - [ ] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
 - [ ] **12.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass.
 - [ ] **12.4** **Acceptance test for ask #6:** run the app, add a supplier, add a template for it,

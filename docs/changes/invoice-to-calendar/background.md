@@ -163,10 +163,23 @@ its own block.
 
 | Change | Timestamps | Tables |
 | --- | --- | --- |
-| #1 | `20260809000001`–`…0002` | `Suppliers`, `SupplierMatchers` |
-| #2 | `…0003`–`…0004` | `InvoiceTemplates`, `TemplateFieldRules` |
-| #4 | `…0005`–`…0009` | `Invoices`, `ScanProblems`, `InvoiceTombstones`, `ScanWindows` (+ seed), `InvoiceSettings` |
-| #7 | `…0010` | `InvoiceCalendarEvents` |
+| #1 | `20260809000001`–`…0002`, **`20260810000001`** | `Suppliers`, `SupplierMatchers`, then the case-insensitive `IX_Suppliers_Name` |
+| #2 | `20260810000002`–`…0003` | `InvoiceTemplates`, `TemplateFieldRules` |
+| #4 | `20260809000005`–`…0009` — **renumber before starting** | `Invoices`, `ScanProblems`, `InvoiceTombstones`, `ScanWindows` (+ seed), `InvoiceSettings` |
+| #7 | `20260809000010` — **renumber before starting** | `InvoiceCalendarEvents` |
+
+**Why #2 moved to the `20260810` prefix.** Change #1 shipped a sixth migration after the fact —
+`20260810000001`, the case-insensitive name index (PR #8) — which sorts *above* every slot originally
+reserved under the `20260809` prefix. Migrations numbered below an already-applied one still apply
+(FluentMigrator runs any version absent from `VersionInfo`), so nothing breaks, but two things get
+harder to reason about: on a fresh database the index fix now runs *after* whatever is numbered below
+it, and `dotnet fm rollback` walks `Down()` in descending version order, so rolling back "the last two
+migrations" would step across changes rather than within one. #2 is renumbered to stay monotonic.
+
+**#4 and #7 still carry the old numbers.** They are left alone deliberately — renumbering a block
+nobody is working on invites a half-applied edit, and both changes will be revisited at the decision
+checkpoints anyway. Renumber each to follow #2 (`20260810000004`–`…0008` and `20260810000009`) as the
+first task of the change that needs it, and update its `design.md` and `tasks.md` together.
 
 ### Scope movements recorded during conversion
 

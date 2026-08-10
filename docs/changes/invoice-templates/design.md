@@ -46,11 +46,16 @@ door into it, and a lot of table-driven tests.
  Database   TemplateStore.fs · TemplateRecordMappers.fs  (the BOTTOM mapper)
             DatabaseContext + GetInvoiceTemplates, GetTemplateFieldRules
         ▲
- Migrations 20260809000003_CreateInvoiceTemplatesTable
-            20260809000004_CreateTemplateFieldRulesTable
+ Migrations 20260810000002_CreateInvoiceTemplatesTable
+            20260810000003_CreateTemplateFieldRulesTable
 ```
 
-**Reserved migration timestamps for this change: `20260809000003`–`20260809000004`.**
+**Reserved migration timestamps for this change: `20260810000002`–`20260810000003`.**
+
+Renumbered from `20260809000003`–`…0004` after change #1 shipped a sixth migration,
+`20260810000001` (the case-insensitive `IX_Suppliers_Name`, PR #8), which sorts above the whole
+`20260809` block. Reasoning in
+[background → *Migration timestamps*](../invoice-to-calendar/background.md#migration-timestamps-reserved-across-the-series).
 
 ### Where each new file lives, and why
 
@@ -63,9 +68,9 @@ Compile order in `MyDogsbody.Domain.fsproj`:
 
 ```
 Result.fs
+Credentials/…                        (removed in change #5)
 Documents/DocumentsTypes.fs          ← gains DocumentFormat and TextLine here
 Documents/ReadDocumentLinesWorkflow.fs
-Credentials/…                        (removed in change #5)
 Suppliers/…                          (change #1)
 InvoiceTemplates/InvoiceTemplatesTypes.fs
 InvoiceTemplates/TextNormalization.fs
@@ -186,6 +191,15 @@ type SaveTemplate    = ValidTemplate -> Result<StoredTemplate, TemplateError>
 type UpdateTemplate  = TemplateId -> ValidTemplate -> Result<StoredTemplate option, TemplateError>
 type DeleteTemplate  = TemplateId -> Result<bool, TemplateError>
 type ReorderTemplates = SupplierId -> TemplateId list -> Result<unit, TemplateError>
+
+/// The suppliers a template may be written for. Declared HERE rather than reusing the suppliers
+/// area's LoadSuppliers, which returns Result<_, SupplierError>: a workflow in this area returns
+/// TemplateError, so reusing it would mean a Result.mapError at every call site and one dependency
+/// type spanning two error DUs - and therefore owing a contract suite in both areas.
+///
+/// The adapter is the same SupplierStore.getAll; only the error mapping in TemplateApiFactory
+/// differs. That mapping is the factory's job, which is exactly where the two rings already meet.
+type LoadSuppliersForTemplates = unit -> Result<StoredSupplier list, TemplateError>
 ```
 
 `ValidTemplate` carries its **compiled** `Regex` objects. Compiling at validation time is what makes
@@ -271,7 +285,7 @@ type InvoiceError =
 | `MatchSupplierWorkflow.fs` | `StoredSupplier list -> ScannedMessage -> Result<SupplierId, InvoiceError>` | pure |
 | `ApplyTemplateWorkflow.fs` | `PaymentTermDays -> ValidTemplate -> ScannedMessage -> Result<ExtractedInvoice, InvoiceError>` | **pure** |
 | `SelectTemplateWorkflow.fs` | `PaymentTermDays -> StoredTemplate list -> ScannedMessage -> Result<ExtractedInvoice, InvoiceError>` | pure |
-| `AddTemplateWorkflow.fs` | `LoadSuppliers -> LoadTemplatesForSupplier -> SaveTemplate -> UnvalidatedTemplate -> Result<StoredTemplate, TemplateError>` | dependencies first |
+| `AddTemplateWorkflow.fs` | `LoadSuppliersForTemplates -> LoadTemplatesForSupplier -> SaveTemplate -> UnvalidatedTemplate -> Result<StoredTemplate, TemplateError>` | dependencies first |
 | `EditTemplateWorkflow.fs` | `LoadTemplatesForSupplier -> UpdateTemplate -> string -> UnvalidatedTemplate -> Result<StoredTemplate, TemplateError>` | |
 | `DeleteTemplateWorkflow.fs` | `DeleteTemplate -> string -> Result<unit, TemplateError>` | |
 | `ListTemplatesWorkflow.fs` | `LoadTemplatesForSupplier -> string -> Result<StoredTemplate list, TemplateError>` | ordered by position |
@@ -284,8 +298,14 @@ cheapest coverage in the whole feature — and where template bugs will actually
 
 | Timestamp | Name | Creates |
 | --- | --- | --- |
-| `20260809000003` | `CreateInvoiceTemplatesTable` | `InvoiceTemplates(Id INTEGER PK identity, SupplierId INTEGER NOT NULL FK → Suppliers.Id ON DELETE CASCADE, Name TEXT(100) NOT NULL, DocumentPart TEXT(32) NOT NULL, AttachmentFormat TEXT(16) NULL, Position INTEGER NOT NULL)` + index on `(SupplierId, Position)` |
-| `20260809000004` | `CreateTemplateFieldRulesTable` | `TemplateFieldRules(Id INTEGER PK identity, TemplateId INTEGER NOT NULL FK → InvoiceTemplates.Id ON DELETE CASCADE, TargetField TEXT(16) NOT NULL, RuleKind TEXT(32) NOT NULL, RuleText TEXT(1000) NULL, RuleOffset INTEGER NULL, RuleSourceField TEXT(16) NULL, HintKind TEXT(16) NOT NULL, HintText TEXT(64) NULL)` + unique index on `(TemplateId, TargetField)` |
+| `20260810000002` | `CreateInvoiceTemplatesTable` | `InvoiceTemplates(Id INTEGER PK identity, SupplierId INTEGER NOT NULL FK → Suppliers.Id ON DELETE CASCADE, Name TEXT(100) NOT NULL, DocumentPart TEXT(32) NOT NULL, AttachmentFormat TEXT(16) NULL, Position INTEGER NOT NULL)` + index on `(SupplierId, Position)` |
+| `20260810000003` | `CreateTemplateFieldRulesTable` | `TemplateFieldRules(Id INTEGER PK identity, TemplateId INTEGER NOT NULL FK → InvoiceTemplates.Id ON DELETE CASCADE, TargetField TEXT(16) NOT NULL, RuleKind TEXT(32) NOT NULL, RuleText TEXT(1000) NULL, RuleOffset INTEGER NULL, RuleSourceField TEXT(16) NULL, HintKind TEXT(16) NOT NULL, HintText TEXT(64) NULL)` + unique index on `(TemplateId, TargetField)` |
+
+**Both tables carry a foreign key, so both are written with `Execute.Sql`, not the fluent
+`Create.Table()` builder.** FluentMigrator's SQLite generator refuses `Create.ForeignKey` outright,
+and SQLite has no `ALTER TABLE ADD CONSTRAINT` — the constraint has to be inline in `CREATE TABLE`,
+which the fluent builder cannot express. `Migration_20260809000002_CreateSupplierMatchersTable.fs` is
+the shape to copy: raw SQL for the table, the fluent builder again for the indexes and `Down()`.
 
 `DocumentPart` splits across two columns because `Attachment of DocumentFormat` carries a payload —
 one column for the case, one for its argument, nullable when the case has none. Same pattern for
@@ -420,6 +440,74 @@ hatch, which is why its editor is the **last** one built here, not the first.
 
 ---
 
+## Carried over from change #1's review
+
+Change #1 was reviewed as five stacked PRs after it was written, and four of the defects it turned up
+are **structural** — they land again in this change unless designed out, because this change writes
+the same kinds of code against the same libraries. Three of the four were sitting under green tests.
+
+### 1. Every multi-row write is transactional
+
+`TemplateStore` has **three** multi-statement writes, more than `SupplierStore` had:
+
+| Function | Statements |
+| --- | --- |
+| `insertOne` | one `InvoiceTemplates` row, then one `TemplateFieldRules` row per rule |
+| `updateOne` | delete the template's rules, reinsert the new set, update the template row |
+| `reorder` | one `UPDATE … SET Position` per template |
+
+Without a transaction, a failure partway through leaves a **committed partial template** — a rule set
+missing its last rule, or a reorder half applied — while the caller is told the write failed. That is
+the exact defect `SupplierStore` shipped with. Copy `SupplierStore.inTransaction`; every one of the
+three runs inside it.
+
+**And it is asserted, not just written.** Change #1's fix has no test behind it: `SupplierStoreTests`
+covers round trips and unreachable-store errors, but nothing there fails if `inTransaction` is
+deleted. This change writes the test that change #1 didn't — force a mid-write failure (a rule row
+that violates the `(TemplateId, TargetField)` unique index is the cheapest trigger) and assert the
+template row is **absent** afterwards, not orphaned.
+
+### 2. The top mapper returns `Result`; it never raises
+
+`TemplateApiMappers` converts **four** unions from plain UI strings — `DocumentPart`, the `FieldRule`
+kind, `TargetField` and `ParseHint`. Change #1's equivalent, `toMatcherKind`, used `failwith`, copied
+from `CredentialApiMappers.toInfrastructure` where it is sound because that mapper takes a C# *enum*
+the UI cannot forge. A string is not an enum. It raised inside the API call, outside any `handleError`
+block, and the UI calls the API from `Async.Start` — so the exception became neither a `MudAlert` nor
+a log entry and **the write silently never happened**.
+
+Every string → union conversion in this change, in **both** mappers, returns
+`Result<_, TemplateError>`. An unrecognised string is a named refusal, never a default and never an
+exception. This is four times the surface change #1 had, so it is stated here rather than left to the
+per-task instruction.
+
+### 3. Dialogs are rendered through `MudDialogProvider` in E2E
+
+Change #1's flow tests passed `(fun _ -> ())` for all three dialog callbacks and **never rendered the
+dialog at all** — a `MudDialog` rendered standalone emits no markup, so an empty assertion looked like
+a passing one. Two user-visible bugs lived behind that gap for the whole change, including a list
+where every row rendered as an unlabelled button.
+
+This change's dialog is far bigger: seven rule editors and a test panel. Its E2E tests render it the
+way production shows it — `MudDialogProvider` plus `IDialogService.ShowAsync` — following
+`E2E/SuppliersFlowTests.renderEditor`. Two specific traps that cost change #1:
+
+- **`MudListItem` renders `Text` *or* child content, never both.** The rule list here is the same
+  shape as the match-rule list that shipped unlabelled.
+- **Remove list entries by index, not by value.** F# records compare structurally, so filtering by
+  value deletes every identical entry. Two rules may legitimately be identical.
+
+### 4. A contract suite constrains a fake only on the axes it asserts
+
+Change #1's `SupplierApi` fake had drifted from the real API in three ways — no payment-term
+validation, no matcher validation, and a "name already taken" message quoting the *submitted* spelling
+where the real workflow quotes the *stored* one. The shared suite was green because it asserted none
+of those behaviours. The rule the shared-suite requirement actually implies: **the suite pins
+behaviour, not shape.** For `TemplateApi` that means each refusal in `requirements.md` is asserted
+against the real record *and* every fake, with its message — not merely that a `Result` came back.
+
+---
+
 ## Testing strategy
 
 This change is where the tests replace a compiler, so the suite is larger than the code.
@@ -475,8 +563,14 @@ measurement deliberately kept those out of version control and this change keeps
 ### Integration
 
 - `TemplateStore` against a real SQLite temp file with the schema from `MigrationSetup.setupMigrations`.
+  Call `SqliteConnection.ClearAllPools()` before deleting the temp file — Microsoft.Data.Sqlite pools
+  connections and Windows keeps a pooled handle's file locked.
 - Round trips for **every** rule kind, target field and parse hint — the split-column encoding is
   where a silent data loss would live.
+- **Atomicity, per write.** A failure partway through `insertOne`, `updateOne` and `reorder` leaves
+  **no** trace of the attempt — no orphaned template row, no half-replaced rule set, no partially
+  applied order. Each is a test that fails if the transaction is removed. See *Carried over from
+  change #1's review*, where this is the defect that shipped once already.
 - Reorder persists and `getAll` returns the new order.
 - Deleting a template removes its rules; deleting a **supplier** removes its templates and their
   rules (two cascades, both asserted — the `PRAGMA foreign_keys` guard from change #1 matters here
@@ -503,6 +597,12 @@ Add, edit, reorder, delete a template; a validation failure showing the specific
 **nothing logged**; a store failure with **exactly one entry logged**; and a test-panel run that
 displays **normalized** text and per-field results. Assert logging through a recording
 `HandleErrorBuilder`. No test reaches `Startup.Startup`.
+
+**The dialog is rendered, not stubbed.** Every flow above that goes through the editor drives it via
+`MudDialogProvider` + `IDialogService.ShowAsync`, per `E2E/SuppliersFlowTests.renderEditor` — passing
+`(fun _ -> ())` for the dialog callbacks is what let two rendering bugs through change #1. At minimum:
+each rule editor renders its own label, and deleting one of **two identical rules** removes exactly
+one.
 
 ### Gate
 
@@ -558,5 +658,8 @@ Zero build errors; zero test failures; **zero skips**.
 | **A pathological regex hangs the scan** | Timeout on every construction, `NonBacktracking` where possible, `RuleTimedOut` as a named error, and a catastrophic-backtracking test that must complete inside the timeout |
 | **Normalization is wrong in a way that only shows in production** | The three measured failure modes are each a test, and the test panel shows the normalized text — so a template is authored against the same text the scan sees, not a guess |
 | **The split-column encoding of `FieldRule` loses a case silently** | Round-trip integration tests over every case, plus a reflection-driven exhaustiveness test |
+| **A multi-row write commits half a template.** Three functions here write several rows; change #1 shipped exactly this and its fix is still untested | `inTransaction` on all three, and an atomicity test per function that fails if it is removed — *Carried over from change #1's review* |
+| **A string → union conversion raises instead of refusing.** Four unions cross the top mapper as UI strings; change #1's one such conversion swallowed a write whole | Both mappers return `Result`; an unrecognised string is a named `TemplateError`. Asserted per case in the contract suite |
+| **A rendering bug the E2E suite cannot see**, because the dialog is never rendered | Dialogs driven through `MudDialogProvider`; label-rendering and delete-one-of-two-identical asserted explicitly |
 | **Multi-column layouts cannot be expressed at all** | Known and accepted: one supplier in the sample needs coordinates, consistency across its samples was 2 in 11, and `SameRowAsLabel` is recorded as the next rule kind with `ReadDocumentContent`'s `Word` type already waiting for it |
 | **Two suppliers match one message and the wrong template runs** | `MultipleSuppliersMatched` is an error carrying *every* match, never a pick. It becomes a visible problem row in change #4 |
