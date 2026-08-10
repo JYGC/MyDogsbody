@@ -1,8 +1,10 @@
-module MyDogsbody.Tests.E2E.SuppliersFlowTests
+﻿module MyDogsbody.Tests.E2E.SuppliersFlowTests
 
 open Xunit
 open Bunit
 open Fun.Blazor
+open MudBlazor
+open Microsoft.Extensions.DependencyInjection
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UI.Portal.ModuleCreators
 open MyDogsbody.UI.Types
@@ -35,6 +37,36 @@ let private renderBrowser (harness: SuppliersHarness) =
 
 let private aSupplier name termDays matchers : SupplierUiTypeWithoutId =
     { Name = name; PaymentTermDays = termDays; Matchers = matchers }
+
+/// Renders the editor dialog the way production does - through the dialog service, inside a
+/// MudDialogProvider. A MudDialog rendered on its own produces no markup at all, so the provider
+/// is what makes the dialog's own content testable.
+let private renderEditor (harness: SuppliersHarness) (matchers: SupplierMatcherUiType list) =
+    let supplier: SupplierUiTypeWithoutId =
+        { Name = "Acme"; PaymentTermDays = 30; Matchers = matchers }
+
+    let provider =
+        harness.Render<MudDialogProvider>(fun builder ->
+            builder.OpenComponent<MudDialogProvider>(0)
+            builder.CloseComponent()
+        )
+
+    let dialogService = harness.Services.GetRequiredService<IDialogService>()
+    let parameters = DialogParameters<SuppliersComponents.SuppliersEditorDialog>()
+    parameters.Add("Title", "Edit Supplier")
+    parameters.Add("SupplierUiType", supplier)
+
+    provider
+        .InvokeAsync(fun () ->
+            dialogService.ShowAsync<SuppliersComponents.SuppliersEditorDialog>("Edit Supplier", parameters)
+            |> ignore
+        )
+        .Wait()
+
+    provider
+
+let private occurrencesOf (needle: string) (haystack: string) =
+    haystack.Split(needle).Length - 1
 
 [<Fact; Trait("Level", "E2E")>]
 let ``a supplier added through the module appears as a row in the rendered table`` () =
@@ -166,4 +198,38 @@ let ``an empty store renders a table rather than an error`` () =
         Assert.Contains("Suppliers", rendered.Markup)
         Assert.DoesNotContain("mud-alert", rendered.Markup)
         Assert.Empty harness.Logged
+    )
+
+[<Fact; Trait("Level", "E2E")>]
+let ``the dialog labels every match rule so each delete button says which rule it removes`` () =
+    withSuppliersHarness (fun harness ->
+        let rendered =
+            renderEditor
+                harness
+                [
+                    { Kind = "Domain"; Value = "acme.example" }
+                    { Kind = "Sender"; Value = "billing@acme.example" }
+                ]
+
+        Assert.Contains("Domain: acme.example", rendered.Markup)
+        Assert.Contains("Sender: billing@acme.example", rendered.Markup)
+    )
+
+[<Fact; Trait("Level", "E2E")>]
+let ``deleting one of two identical match rules removes only the one clicked`` () =
+    withSuppliersHarness (fun harness ->
+        // requirements.md: duplicate match rules are stored as submitted, so two identical rows
+        // are a state the dialog has to cope with.
+        let duplicate: SupplierMatcherUiType = { Kind = "Domain"; Value = "acme.example" }
+        let rendered = renderEditor harness [ duplicate; duplicate ]
+
+        Assert.Equal(2, occurrencesOf "Domain: acme.example" rendered.Markup)
+
+        let deleteButtons = rendered.FindAll(".mud-list-item button")
+        Assert.Equal(2, deleteButtons.Count)
+        deleteButtons.[0].Click()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Equal(1, occurrencesOf "Domain: acme.example" rendered.Markup)
+        )
     )

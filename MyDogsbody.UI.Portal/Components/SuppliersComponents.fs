@@ -180,16 +180,23 @@ type SuppliersEditorDialog() =
                             adapt {
                                 let! matchers = matchersCval
                                 MudList'' {
-                                    for matcher in matchers do
+                                    // Indexed, because match rules may legitimately repeat -
+                                    // requirements.md says a duplicate is stored as submitted. Removing
+                                    // by value would take every identical rule with it, not the one
+                                    // whose button was pressed.
+                                    for index, matcher in List.indexed matchers do
                                         MudListItem'' {
-                                            Text $"{matcher.Kind}: {matcher.Value}"
-                                            adapt {
+                                            // The label goes in the child content, not MudListItem's
+                                            // Text: a list item renders one or the other, so setting
+                                            // both left every rule showing an unlabelled delete button.
+                                            MudStack'' {
+                                                Row true
+                                                MudText'' { $"{matcher.Kind}: {matcher.Value}" }
                                                 MudIconButton'' {
                                                     Icon Icons.Material.Filled.Delete
                                                     OnClick (fun _ ->
                                                         transact (fun _ ->
-                                                            matchersCval.Value <-
-                                                                matchers |> List.filter (fun m -> m <> matcher)
+                                                            matchersCval.Value <- matchers |> List.removeAt index
                                                         )
                                                     )
                                                 }

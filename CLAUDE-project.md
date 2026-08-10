@@ -94,7 +94,7 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **386 tests — 159 Unit, 74 Integration, 138 Contract, 15 E2E**, zero skips. If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **399 tests — 162 Unit, 74 Integration, 146 Contract, 17 E2E**, zero skips. If the build breaks now, assume you broke it.
 
 The suite was run eight times consecutively while closing the `architecture-compliance` change to confirm it is not flaky. If you see an intermittent failure, do not re-run until it passes — see the note on LiteDB's global `BsonMapper` under *Per-integration databases*.
 
