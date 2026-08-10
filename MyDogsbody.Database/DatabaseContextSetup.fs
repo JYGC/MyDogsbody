@@ -9,6 +9,8 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let commentsTableName = "Comments"
     let suppliersTableName = "Suppliers"
     let supplierMatchersTableName = "SupplierMatchers"
+    let invoiceTemplatesTableName = "InvoiceTemplates"
+    let templateFieldRulesTableName = "TemplateFieldRules"
 
     OptionTypes.register()
 
@@ -22,6 +24,8 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let commentsTable = table'<Comment> commentsTableName
     let suppliersTable = table'<SupplierRecord> suppliersTableName
     let supplierMatchersTable = table'<SupplierMatcherRecord> supplierMatchersTableName
+    let invoiceTemplatesTable = table'<InvoiceTemplateRecord> invoiceTemplatesTableName
+    let templateFieldRulesTable = table'<TemplateFieldRuleRecord> templateFieldRulesTableName
 
     {
         GetDatabaseConnection = fun () -> databaseConnection
@@ -29,5 +33,7 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
         GetComments = fun () -> commentsTable
         GetSuppliers = fun () -> suppliersTable
         GetSupplierMatchers = fun () -> supplierMatchersTable
+        GetInvoiceTemplates = fun () -> invoiceTemplatesTable
+        GetTemplateFieldRules = fun () -> templateFieldRulesTable
         Dispose = fun () -> databaseConnection.Dispose()
     }
