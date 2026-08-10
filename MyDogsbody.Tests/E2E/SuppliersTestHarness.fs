@@ -63,6 +63,8 @@ let withUnreachableSupplierStoreHarness (test: SuppliersHarness -> unit) =
             GetComments = fun () -> failwith "not used"
             GetSuppliers = fun () -> failwith "not used"
             GetSupplierMatchers = fun () -> failwith "not used"
+            GetInvoiceTemplates = fun () -> failwith "not used"
+            GetTemplateFieldRules = fun () -> failwith "not used"
             Dispose = fun () -> ()
         }
 

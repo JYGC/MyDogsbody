@@ -11,6 +11,8 @@
     <Compile Include="Migrations\Migration_20260809000001_CreateSuppliersTable.fs" />
     <Compile Include="Migrations\Migration_20260809000002_CreateSupplierMatchersTable.fs" />
     <Compile Include="Migrations\Migration_20260810000001_MakeSupplierNameIndexCaseInsensitive.fs" />
+    <Compile Include="Migrations\Migration_20260810000002_CreateInvoiceTemplatesTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000003_CreateTemplateFieldRulesTable.fs" />
     <Compile Include="MigrationSetup.fs" />
     <None Include="INSTALL.md" />
   </ItemGroup>

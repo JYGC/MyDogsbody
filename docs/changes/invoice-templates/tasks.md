@@ -173,14 +173,14 @@ until normalization is correct, so it goes first.
 
 ## Phase 7 — Migrations and store (required)
 
-- [ ] **7.1** *(test-first)* `Migration_20260810000002_CreateInvoiceTemplatesTable.fs`.
+- [x] **7.1** *(test-first)* `Migration_20260810000002_CreateInvoiceTemplatesTable.fs`.
       **`Execute.Sql` for the `CREATE TABLE`** — it carries a foreign key, and FluentMigrator's SQLite
       generator refuses `Create.ForeignKey` while the fluent builder cannot express an inline one.
       Fluent builder for the index and `Down()`. Copy
       `Migration_20260809000002_CreateSupplierMatchersTable.fs`.
       Tests: `MigrateUp` produces the expected columns; the `(SupplierId, Position)` index exists;
       **deleting a supplier deletes its templates**; `Down()` reverses it.
-- [ ] **7.2** *(test-first)* `Migration_20260810000003_CreateTemplateFieldRulesTable.fs`. Same
+- [x] **7.2** *(test-first)* `Migration_20260810000003_CreateTemplateFieldRulesTable.fs`. Same
       `Execute.Sql` treatment — this table has a foreign key too.
       Tests: as above; the unique index on `(TemplateId, TargetField)` refuses a duplicate;
       **deleting a template deletes its rules**; deleting a **supplier** deletes templates *and*

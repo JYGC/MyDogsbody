@@ -12,6 +12,8 @@ type DatabaseContext =
         GetComments: unit -> QuerySource<Comment>
         GetSuppliers: unit -> QuerySource<SupplierRecord>
         GetSupplierMatchers: unit -> QuerySource<SupplierMatcherRecord>
+        GetInvoiceTemplates: unit -> QuerySource<InvoiceTemplateRecord>
+        GetTemplateFieldRules: unit -> QuerySource<TemplateFieldRuleRecord>
 
         /// Closes the underlying SqliteConnection.
         ///
