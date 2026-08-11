@@ -85,12 +85,12 @@ until normalization is correct, so it goes first.
 
 ## Phase 3 — Invoice-side types and matching (required)
 
-- [ ] **3.1** *(test-first)* `SourceMessageId`, `MessagePart`, `ScannedMessage`, `ExtractedInvoice`,
+- [x] **3.1** *(test-first)* `SourceMessageId`, `MessagePart`, `ScannedMessage`, `ExtractedInvoice`,
       `InvoiceError` in `Domain/Invoices/InvoicesTypes.fs`.
       Tests: `SourceMessageId.create` accepts and rejects per rule.
       *Outcome:* the file is created here and **extended** by change #4 — do not duplicate it.
       *Depends on:* 2.2.
-- [ ] **3.2** *(test-first)* `Invoices/MatchSupplierWorkflow.fs`.
+- [x] **3.2** *(test-first)* `Invoices/MatchSupplierWorkflow.fs`.
       Tests: exactly one supplier matches → that supplier; a sender-domain rule matches an address in
       that domain; comparison is case-insensitive; a subject substring matches; no match →
       `SupplierNotRecognised` with the **sender** asserted; two matches → `MultipleSuppliersMatched`
@@ -99,13 +99,13 @@ until normalization is correct, so it goes first.
 
 ## Phase 4 — The engine (required) — the heart of the change
 
-- [ ] **4.1** *(test-first)* `Invoices/ApplyTemplateWorkflow.fs`, table-driven.
+- [x] **4.1** *(test-first)* `Invoices/ApplyTemplateWorkflow.fs`, table-driven.
       Tests: one case per rule kind — `AfterLabel`, `LinesAfterLabel`, `RegexCapture`, `FixedValue`,
       `SubjectCapture`, `AttachmentName` — each asserting **every** output field; a label appearing
       twice takes the first; an offset past the end of a block reports the rule found nothing;
       `TemplateMatchedNothing` names the field; the workflow takes **no dependency parameters**.
       *Depends on:* 3.1, 2.4, 1.2.
-- [ ] **4.2** *(test-first)* Parse hints inside the engine.
+- [x] **4.2** *(test-first)* Parse hints inside the engine.
       Tests: `AsMoney` strips a leading `$`, a thousands separator and a trailing `CR`/`DR`;
       `AsMoney` with a comma decimal separator; a negative and a zero amount extract as found;
       `AmountUnparseable` carries the raw text; `AsDate` with each of the four measured formats
@@ -115,24 +115,24 @@ until normalization is correct, so it goes first.
       the same text read with `M/d/yyyy` is 8 February. Two tests, because this is a six-month error
       that silently lands an event on the wrong day.
       *Depends on:* 4.1.
-- [ ] **4.3** *(test-first)* `DateFromField` — **the 12% → 39% rule** (friction #19).
+- [x] **4.3** *(test-first)* `DateFromField` — **the 12% → 39% rule** (friction #19).
       Tests: `DateFromField IssueDate` with `PaymentTermDays 30` and an issue date of 14 July gives
       13 August; a term of 0 gives the issue date itself; the source field yielding nothing makes the
       due date absent rather than wrong; the term comes from the **supplier**, so two templates for
       one supplier derive the same due date from the same document.
       *Depends on:* 4.2.
-- [ ] **4.4** *(test-first)* `RuleTimedOut` at apply time.
+- [x] **4.4** *(test-first)* `RuleTimedOut` at apply time.
       Tests: a pathological pattern inside a `ValidTemplate` fails **that rule** with `RuleTimedOut`
       carrying the template and field, inside the timeout; the rest of the extraction is unaffected.
       *Depends on:* 4.1, 2.3.
-- [ ] **4.5** *(test-first)* `Invoices/SelectTemplateWorkflow.fs`.
+- [x] **4.5** *(test-first)* `Invoices/SelectTemplateWorkflow.fs`.
       Tests: templates tried in stored order and the first complete match wins; a message matching
       only the **second** template still yields an invoice; the winning `TemplateId` is on the
       result; when all fail the error is the one from the **last** template tried; a template whose
       document part the message does not carry is skipped, not failed; no matching template →
       `NoTemplateForSupplier` with the supplier asserted; several attachments are each tried in turn.
       *Depends on:* 4.1.
-- [ ] **4.6** *(test-first)* `InvoiceReference` internal-whitespace folding.
+- [x] **4.6** *(test-first)* `InvoiceReference` internal-whitespace folding.
       Test: `"1234 5678 90"` from a PDF and `"1234567890"` from an attachment filename produce **one**
       value. Without this, the natural key makes one invoice into two ledger rows and two calendar
       events.
@@ -142,11 +142,11 @@ until normalization is correct, so it goes first.
 
 ## Phase 5 — The measured fixtures (required)
 
-- [ ] **5.1** `Fixtures/MeasuredTemplates.fs` — the four worked templates as synthetic documents in
+- [x] **5.1** `Fixtures/MeasuredTemplates.fs` — the four worked templates as synthetic documents in
       the measured layouts. **Layout only: no real amount, reference, account number, address or
       supplier name.**
       *Depends on:* 4.5.
-- [ ] **5.2** *(test-first)* One test per fixture, asserting **every field it claims to extract**.
+- [x] **5.2** *(test-first)* One test per fixture, asserting **every field it claims to extract**.
       Including: the invoice-management platform's `DateFromField` producing a due date its documents
       never state; the water utility's second template being reached when the first fails; the
       accounting platform using a different rule kind per field in one document; the
