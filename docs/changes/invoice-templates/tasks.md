@@ -34,17 +34,17 @@ table-driven tests before a page is written against it.
 Finding 4 says every one of these failures is **silent**. Nothing else in this change can be trusted
 until normalization is correct, so it goes first.
 
-- [ ] **1.1** *(test-first)* `TextLine` and `DocumentFormat` added to
+- [x] **1.1** *(test-first)* `TextLine` and `DocumentFormat` added to
       `Domain/Documents/DocumentsTypes.fs`.
       *Outcome:* `TextLine` carries `BlockIndex`. No test of its own — type declarations.
-- [ ] **1.2** *(test-first)* `Domain/InvoiceTemplates/TextNormalization.fs`.
+- [x] **1.2** *(test-first)* `Domain/InvoiceTemplates/TextNormalization.fs`.
       Tests, one per clause: NFKC applied; `U+00A0`, `U+2007`, `U+202F` folded to a plain space;
       runs of spaces and tabs collapsed; each line trimmed; a wrapped continuation joined **within**
       a block; a continuation **not** joined across a block boundary; empty lines dropped before
       offsets apply. Plus one case whose result changes if two clauses are reordered, so the order
       is pinned.
       *Depends on:* 1.1.
-- [ ] **1.3** *(test-first)* The three **measured** failure modes, as their own tests:
+- [x] **1.3** *(test-first)* The three **measured** failure modes, as their own tests:
       a label separated from its value by a non-breaking space matches;
       a label hard-wrapped across two lines matches;
       a label separated from its value by blank lines matches at offset 1.
@@ -54,10 +54,10 @@ until normalization is correct, so it goes first.
 
 ## Phase 2 — The rule model (required)
 
-- [ ] **2.1** *(test-first)* `TemplateId`, `TemplateName` in
+- [x] **2.1** *(test-first)* `TemplateId`, `TemplateName` in
       `Domain/InvoiceTemplates/InvoiceTemplatesTypes.fs`.
       Tests: one accepted and one rejected value per rule, reason asserted.
-- [ ] **2.2** `DocumentPart`, `FieldRule`, `TargetField`, `ParseHint`, `TemplateFieldRule`,
+- [x] **2.2** `DocumentPart`, `FieldRule`, `TargetField`, `ParseHint`, `TemplateFieldRule`,
       `UnvalidatedTemplate`, `ValidTemplate` (private constructor), `StoredTemplate`,
       `TemplateError`, and the **six** dependency function types — the five template ones plus
       `LoadSuppliersForTemplates`, this area's own supplier-loading type. It is declared here rather
@@ -67,14 +67,14 @@ until normalization is correct, so it goes first.
       *Outcome:* `ValidTemplate` exposes accessors and **no constructor**. Added to the `.fsproj` in
       the compile order in `design.md`.
       *Depends on:* 2.1, 1.1.
-- [ ] **2.3** *(test-first)* Regex compilation helper — `NonBacktracking` first, backtracking with
+- [x] **2.3** *(test-first)* Regex compilation helper — `NonBacktracking` first, backtracking with
       the timeout as fallback, both carrying a 250 ms match timeout.
       Tests: a plain pattern compiles on the `NonBacktracking` path; a lookaround pattern compiles on
       the **fallback** path and reports that it did; a syntactically invalid pattern returns an
       error with the reason; a catastrophic-backtracking pattern (`(a+)+$` against a long
       non-matching input) **completes inside the timeout** rather than hanging.
       *Depends on:* 2.2.
-- [ ] **2.4** *(test-first)* `ValidateTemplateWorkflow` — the only door to `ValidTemplate`.
+- [x] **2.4** *(test-first)* `ValidateTemplateWorkflow` — the only door to `ValidTemplate`.
       Tests, one per refusal, each asserting the case **and its payload**: name invalid; pattern does
       not compile; pattern has no capture group; date format not a real format string; offset
       negative or over 20; a required field (`Reference`, `Amount`, `Currency`) has no rule; two
@@ -157,18 +157,18 @@ until normalization is correct, so it goes first.
 
 ## Phase 6 — Template CRUD workflows (required)
 
-- [ ] **6.1** *(test-first)* `AddTemplateWorkflow`.
+- [x] **6.1** *(test-first)* `AddTemplateWorkflow`.
       Tests: Ok path with every field; `TemplateSupplierNotFound`; each validation refusal propagated
       with its payload; **`saveTemplate` never called** on any refusal; a new template's position is
       last in the supplier's order.
       *Depends on:* 2.4.
-- [ ] **6.2** *(test-first)* `EditTemplateWorkflow`. Tests: Ok path; `TemplateNotFound`; refusals
+- [x] **6.2** *(test-first)* `EditTemplateWorkflow`. Tests: Ok path; `TemplateNotFound`; refusals
       propagated; `updateTemplate` never called on a refusal; the rule set is **replaced**, not merged.
-- [ ] **6.3** *(test-first)* `DeleteTemplateWorkflow`. Tests: Ok; `TemplateNotFound`; dependency not
+- [x] **6.3** *(test-first)* `DeleteTemplateWorkflow`. Tests: Ok; `TemplateNotFound`; dependency not
       called on an unusable id.
-- [ ] **6.4** *(test-first)* `ListTemplatesWorkflow`. Tests: returned in `Position` order; empty list
+- [x] **6.4** *(test-first)* `ListTemplatesWorkflow`. Tests: returned in `Position` order; empty list
       is `Ok []`, not an error.
-- [ ] **6.5** *(test-first)* Reorder. Tests: a new order persists; an order naming a template not
+- [x] **6.5** *(test-first)* Reorder. Tests: a new order persists; an order naming a template not
       belonging to that supplier is refused; an order omitting a template is refused.
 
 ## Phase 7 — Migrations and store (required)
