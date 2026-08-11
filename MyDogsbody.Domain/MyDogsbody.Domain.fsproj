@@ -30,6 +30,14 @@
     <Compile Include="Suppliers\AddSupplierWorkflow.fs" />
     <Compile Include="Suppliers\EditSupplierWorkflow.fs" />
     <Compile Include="Suppliers\DeleteSupplierWorkflow.fs" />
+    <Compile Include="InvoiceTemplates\TextNormalization.fs" />
+    <Compile Include="InvoiceTemplates\InvoiceTemplatesTypes.fs" />
+    <Compile Include="InvoiceTemplates\ValidateTemplateWorkflow.fs" />
+    <Compile Include="InvoiceTemplates\AddTemplateWorkflow.fs" />
+    <Compile Include="InvoiceTemplates\EditTemplateWorkflow.fs" />
+    <Compile Include="InvoiceTemplates\DeleteTemplateWorkflow.fs" />
+    <Compile Include="InvoiceTemplates\ListTemplatesWorkflow.fs" />
+    <Compile Include="InvoiceTemplates\ReorderTemplatesWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">
