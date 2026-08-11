@@ -186,12 +186,12 @@ until normalization is correct, so it goes first.
       **deleting a template deletes its rules**; deleting a **supplier** deletes templates *and*
       rules; `Down()` reverses it.
       *Depends on:* 7.1.
-- [ ] **7.3** *(test-first)* `TemplateRecordMappers.fs` — the bottom mapper, with the split-column
+- [x] **7.3** *(test-first)* `TemplateRecordMappers.fs` — the bottom mapper, with the split-column
       encoding for `DocumentPart`, `FieldRule` and `ParseHint`.
       Tests: field-for-field both directions for **every** case of all four unions; an unrecognised
       stored string maps to an error rather than a default.
       *Depends on:* 2.2, 7.2.
-- [ ] **7.4** *(test-first)* `TemplateStore.fs` — `getForSupplier`, `insertOne`, `updateOne`,
+- [x] **7.4** *(test-first)* `TemplateStore.fs` — `getForSupplier`, `insertOne`, `updateOne`,
       `deleteOne`, `reorder`. Outer-ring shape, `handleError`, `Result<_, MyDogsbodyException>`.
       **Copy four shapes from `SupplierStore.fs` rather than re-deriving them:** `runSync` (the
       Dapper.FSharp async-only bridge); `inTransaction`; plain parameterised SQL with
@@ -210,7 +210,7 @@ until normalization is correct, so it goes first.
       Tests *(Unit)*: each error path asserts the declared `ActionNames` string, the message and a
       preserved inner exception.
       *Depends on:* 7.3.
-- [ ] **7.5** `ActionNames.MyDogsbody.Database.TemplateStore.*`, five entries.
+- [x] **7.5** `ActionNames.MyDogsbody.Database.TemplateStore.*`, five entries.
       *Outcome:* the structural suite still passes.
 
 ## Phase 8 — Composition root (required)

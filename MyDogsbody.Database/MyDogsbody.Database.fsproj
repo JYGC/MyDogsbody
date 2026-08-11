@@ -10,6 +10,8 @@
     <Compile Include="DatabaseContextSetup.fs" />
     <Compile Include="SupplierRecordMappers.fs" />
     <Compile Include="SupplierStore.fs" />
+    <Compile Include="TemplateRecordMappers.fs" />
+    <Compile Include="TemplateStore.fs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -164,3 +164,47 @@ let validateTemplate (input: UnvalidatedTemplate) : Result<ValidTemplate, Templa
                 CompiledPatterns' = compiledPatterns
             }
     }
+
+/// Reconstructs a ValidTemplate from components a stored row already carries. NOT a second door
+/// for untrusted input - the only caller is TemplateRecordMappers.toStoredTemplate, reading back
+/// a row this same function already approved once, when it was originally saved.
+///
+/// design.md does not address how the store builds a ValidTemplate at all: ValidTemplate's
+/// constructor is private to this project, and MyDogsbody.Database is a separate assembly - it
+/// cannot construct one directly even though it references MyDogsbody.Domain. Regex objects also
+/// cannot be persisted to a database column, so every pattern-carrying rule's pattern is
+/// recompiled here from its stored text, deterministically, rather than read back compiled.
+///
+/// This does not re-run the other checks validateTemplate performs (capture group, offset range,
+/// date format, DateFromField soundness) - those already passed once at save time, and re-running
+/// them on every read would mean a row saved under today's rules could become unreadable if a
+/// future change tightened them, turning "read this row" into "read this row if it still
+/// happens to validate".
+let reconstructValidTemplate
+    (supplierId: SupplierId)
+    (name: TemplateName)
+    (part: DocumentPart)
+    (position: int)
+    (rules: TemplateFieldRule list)
+    : Result<ValidTemplate, string> =
+    let compilePatternFor (rule: TemplateFieldRule) (compiled: Map<TargetField, Regex>) : Result<Map<TargetField, Regex>, string> =
+        match rule.Rule with
+        | RegexCapture pattern
+        | SubjectCapture pattern
+        | AttachmentName pattern -> compilePattern pattern |> Result.map (fun regex -> Map.add rule.Field regex compiled)
+        | AfterLabel _
+        | LinesAfterLabel _
+        | FixedValue _
+        | DateFromField _ -> Ok compiled
+
+    rules
+    |> List.fold (fun accumulated rule -> accumulated |> Result.bind (compilePatternFor rule)) (Ok Map.empty)
+    |> Result.map (fun compiledPatterns ->
+        {
+            SupplierId' = supplierId
+            Name' = name
+            Part' = part
+            Position' = position
+            Rules' = rules
+            CompiledPatterns' = compiledPatterns
+        })

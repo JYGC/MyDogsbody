@@ -46,6 +46,14 @@ module MyDogsbody =
             let updateOne = $"{supplierStore}.updateOne"
             let deleteOne = $"{supplierStore}.deleteOne"
 
+        module TemplateStore =
+            let private templateStore = $"{database}.TemplateStore"
+            let getForSupplier = $"{templateStore}.getForSupplier"
+            let insertOne = $"{templateStore}.insertOne"
+            let updateOne = $"{templateStore}.updateOne"
+            let deleteOne = $"{templateStore}.deleteOne"
+            let reorder = $"{templateStore}.reorder"
+
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
 

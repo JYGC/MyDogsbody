@@ -42,6 +42,8 @@
     <Compile Include="Database\SupplierMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
+    <Compile Include="Database\TemplateRecordMappersTests.fs" />
+    <Compile Include="Database\TemplateStoreTests.fs" />
     <Compile Include="Database\SupplierStoreTests.fs" />
     <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
