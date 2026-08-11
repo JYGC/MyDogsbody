@@ -12,6 +12,9 @@
     <Compile Include="SupplierUiType.fs" />
     <Compile Include="SupplierApi.fs" />
     <Compile Include="Modules\SuppliersBrowserModule.fs" />
+    <Compile Include="TemplateUiType.fs" />
+    <Compile Include="TemplateTestUiType.fs" />
+    <Compile Include="TemplateApi.fs" />
   </ItemGroup>
 
   <ItemGroup>

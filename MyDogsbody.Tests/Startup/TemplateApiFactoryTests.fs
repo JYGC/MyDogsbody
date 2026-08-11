@@ -1,0 +1,267 @@
+module MyDogsbody.Tests.Startup.TemplateApiFactoryTests
+
+open System
+open System.IO
+open Xunit
+open Microsoft.Data.Sqlite
+open MyDogsbody.Builders
+open MyDogsbody.Exceptions.Types
+open MyDogsbody.Database
+open MyDogsbody.Database.Migrations
+open MyDogsbody.Startup
+open MyDogsbody.UI.Types
+
+let private handleError = HandleErrorBuilder (fun _ -> ())
+
+let private uiRule field ruleKind ruleText ruleOffset ruleSourceField hintKind hintText : TemplateFieldRuleUiType =
+    { Field = field; RuleKind = ruleKind; RuleText = ruleText; RuleOffset = ruleOffset; RuleSourceField = ruleSourceField; HintKind = hintKind; HintText = hintText }
+
+let private validRulesUi =
+    [ uiRule "Reference" "AfterLabel" "Invoice:" 0 "" "AsText" ""
+      uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+      uiRule "Currency" "FixedValue" "AUD" 0 "" "AsText" "" ]
+
+/// Fresh temp SQLite file per test, schema built by the real migrations, context disposed and
+/// the file deleted - no test reaches Startup.Startup.
+let private withApi (test: TemplateApi -> string -> unit) =
+    let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let connectionString = $"Data Source={databaseFilePath}"
+    MigrationSetup.setupMigrations connectionString
+    let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
+    let api = TemplateApiFactory.createTemplateApi handleError context
+
+    // A supplier must exist for AddTemplate/TemplateSupplierNotFound to be meaningful - inserted
+    // directly, bypassing SupplierStore, so this file has no cross-store test dependency.
+    let supplierId =
+        let connection = context.GetDatabaseConnection()
+        connection.Open()
+        try
+            use command = connection.CreateCommand()
+            command.CommandText <- "INSERT INTO Suppliers (Name, PaymentTermDays) VALUES ('Acme', 30); SELECT last_insert_rowid();"
+            string (Convert.ToInt64(command.ExecuteScalar()))
+        finally
+            connection.Close()
+
+    try
+        test api supplierId
+    finally
+        context.Dispose()
+        SqliteConnection.ClearAllPools()
+        File.Delete databaseFilePath
+
+let private aTemplate supplierId : TemplateUiTypeWithoutId =
+    { SupplierId = supplierId; Name = "Monthly statement"; DocumentPart = "AnyPart"; AttachmentFormat = ""; Position = 0; Rules = validRulesUi }
+
+let private okOrFail label result =
+    match result with
+    | Ok value -> value
+    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+
+let private errorOrFail label result =
+    match result with
+    | Error (ex: MyDogsbodyException) -> ex
+    | Ok _ -> failwith $"{label} expected Error, but got Ok"
+
+let private single (api: TemplateApi) supplierId =
+    match api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier" with
+    | [ only ] -> only
+    | other -> failwith $"Expected exactly one template, got {List.length other}"
+
+[<Fact; Trait("Level", "Integration")>]
+let ``GetTemplatesForSupplier returns an empty list for a supplier with no templates`` () =
+    withApi (fun api supplierId -> Assert.Empty(api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier"))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``AddTemplate stores every field and assigns an identifier`` () =
+    withApi (fun api supplierId ->
+        api.AddTemplate(aTemplate supplierId) |> okOrFail "AddTemplate"
+
+        let stored = single api supplierId
+        Assert.False(String.IsNullOrWhiteSpace stored.Id)
+        Assert.Equal(supplierId, stored.SupplierId)
+        Assert.Equal("Monthly statement", stored.Name)
+        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], stored.Rules |> List.map (fun r -> r.Field))
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``EditTemplate changes the addressed template and replaces its rule set`` () =
+    withApi (fun api supplierId ->
+        api.AddTemplate(aTemplate supplierId) |> okOrFail "AddTemplate"
+        let stored = single api supplierId
+
+        api.EditTemplate
+            { stored with
+                Name = "Renamed"
+                Rules = [ uiRule "Reference" "AfterLabel" "Ref:" 0 "" "AsText" ""
+                          uiRule "Amount" "AfterLabel" "Owed:" 0 "" "AsMoney" "."
+                          uiRule "Currency" "FixedValue" "USD" 0 "" "AsText" "" ] }
+        |> okOrFail "EditTemplate"
+
+        let reloaded = single api supplierId
+        Assert.Equal(stored.Id, reloaded.Id)
+        Assert.Equal("Renamed", reloaded.Name)
+        Assert.Equal("USD", (reloaded.Rules |> List.find (fun r -> r.Field = "Currency")).RuleText)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``DeleteTemplate removes the template`` () =
+    withApi (fun api supplierId ->
+        api.AddTemplate(aTemplate supplierId) |> okOrFail "AddTemplate"
+        let stored = single api supplierId
+
+        api.DeleteTemplate stored.Id |> okOrFail "DeleteTemplate"
+
+        Assert.Empty(api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``ReorderTemplates persists the new order`` () =
+    withApi (fun api supplierId ->
+        api.AddTemplate { aTemplate supplierId with Name = "First" } |> okOrFail "AddTemplate"
+        api.AddTemplate { aTemplate supplierId with Name = "Second" } |> okOrFail "AddTemplate"
+
+        let stored = api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier"
+        let firstId = (stored |> List.find (fun t -> t.Name = "First")).Id
+        let secondId = (stored |> List.find (fun t -> t.Name = "Second")).Id
+
+        api.ReorderTemplates supplierId [ secondId; firstId ] |> okOrFail "ReorderTemplates"
+
+        let reread =
+            api.GetTemplatesForSupplier supplierId
+            |> okOrFail "GetTemplatesForSupplier"
+            |> List.sortBy (fun t -> t.Position)
+
+        Assert.Equal<string list>([ secondId; firstId ], reread |> List.map (fun t -> t.Id))
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``AddTemplate rejects a supplier that does not exist and stores nothing`` () =
+    withApi (fun api supplierId ->
+        let actual = api.AddTemplate { aTemplate "9999" with SupplierId = "9999" } |> errorOrFail "AddTemplate"
+
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.addTemplate, actual.ActionName)
+        Assert.Equal("No supplier was found with id '9999'.", actual.Message)
+        Assert.Empty(api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``AddTemplate rejects an empty name and stores nothing`` () =
+    withApi (fun api supplierId ->
+        let actual = api.AddTemplate { (aTemplate supplierId) with Name = "" } |> errorOrFail "AddTemplate"
+
+        Assert.Equal("Template name must not be empty.", actual.Message)
+        Assert.Empty(api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``EditTemplate reports not found when no template carries that id`` () =
+    withApi (fun api supplierId ->
+        let actual =
+            api.EditTemplate
+                { Id = "9999"; SupplierId = supplierId; Name = "Ghost"; DocumentPart = "AnyPart"; AttachmentFormat = ""; Position = 0; Rules = validRulesUi }
+            |> errorOrFail "EditTemplate"
+
+        Assert.Equal("No template was found with id '9999'.", actual.Message)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``DeleteTemplate reports not found when no template carries that id`` () =
+    withApi (fun api _ ->
+        let actual = api.DeleteTemplate "9999" |> errorOrFail "DeleteTemplate"
+
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.deleteTemplate, actual.ActionName)
+        Assert.Equal("No template was found with id '9999'.", actual.Message)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``a validation failure is never written to the log`` () =
+    let logged = ResizeArray<MyDogsbodyException>()
+    let recordingHandleError = HandleErrorBuilder logged.Add
+    let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let connectionString = $"Data Source={databaseFilePath}"
+    MigrationSetup.setupMigrations connectionString
+    let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
+    let api = TemplateApiFactory.createTemplateApi recordingHandleError context
+
+    try
+        api.AddTemplate { aTemplate "1" with Name = "" } |> ignore
+        Assert.Empty logged
+    finally
+        context.Dispose()
+        SqliteConnection.ClearAllPools()
+        File.Delete databaseFilePath
+
+[<Fact; Trait("Level", "Integration")>]
+let ``a store failure reaches the UI as an Error and is written to the log exactly once`` () =
+    let logged = ResizeArray<MyDogsbodyException>()
+    let recordingHandleError = HandleErrorBuilder logged.Add
+
+    let brokenContext: DatabaseContext =
+        {
+            GetDatabaseConnection = fun () -> raise (InvalidOperationException "database is gone")
+            GetBlogs = fun () -> failwith "not used"
+            GetComments = fun () -> failwith "not used"
+            GetSuppliers = fun () -> failwith "not used"
+            GetSupplierMatchers = fun () -> failwith "not used"
+            GetInvoiceTemplates = fun () -> failwith "not used"
+            GetTemplateFieldRules = fun () -> failwith "not used"
+            Dispose = fun () -> ()
+        }
+
+    let api = TemplateApiFactory.createTemplateApi recordingHandleError brokenContext
+
+    let actual = api.GetTemplatesForSupplier "1"
+
+    match actual with
+    | Error ex ->
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.getTemplatesForSupplier, ex.ActionName)
+        Assert.Equal("Failed to retrieve templates for supplier.", ex.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+    Assert.Single logged |> ignore
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate runs the same engine a scan calls, over pasted text, and returns the normalized text and per-field results`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            {
+                Template = aTemplate supplierId
+                SampleText = "Invoice: INV-9001\nTotal: 245.00"
+                SampleSubject = ""
+                SampleAttachmentFilename = ""
+            }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Contains("INV-9001", actual.NormalizedText)
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.True referenceResult.Succeeded
+        Assert.Equal("INV-9001", referenceResult.ParsedValue)
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.True amountResult.Succeeded
+        Assert.Equal("245.00", amountResult.ParsedValue)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate never writes - the template is not stored`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId; SampleText = "Invoice: INV-1\nTotal: 1.00"; SampleSubject = ""; SampleAttachmentFilename = "" }
+
+        api.TestTemplate input |> okOrFail "TestTemplate" |> ignore
+
+        Assert.Empty(api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports a failed field rather than a default when the sample text does not match`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId; SampleText = "nothing relevant here"; SampleSubject = ""; SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.False referenceResult.Succeeded
+        Assert.False(String.IsNullOrWhiteSpace referenceResult.FailureReason)
+    )
