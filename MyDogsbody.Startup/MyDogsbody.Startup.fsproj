@@ -10,6 +10,8 @@
     <Compile Include="CredentialApiFactory.fs" />
     <Compile Include="SupplierApiMappers.fs" />
     <Compile Include="SupplierApiFactory.fs" />
+    <Compile Include="TemplateApiMappers.fs" />
+    <Compile Include="TemplateApiFactory.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>
 
