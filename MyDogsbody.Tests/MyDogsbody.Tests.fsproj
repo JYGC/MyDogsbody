@@ -60,13 +60,20 @@
     <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
     <Compile Include="Contracts\SupplierApiContractTests.fs" />
     <Compile Include="Contracts\SupplierPersistedShapeTests.fs" />
+    <Compile Include="Contracts\TemplateDependencyContractTests.fs" />
+    <Compile Include="Contracts\TemplateApiContractTests.fs" />
+    <Compile Include="Contracts\TemplatePersistedShapeTests.fs" />
+    <Compile Include="Contracts\TemplateExhaustivenessTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
+    <Compile Include="UI\ModuleCreators\TemplatesBrowserModuleCreatorsTests.fs" />
     <Compile Include="E2E\BlazorTestHarness.fs" />
     <Compile Include="E2E\CredentialsFlowTests.fs" />
     <Compile Include="E2E\SuppliersTestHarness.fs" />
     <Compile Include="E2E\SuppliersFlowTests.fs" />
+    <Compile Include="E2E\TemplatesTestHarness.fs" />
+    <Compile Include="E2E\TemplatesFlowTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

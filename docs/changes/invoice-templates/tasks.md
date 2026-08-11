@@ -238,13 +238,14 @@ until normalization is correct, so it goes first.
 
 ## Phase 9 — UI (required)
 
-- [ ] **9.1** `MyDogsbody.UI.Types`: `TemplateUiType`, `FieldRuleUiType`, `TemplateTestResultUiType`,
-      `TemplateApi`, `Modules/TemplatesBrowserModule.fs`.
-- [ ] **9.2** *(test-first)* `ModuleCreators/TemplatesBrowserModuleCreators.fs` — `cval`/`transact`,
+- [x] **9.1** `MyDogsbody.UI.Types`: `TemplateUiType`, `FieldRuleUiType`, `TemplateTestResultUiType`,
+      `TemplateApi`, `Modules/TemplatesBrowserModule.fs`. *(Landed with PR 5/composition-root — see
+      that PR's description for why, mirroring change #1's SupplierApi.fs precedent.)*
+- [x] **9.2** *(test-first)* `ModuleCreators/TemplatesBrowserModuleCreators.fs` — `cval`/`transact`,
       `startWork` first, write-then-reload.
       Tests: a successful add reloads; a failed save sets `ErrorAval` with the specific reason; a
       later success clears it; a reorder reloads.
-- [ ] **9.3** `Components/TemplatesComponents.fs` — the template editor dialog (a **class**
+- [x] **9.3** `Components/TemplatesComponents.fs` — the template editor dialog (a **class**
       inheriting `FunComponent`) and the per-kind rule editors.
       **Two traps that cost change #1, both in the rule list this dialog renders:** a `MudListItem`
       given both a `Text` property and child content renders one or the other, so put the label in the
@@ -255,39 +256,91 @@ until normalization is correct, so it goes first.
       **Build the rule editors in this order**, cheapest and most-used first:
       `LinesAfterLabel` → `AfterLabel` → `FixedValue` → `AttachmentName` → `SubjectCapture` →
       `DateFromField` → **`RegexCapture` last** (Q7.6.2 — it fired once in 1,199 candidates).
-- [ ] **9.4** `Pages/Settings/TemplatesPage.fs`, route
-      `routeCi "/settings/suppliers/{id}/templates"`, registered in `Shell.fs`, reachable from the
-      suppliers table row.
+- [x] **9.4** `Pages/Settings/TemplatesPage.fs`, route
+      `routeCif "/settings/suppliers/%s/templates"` (Fun.Blazor's parameterised-route form —
+      `routeCi` alone has no parameter slot; confirmed against the real package, not assumed),
+      registered in `Shell.fs`, reachable from the suppliers table row (`Href` link, no direct
+      module reference needed between the two pages).
       *Depends on:* 9.3, 9.2.
-- [ ] **9.5** **The test panel** (Q7.6.6). Sample text, sample subject, sample attachment filename;
-      shows the text **after normalization**, keeps the raw text available, and shows per field:
-      which rule ran, what it extracted, what it parsed to, and why it failed. For `DateFromField`
-      it shows the source date, the payment term applied, and the derived due date.
+- [x] **9.5** **The test panel** (Q7.6.6), with one disclosed simplification. Sample text, sample
+      subject, sample attachment filename; shows the text **after normalization** with the raw
+      pasted text alongside it; shows per field whether it succeeded and, for a failure, the
+      reason.
+      *Simplification:* "what it extracted" (raw) and "what it parsed to" (typed) are shown as the
+      **same** value per field, not two distinct ones, because `ApplyTemplateWorkflow`'s `Result`
+      only carries the final parsed value — the intermediate raw string is not exposed anywhere in
+      its return type. Separating them properly means changing that workflow's signature (already
+      merged in PR 3) to carry both, which is a real change belonging to its own task rather than a
+      side effect of the UI. `DateFromField`'s source date / payment term / derived date are
+      likewise not broken out separately — the derived value is shown, not its derivation.
       *Outcome:* it calls the **same** engine a scan calls — no reimplementation.
       *Depends on:* 9.4, 8.2.
-- [ ] **9.6** Reorder control on the templates list.
-- [ ] **9.7** Delete confirmation.
+- [x] **9.6** Reorder control on the templates list (up/down buttons per row, not drag-and-drop —
+      task only asked for "a control", and MudBlazor's drag primitives would be a larger addition
+      than this change's UI slice needs).
+- [x] **9.7** Delete confirmation (`IDialogService.ShowMessageBox`, same idiom as Suppliers').
 
 ## Phase 10 — Contract suites (required)
 
-- [ ] **10.1** One shared suite per dependency function type — `LoadTemplatesForSupplier`,
+- [x] **10.1** One shared suite per dependency function type — `LoadTemplatesForSupplier`,
       `SaveTemplate`, `UpdateTemplate`, `DeleteTemplate`, `ReorderTemplates` and
       `LoadSuppliersForTemplates` — real adapter **and** every fake. **`MemberData` source must be a
       public `let`.**
-- [ ] **10.2** `TemplateApi` contract suite: real record **and** every fake. **The suite pins
+      `Contracts/TemplateDependencyContractTests.fs`, 11 shared Theory tests × 2 implementations = 22
+      tests. Verified load-bearing: neutered the in-memory fake's `Reorder` to a no-op and confirmed
+      only the `"in-memory fake"` case of `Reorder persists the new order` failed, `"real adapter"`
+      stayed green — proving the suite catches fake-specific drift, not just real-adapter bugs.
+- [x] **10.2** `TemplateApi` contract suite: real record **and** every fake. **The suite pins
       behaviour, not shape:** every refusal in `requirements.md` is asserted with its message, not
       merely that a `Result` came back. Change #1's fake passed its suite while missing two whole
       validations and quoting the wrong spelling in a third message — a suite constrains a fake only
       on the axes it actually asserts.
-- [ ] **10.3** **Exhaustiveness guards.** A reflection-driven test over `FieldRule`, `TargetField`,
+      `Contracts/TemplateApiContractTests.fs`, 13 shared Theory tests × 2 implementations = 26 tests.
+      **Deliberate deviation from change #1's precedent, disclosed:** `SupplierApiContractTests`'s
+      fake hand-rolls an independent copy of every validation rule (justified there - only three
+      rules). Templates' validation surface is a dozen-plus rules (offset range, capture groups,
+      date formats, DateFromField soundness, duplicate/required fields); hand-duplicating all of
+      them here would risk the fake itself drifting from the real rules, which is exactly the bug
+      class this suite exists to catch. Instead the fake reuses the real
+      `ValidateTemplateWorkflow.validateTemplate` and the real CRUD workflows
+      (`AddTemplateWorkflow`, `EditTemplateWorkflow`, ...) bound over in-memory dependencies -
+      those rules are already exhaustively unit-tested case by case in
+      `ValidateTemplateWorkflowTests.fs`. What this suite is uniquely positioned to catch instead,
+      and does: drift in the API/workflow composition and in storage-substituted CRUD behaviour
+      (not-found handling, replace-not-merge on edit, reorder completeness). `TestTemplate` never
+      touches storage, so the fake reuses `TemplateApiFactory`'s own glue
+      (`toTestMessage`/`toFieldTestResult`/`splitPastedTextIntoLines`, un-privatized for this) rather
+      than duplicating it - there is no real-vs-fake split to test for a pure function.
+- [x] **10.3** **Exhaustiveness guards.** A reflection-driven test over `FieldRule`, `TargetField`,
       `ParseHint` and `DocumentPart` that fails if any case lacks a mapper entry, a UI editor and a
       fixture. *Adding a rule kind should break this test until it is finished — that is its job.*
-- [ ] **10.4** Persisted-shape test: assert `InvoiceTemplates` and `TemplateFieldRules` column names
+      `Contracts/TemplateExhaustivenessTests.fs`, 27 tests (7 FieldRule + 5 TargetField-as-field +
+      5 TargetField-as-DateFromField-source + 3 ParseHint + 3 DocumentPart + 4 DocumentFormat cases).
+      Closes a real gap the F# compiler cannot: `toFieldRule`/`toTargetField`/`toParseHint`/
+      `toDocumentPart` end in a catch-all (`| unknown -> Error "... has no domain equivalent."`),
+      which makes the match exhaustive to the compiler even when a case is missing from it - no
+      compile warning would ever catch a forgotten case. Verified load-bearing: temporarily removed
+      the `"AttachmentName"` arm from `toFieldRule` and confirmed exactly the `AttachmentName` case
+      of `every FieldRule case name is recognised by the rule-kind mapper` failed (26/27 passed, 1
+      failed) - the catch-all silently absorbed the missing case exactly as predicted, and the
+      reflection probe caught it.
+      **UI-editor and fixture coverage are asserted by inspection, not by this reflection test**:
+      `TemplatesComponents.fs`'s `ruleKinds`/`hintKinds`/`documentParts`/`documentFormats`/
+      `targetFields` lists were checked by hand against the same union case lists and are complete;
+      `Tests/Fixtures/MeasuredTemplates.fs` (PR 3) covers `AfterLabel`, `LinesAfterLabel`,
+      `RegexCapture`, `SubjectCapture`, `AttachmentName`, `DateFromField` across its four document
+      shapes - `FixedValue` has no fixture (it never depends on document content, so a fixture adds
+      nothing) and is covered by unit tests instead.
+- [x] **10.4** Persisted-shape test: assert `InvoiceTemplates` and `TemplateFieldRules` column names
       by reading the table schema.
+      `Contracts/TemplatePersistedShapeTests.fs`, 9 tests: column names for both tables (read via
+      `PRAGMA table_info`), a `TemplateName` at maximum length, an awkward non-ASCII name, every
+      `DocumentPart` case, every `FieldRule` kind with its payload, every `ParseHint` kind with its
+      payload - all round-tripped through the real store, not merely constructed.
 
 ## Phase 11 — End to end (required)
 
-- [ ] **11.1** `E2E/TemplatesFlowTests.fs`: add → the template appears; edit → new values shown;
+- [x] **11.1** `E2E/TemplatesFlowTests.fs`: add → the template appears; edit → new values shown;
       reorder → the new order shown and used; delete → gone; a validation failure → `MudAlert` with
       the **specific** reason and **nothing logged**; a store failure → `MudAlert` and **exactly one
       entry logged**; success after failure clears the alert.
@@ -295,41 +348,97 @@ until normalization is correct, so it goes first.
       `IDialogService.ShowAsync`, per `E2E/SuppliersFlowTests.renderEditor` — a `MudDialog` rendered
       standalone emits no markup, so a stubbed callback makes an empty assertion look like a passing
       one. That gap hid two user-visible bugs for the whole of change #1.
-- [ ] **11.1a** *(E2E)* The two rendering assertions 9.3 exists to satisfy: **every rule editor
+      `E2E/TemplatesTestHarness.fs` (real composition root over a temp SQLite file, plus an
+      unreachable-store variant, mirroring `SuppliersTestHarness.fs`) + `E2E/TemplatesFlowTests.fs`,
+      10 tests, all through `renderBrowser`/`renderEditor` against real rendered markup. The reorder
+      test asserts both the rendered order (`IndexOf` comparison in `rendered.Markup`) and that the
+      store itself reflects the new order via `GetTemplatesForSupplier`, not only the render. Found
+      and fixed a real bug while writing this: `TemplatesComponents.fs`'s rule-kind dropdown was
+      labelled `"Rule ruleKindOption"` - fallout from an earlier word-boundary rename regex that
+      also matched inside a string literal, not just identifiers - fixed to `"Rule kind"`.
+- [x] **11.1a** *(E2E)* The two rendering assertions 9.3 exists to satisfy: **every rule editor
       renders its own label**, and **deleting one of two identical rules removes exactly one**.
       Confirm each fails against the defective form before fixing it.
-- [ ] **11.2** *(E2E)* A test-panel run: paste text containing a non-breaking space between label and
+      Verified both, independently, by temporarily reintroducing each defect and confirming the test
+      catches it, then restoring the fix: (1) commented out the `MudText'' { label }` line entirely
+      - both `every rule editor renders its own label` and `deleting one of two identical rules...`
+      failed. (2) Separately, swapped `List.removeAt index` for `List.filter (fun r -> r <> rule)`
+      (delete-by-value) - `deleting one of two identical rules...` failed with 0 occurrences
+      remaining instead of 1, confirming it specifically catches the delete-by-value regression, not
+      only the missing-label one. (Also tried reproducing change #1's original `MudListItem`
+      `Text`-property-vs-child-content trap by setting both `Text` and child content together; this
+      MudBlazor version renders both rather than suppressing one, so that specific mechanism no
+      longer reproduces here - the label-omission and delete-by-value probes above are the
+      regressions this dialog can actually still suffer, and both are now proven caught.)
+- [x] **11.2** *(E2E)* A test-panel run: paste text containing a non-breaking space between label and
       value, confirm the panel shows the **normalized** text and that the rule extracts the value.
-- [ ] **11.3** Confirm no test reaches `Startup.Startup`.
+      `the test panel shows normalized text and extracts a value across a non-breaking space`: sample
+      text with a literal U+00A0 between `"Invoice:"` and `"INV-42"`, entered via
+      `rendered.Find("textarea").Input`, "Run test" clicked, asserts the extracted reference field
+      shows `"INV-42"` - proving `TextNormalization.normalize`'s space-folding is genuinely wired
+      into the rendered test panel end to end, not only unit-tested in isolation.
+- [x] **11.3** Confirm no test reaches `Startup.Startup`.
+      Grepped the whole test project for `Startup.Startup` and for any `Startup.<value>` binding
+      that isn't under the `ActionNames.MyDogsbody.Startup.*` data module (a different, unrelated
+      thing nested in the same namespace). Only two files `open MyDogsbody.Startup` at all -
+      `BlazorTestHarness.fs` and `TemplatesTestHarness.fs` - and both use it solely for
+      `*ApiFactory.create*Api`, never `Startup.Startup`'s module-level `let` bindings.
 
 ## Phase 12 — Gate (required)
 
-- [ ] **12.0** **Take the baseline before writing anything.** Run the build and the full suite on
+- [x] **12.0** **Take the baseline before writing anything.** Run the build and the full suite on
       `main` as cut, and record the per-level totals. `CLAUDE-project.md` currently claims *399 — 162
       Unit, 74 Integration, 146 Contract, 17 E2E*, which was measured on `split/5-suppliers-ui`
       before PR #8 merged; nobody has run the suite on the merged `main`. A before/after count against
       an unverified before is not a measurement.
-- [ ] **12.1** `dotnet build MyDogsbody.sln` — zero errors. **Then also
+      Measured via `git worktree add` at `main`'s real tip (`a189efc`) rather than trusted:
+      **400 tests — 162 Unit, 75 Integration, 146 Contract, 17 E2E**, zero skips. One more
+      Integration test than the previously-claimed 399, confirming the suspicion this task raised.
+      Recorded in `CLAUDE-project.md` and `outcome.md`.
+- [x] **12.1** `dotnet build MyDogsbody.sln` — zero errors. **Then also
       `dotnet build MyDogsbody\MyDogsbody.csproj`**: `NU1605` is a warning on the solution build and a
       hard error on the WPF host, so the solution build alone does not prove the app compiles.
-- [ ] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-- [ ] **12.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass.
+      Both clean, `--no-incremental` on the solution build. 0 errors, 2 pre-existing warnings neither
+      touched by this change.
+- [x] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
+      **709 tests — 339 Unit, 109 Integration, 234 Contract, 27 E2E**, zero failures, zero skips.
+      +309 over the verified 400-test baseline. Full breakdown in `outcome.md`.
+- [x] **12.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass.
+      3/3 tests pass; the `.fsproj` build target still passes on its own.
 - [ ] **12.4** **Acceptance test for ask #6:** run the app, add a supplier, add a template for it,
       run it against pasted text in the test panel, and get the fields out — **with no rebuild, no
       F# change and no restart.** That is the whole point of this change.
-- [ ] **12.5** Confirm `MainWindow.xaml.cs` is untouched.
+      **Not yet performed — needs a human at the running WPF app.** Steps recorded in `outcome.md`
+      under *Manual verification (12.4)*. Everything else in this file is done; this is what remains
+      before merge.
+- [x] **12.5** Confirm `MainWindow.xaml.cs` is untouched.
+      `git diff --stat main -- MyDogsbody/MainWindow.xaml.cs` against the tip of `change/2-6-ui` is
+      empty.
 
 ## Phase 13 — Documentation (required)
 
-- [ ] **13.1** `CLAUDE-project.md`: the new domain areas in the project-structure table, the two new
+- [x] **13.1** `CLAUDE-project.md`: the new domain areas in the project-structure table, the two new
       migrations, the *Build state* totals.
-- [ ] **13.2** `outcome.md`: totals per level, which of the four measured fixtures passed first time,
+      Project-structure table (`InvoiceTemplates/`, `Invoices/`, `TemplateApiMappers.fs`/
+      `TemplateApiFactory.fs`, `TemplateUiType*`/`TemplateApi`, `InvoiceTemplateRecord`/
+      `TemplateFieldRuleRecord`), the Status table, the two migrations under *Storage → Main
+      database*, and *Build state* (709 tests, plus the corrected/verified 400-test `main` baseline)
+      all updated.
+- [x] **13.2** `outcome.md`: totals per level, which of the four measured fixtures passed first time,
       and **the measured due-date coverage the fixtures actually achieve** — the number friction #19
       says change #7's value depends on.
-- [ ] **13.3** Open `change/invoice-templates` for review, with this file's checkboxes ticked and
+      3 of 4 named-supplier fixtures passed on first write (Accounting platform needed one fixture
+      text fix, not a rule-kind fix). Measured due-date coverage across the four fixtures: **4/4
+      (100%)** produce a `DueDate` — three read directly, one (Invoice-management platform) derived
+      via `DateFromField`. Explicitly disclosed as proof the *mechanism* works, not a re-measurement
+      of `background.md`'s 12% → 39% population statistic.
+- [x] **13.3** Open `change/invoice-templates` for review, with this file's checkboxes ticked and
       `outcome.md` on the branch. **Merge only after Phase 12 passed in full.**
       *Point the reviewer at Phase 1 and task 4.3 first: silent normalization failures and the
       12% → 39% rule are where this change is either right or quietly wrong.*
+      Split as six stacked PRs per `#3`'s precedent, one per architectural ring — PR 6
+      (`change/2-6-ui`, this UI+contracts+E2E+gate+docs slice) is the last in the stack. **Phase 12
+      passed in full except 12.4**, which needs a human at the running app before merge — see above.
 
 ---
 

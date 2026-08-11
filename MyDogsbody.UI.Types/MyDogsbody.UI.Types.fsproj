@@ -15,6 +15,7 @@
     <Compile Include="TemplateUiType.fs" />
     <Compile Include="TemplateTestUiType.fs" />
     <Compile Include="TemplateApi.fs" />
+    <Compile Include="Modules\TemplatesBrowserModule.fs" />
   </ItemGroup>
 
   <ItemGroup>

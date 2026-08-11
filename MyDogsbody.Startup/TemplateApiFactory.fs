@@ -23,7 +23,10 @@ open MyDogsbody.UI.Types
 /// splits on blank lines" (Documents/DocumentsTypes.fs's own TextLine doc comment). The blank
 /// lines themselves are still emitted; TextNormalization.normalize drops them later, the same way
 /// it would for any other reader's output. Pure, no mutable state.
-let private splitPastedTextIntoLines (text: string) : TextLine list =
+///
+/// Not private: TestTemplate never touches storage, so TemplateApiContractTests.fs's fake reuses
+/// this rather than duplicating it - there is no real-vs-fake split to test for a pure function.
+let splitPastedTextIntoLines (text: string) : TextLine list =
     let rawLines = text.Replace("\r\n", "\n").Split '\n' |> Array.toList
 
     rawLines
@@ -38,7 +41,7 @@ let private splitPastedTextIntoLines (text: string) : TextLine list =
 /// Builds the ScannedMessage TestTemplate applies against: the pasted text as the body, the
 /// pasted subject, and - only when a filename was given - a single attachment part carrying that
 /// name and no text of its own (AttachmentName matches a filename, not content).
-let private toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) : ScannedMessage =
+let toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) : ScannedMessage =
     let attachmentParts =
         if String.IsNullOrWhiteSpace input.SampleAttachmentFilename then
             []
@@ -54,7 +57,7 @@ let private toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) 
         Parts = (BodyPart, splitPastedTextIntoLines input.SampleText) :: attachmentParts
     }
 
-let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
+let toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
     match extracted with
     | Error error ->
         { Field = TemplateApiMappers.toTargetFieldUiString field

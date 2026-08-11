@@ -81,6 +81,12 @@ let suppliersBrowser
                         MudTd''{
                             MudButton''{
                                 Variant Variant.Filled
+                                Color Color.Secondary
+                                Href $"/settings/suppliers/{supplier.Id}/templates"
+                                "Templates"
+                            }
+                            MudButton''{
+                                Variant Variant.Filled
                                 Color Color.Primary
                                 OnClick (fun _ ->
                                     showEditSupplierModal supplier

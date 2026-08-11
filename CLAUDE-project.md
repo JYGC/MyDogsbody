@@ -18,14 +18,14 @@ One solution, `MyDogsbody.sln`. Every project targets `net9.0` except the WPF ho
 
 | Ring | Project | Holds |
 | --- | --- | --- |
-| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/`, `Documents/` and `Suppliers/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
+| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/`, `Documents/`, `Suppliers/`, `InvoiceTemplates/` and `Invoices/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
 | Outer ring | `MyDogsbody.Integrations.Credentials` (+ `.Database.Models`, C#) | LiteDB context, `CredentialEntityMappers.fs` (the bottom mapper), `CredentialStore.fs` (the adapter), `Credential` entity. An integration is an **adapter**: it implements the function types the domain declares |
 | Outer ring | `MyDogsbody.Integrations.Pdf` | `PdfDocumentReader.fs` — PdfPig behind the domain's `ReadDocumentContent` |
-| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` / `SupplierApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` / `SupplierApiFactory.fs` (`createCredentialApi` / `createSupplierApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, the main SQLite context, migration run, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
+| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` / `SupplierApiMappers.fs` / `TemplateApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` / `SupplierApiFactory.fs` / `TemplateApiFactory.fs` (`createCredentialApi` / `createSupplierApi` / `createTemplateApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, the main SQLite context, migration run, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
 | Host | `MyDogsbody` (C#) | WPF `MainWindow` + `BlazorWebView`, `Frame.razor` (MudBlazor providers + theme), the DI registration, `wwwroot/` |
 | UI | `MyDogsbody.UI.Portal` | `Shell.fs` (routes), `Pages/`, `Components/`, `ModuleCreators/`, `Layout/` |
-| UI | `MyDogsbody.UI.Types` | UI-facing records (`IntegrationCredentialUiType*`, `SupplierUiType*`, `SupplierApi`) and `Modules/` adaptive-state records |
-| Main database | `MyDogsbody.Database` (+ `.Database.Models`, F#) | The **main** store: SQLite `DatabaseContext` — a `SqliteConnection` plus a Dapper.FSharp `QuerySource<_>` per table, and a `Dispose`; `Blog`/`Comment`/`SupplierRecord`/`SupplierMatcherRecord` records; `SupplierRecordMappers.fs` (the bottom mapper) and `SupplierStore.fs` (the adapter). References `MyDogsbody.Domain` and `MyDogsbody.Builders`. `Blog`/`Comment` remain scaffold; `Suppliers`/`SupplierMatchers` is the first table pair actually consumed by the app |
+| UI | `MyDogsbody.UI.Types` | UI-facing records (`IntegrationCredentialUiType*`, `SupplierUiType*`, `SupplierApi`, `TemplateUiType*`, `TemplateTestUiType*`, `TemplateApi`) and `Modules/` adaptive-state records |
+| Main database | `MyDogsbody.Database` (+ `.Database.Models`, F#) | The **main** store: SQLite `DatabaseContext` — a `SqliteConnection` plus a Dapper.FSharp `QuerySource<_>` per table, and a `Dispose`; `Blog`/`Comment`/`SupplierRecord`/`SupplierMatcherRecord`/`InvoiceTemplateRecord`/`TemplateFieldRuleRecord` records; `SupplierRecordMappers.fs` / `TemplateRecordMappers.fs` (the bottom mappers) and `SupplierStore.fs` / `TemplateStore.fs` (the adapters). References `MyDogsbody.Domain` and `MyDogsbody.Builders`. `Blog`/`Comment` remain scaffold; `Suppliers`/`SupplierMatchers` and `InvoiceTemplates`/`TemplateFieldRules` are the table pairs actually consumed by the app |
 | Main database | `MyDogsbody.Database.Migrations` | FluentMigrator migrations — **the schema source of truth for the main database**. Runner instructions in its `INSTALL.md` |
 | Cross-cutting | `MyDogsbody.Builders` | `HandleErrorBuilder` — the outer ring's `Result` computation expression. The domain does **not** use it; see *Architecture → Errors* |
 | Cross-cutting | `MyDogsbody.Exceptions` / `.Exceptions.Types` | `ExceptionHelpers`, `MyDogsbodyException`, `ActionNames` |
@@ -94,7 +94,9 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **399 tests — 162 Unit, 74 Integration, 146 Contract, 17 E2E**, zero skips. If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **709 tests — 339 Unit, 109 Integration, 234 Contract, 27 E2E**, zero skips. If the build breaks now, assume you broke it.
+
+Measured directly against a real `main` checkout while closing `invoice-templates` (change #2): `main` as cut stood at **400 tests — 162 Unit, 75 Integration, 146 Contract, 17 E2E** (one more Integration test than this file had previously claimed — the old "399" figure predated a merge and was never reverified, exactly the gap `invoice-templates`'s own Phase 12 gate flagged before trusting it). `invoice-templates` added **309 tests** on top of that verified baseline.
 
 The suite was run eight times consecutively while closing the `architecture-compliance` change to confirm it is not flaky. If you see an intermittent failure, do not re-run until it passes — see the note on LiteDB's global `BsonMapper` under *Per-integration databases*.
 
@@ -207,10 +209,10 @@ The migration is **done**. The `architecture-compliance` change created `MyDogsb
 
 | | Specified | Built today |
 | --- | --- | --- |
-| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/`, `Documents/` and `Suppliers/` |
+| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/`, `Documents/`, `Suppliers/`, `InvoiceTemplates/` and `Invoices/` |
 | `MyDogsbody.Spine` | Gone — pipeline moves to `Domain`, wiring to `Startup` | ✅ deleted |
-| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 per area — `CredentialEntityMappers`/`CredentialApiMappers`, `SupplierRecordMappers`/`SupplierApiMappers` |
-| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError`, `SupplierError` |
+| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 per area — `CredentialEntityMappers`/`CredentialApiMappers`, `SupplierRecordMappers`/`SupplierApiMappers`, `TemplateRecordMappers`/`TemplateApiMappers` |
+| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError`, `SupplierError`, `TemplateError`, `InvoiceError` |
 | Store in a core signature | Never | ✅ never — the domain names no store type |
 
 What is **not** built, and is a status rather than a violation: only the error log type exists in the log database (see *Log database*). The main SQLite database's own "designed but not wired in" gap closed with `invoice-ledger-foundation` — see *Storage → Main database*.
@@ -412,6 +414,8 @@ Three tiers, kept deliberately separate: one main database, a private store per 
 **The schema belongs to `MyDogsbody.Database.Migrations` and nothing else.** The FluentMigrator classes under its `Migrations/` folder are the source of truth: never create or alter a table at runtime, from `DatabaseContextSetup`, or by hand in a SQLite tool. Adding a column means adding a migration. `MigrationSetup.setupMigrations` wires `AddSQLite` + `ScanIn(...).For.Migrations()` and calls `MigrateUp()`; CLI equivalent under *Commands → Migrate*. **FluentMigrator's SQLite generator refuses `Create.ForeignKey` outright** ("Foreign keys are not supported in SQLite") because SQLite has no `ALTER TABLE ADD CONSTRAINT` — a foreign key has to be declared inline in `CREATE TABLE`, which the fluent `Create.Table()` builder cannot express either. `Migration_20260809000002_CreateSupplierMatchersTable.fs` is the pattern to copy: `this.Execute.Sql("CREATE TABLE ... FOREIGN KEY (...) REFERENCES ... ON DELETE CASCADE")` for the table, then the fluent builder again for anything that doesn't involve the constraint (indexes, `Down()`).
 
 Status: the main database is **wired in as of `invoice-ledger-foundation` (change #1 of the invoice-to-calendar series)**, with suppliers as its first real consumer end to end — migrations, `SupplierStore.fs`, `SupplierApiFactory.fs`, and `/settings/suppliers`. `Startup.fs` calls `MigrationSetup.setupMigrations` before constructing the context, exactly the pattern below always intended. `Blog`/`Comment` remain scaffold sample tables, deliberately untouched by that change — treat them as the shape to follow, not as finished schema, and the next feature needing the main database adds its own migrations, store functions and dependency-type bindings the same way `Suppliers`/`SupplierMatchers` did — never reaching it from the UI, and never handing a `DatabaseContext` inward.
+
+`invoice-templates` (change #2) added the second table pair the same way: `Migration_20260810000002_CreateInvoiceTemplatesTable.fs` (`InvoiceTemplates` — `Id`, `SupplierId` FK `ON DELETE CASCADE`, `Name`, `DocumentPart`, `AttachmentFormat` nullable, `Position`, indexed on `(SupplierId, Position)`) and `Migration_20260810000003_CreateTemplateFieldRulesTable.fs` (`TemplateFieldRules` — `Id`, `TemplateId` FK `ON DELETE CASCADE`, `TargetField`, `RuleKind`, `RuleText`/`RuleOffset`/`RuleSourceField` nullable, `HintKind`, `HintText` nullable, unique-indexed on `(TemplateId, TargetField)`). `TemplateFieldRules` is the split-column encoding for `FieldRule` and `ParseHint` — two discriminated unions with per-case payloads — described under *The two mapping points*; `TemplateRecordMappers.fs` is the bottom mapper that reads and writes it.
 
 Two things worth knowing before adding a second table pair:
 
