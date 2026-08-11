@@ -38,6 +38,10 @@
     <Compile Include="InvoiceTemplates\DeleteTemplateWorkflow.fs" />
     <Compile Include="InvoiceTemplates\ListTemplatesWorkflow.fs" />
     <Compile Include="InvoiceTemplates\ReorderTemplatesWorkflow.fs" />
+    <Compile Include="Invoices\InvoicesTypes.fs" />
+    <Compile Include="Invoices\MatchSupplierWorkflow.fs" />
+    <Compile Include="Invoices\ApplyTemplateWorkflow.fs" />
+    <Compile Include="Invoices\SelectTemplateWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">
