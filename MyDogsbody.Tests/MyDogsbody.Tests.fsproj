@@ -26,10 +26,11 @@
     <Compile Include="Logging\ExceptionStoreTests.fs" />
     <Compile Include="Database\MigrationsTests.fs" />
     <Compile Include="Database\SupplierMigrationsTests.fs" />
+    <Compile Include="Database\MigrationTestHelpers.fs" />
+    <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
     <Compile Include="Database\SupplierStoreTests.fs" />
-    <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />
