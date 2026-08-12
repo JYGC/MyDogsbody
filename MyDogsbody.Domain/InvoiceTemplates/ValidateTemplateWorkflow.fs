@@ -41,7 +41,8 @@ let private MinimumOffset = 0
 [<Literal>]
 let private MaximumOffset = 20
 
-let private requiredFields = [ Reference; Amount; Currency ]
+// Currency is not required - see ExtractedInvoice's doc comment.
+let private requiredFields = [ Reference; Amount ]
 
 let private ensureRequiredFieldsHaveRules (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
     let covered = rules |> List.map (fun rule -> rule.Field) |> Set.ofList

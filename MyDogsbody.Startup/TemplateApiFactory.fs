@@ -70,7 +70,10 @@ let toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field
             match field with
             | Reference -> invoice.Reference, true, ""
             | Amount -> string invoice.Amount, true, ""
-            | Currency -> invoice.Currency, true, ""
+            | Currency ->
+                match invoice.Currency with
+                | Some currency -> currency, true, ""
+                | None -> "", false, "No value extracted."
             | IssueDate ->
                 match invoice.IssueDate with
                 | Some date -> date.ToString "yyyy-MM-dd", true, ""

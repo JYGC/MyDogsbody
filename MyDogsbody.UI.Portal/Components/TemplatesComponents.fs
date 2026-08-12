@@ -7,8 +7,18 @@ open FSharp.Data.Adaptive
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 open Microsoft.AspNetCore.Components
+open Microsoft.AspNetCore.Components.Forms
 
 let private targetFields = [ "Reference"; "Amount"; "Currency"; "IssueDate"; "DueDate" ]
+
+/// Mirrors ValidateTemplateWorkflow's own requiredFields - Currency, IssueDate and DueDate are
+/// optional. Duplicated here rather than reached from the domain (the UI cannot reference
+/// MyDogsbody.Domain), the same way SuppliersComponents mirrors "name must not be empty" for its
+/// own Ok-button disable check: the domain still re-validates on submit, this is a UX nicety only.
+let private requiredFieldsForTest = [ "Reference"; "Amount" ]
+
+let private missingRequiredFieldsForTest (rules: TemplateFieldRuleUiType list) =
+    requiredFieldsForTest |> List.filter (fun field -> rules |> List.forall (fun r -> r.Field <> field))
 
 /// Cheapest and most-used first, RegexCapture last - it fired once in 1,199 measured candidates
 /// (design.md -> Testing strategy). This is the order the rule-kind dropdown lists them in.
@@ -427,13 +437,25 @@ type TemplatesEditorDialog() =
                         MudItem'' {
                             xs 12; sm 3; md 3
                             adapt {
-                                let! sampleAttachmentFilename, setSampleAttachmentFilename = sampleAttachmentFilenameCval.WithSetter()
-                                MudTextField'' {
-                                    Label "Sample attachment filename"
-                                    Variant Variant.Text
-                                    Value sampleAttachmentFilename
-                                    Immediate true
-                                    ValueChanged setSampleAttachmentFilename
+                                let! sampleAttachmentFilename = sampleAttachmentFilenameCval
+                                // AttachmentName matches a filename, not file content (see
+                                // toTestMessage in TemplateApiFactory.fs) - so only the browser's
+                                // IBrowserFile.Name is read here, never the file's bytes. WebView2
+                                // backs BlazorWebView, so this opens the real Windows file picker
+                                // with no extra JS interop needed.
+                                MudFileUpload'' {
+                                    FilesChanged (fun (file: IBrowserFile) ->
+                                        transact (fun _ -> sampleAttachmentFilenameCval.Value <- file.Name))
+                                    ActivatorContent (fragment {
+                                        MudButton'' {
+                                            Variant Variant.Filled
+                                            StartIcon Icons.Material.Filled.AttachFile
+                                            if String.IsNullOrWhiteSpace sampleAttachmentFilename then
+                                                "Choose attachment file"
+                                            else
+                                                sampleAttachmentFilename
+                                        }
+                                    })
                                 }
                             }
                         }
@@ -447,9 +469,11 @@ type TemplatesEditorDialog() =
                                 let! sampleText = sampleTextCval
                                 let! sampleSubject = sampleSubjectCval
                                 let! sampleAttachmentFilename = sampleAttachmentFilenameCval
+                                let missingRequiredFields = missingRequiredFieldsForTest rules
                                 MudButton'' {
                                     Variant Variant.Filled
                                     Color Color.Secondary
+                                    Disabled (not (List.isEmpty missingRequiredFields))
                                     OnClick (fun _ ->
                                         let input: TemplateTestInputUiType =
                                             {
@@ -477,6 +501,12 @@ type TemplatesEditorDialog() =
                                                 testErrorCval.Value <- Some ex.Message))
                                     "Run test"
                                 }
+                                if not (List.isEmpty missingRequiredFields) then
+                                    MudText'' {
+                                        Typo Typo.caption
+                                        Color Color.Warning
+                                        $"""Add a rule for: {String.concat ", " missingRequiredFields} before testing."""
+                                    }
                             }
                         }
                         MudItem'' {

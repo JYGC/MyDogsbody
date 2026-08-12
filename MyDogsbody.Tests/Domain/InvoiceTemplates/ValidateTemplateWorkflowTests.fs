@@ -215,14 +215,14 @@ let ``validateTemplate accepts an offset at each end of the 0 to 20 range`` () =
 [<Theory; Trait("Level", "Unit")>]
 [<InlineData("Reference")>]
 [<InlineData("Amount")>]
-[<InlineData("Currency")>]
 let ``validateTemplate refuses a template missing a required field with RequiredFieldHasNoRule naming it`` (missingFieldName: string) =
+    // Currency is not in this list - it is not required, and has its own test below asserting
+    // exactly that.
     let allRules = [ validReferenceRule; validAmountRule; validCurrencyRule ]
     let missingField =
         match missingFieldName with
         | "Reference" -> Reference
         | "Amount" -> Amount
-        | "Currency" -> Currency
         | other -> failwith $"unexpected test field {other}"
 
     let input = { minimalValidTemplate with Rules = allRules |> List.filter (fun r -> r.Field <> missingField) }
@@ -232,6 +232,18 @@ let ``validateTemplate refuses a template missing a required field with Required
     match actual with
     | Error (RequiredFieldHasNoRule field) -> Assert.Equal<TargetField>(missingField, field)
     | other -> Assert.Fail($"Expected Error(RequiredFieldHasNoRule _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate accepts a template with no Currency rule - Currency is not required`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules = [ validReferenceRule; validAmountRule ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Ok template -> Assert.Empty(ValidTemplate.rules template |> List.filter (fun r -> r.Field = Currency))
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``validateTemplate refuses two rules targeting the same field with DuplicateRuleForField naming it`` () =

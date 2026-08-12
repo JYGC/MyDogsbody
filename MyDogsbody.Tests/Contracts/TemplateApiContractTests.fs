@@ -355,12 +355,24 @@ let ``AddTemplate rejects a supplier id that does not exist`` (implementation: s
 [<MemberData(nameof implementations)>]
 let ``AddTemplate rejects a required field with no rule`` (implementation: string) =
     withImplementation implementation (fun api supplierIdString ->
-        let missingCurrency = validRules |> List.filter (fun r -> r.Field <> "Currency")
+        let missingAmount = validRules |> List.filter (fun r -> r.Field <> "Amount")
 
-        let actual = api.AddTemplate { aTemplate supplierIdString with Rules = missingCurrency } |> errorOrFail "AddTemplate"
+        let actual = api.AddTemplate { aTemplate supplierIdString with Rules = missingAmount } |> errorOrFail "AddTemplate"
 
-        Assert.Equal("Currency needs a rule.", actual.Message)
+        Assert.Equal("Amount needs a rule.", actual.Message)
         Assert.Empty(api.GetTemplatesForSupplier supplierIdString |> okOrFail "GetTemplatesForSupplier")
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``AddTemplate accepts a template with no Currency rule - Currency is not required`` (implementation: string) =
+    withImplementation implementation (fun api supplierIdString ->
+        let noCurrency = validRules |> List.filter (fun r -> r.Field <> "Currency")
+
+        api.AddTemplate { aTemplate supplierIdString with Rules = noCurrency } |> okOrFail "AddTemplate"
+
+        let stored = Assert.Single(api.GetTemplatesForSupplier supplierIdString |> okOrFail "GetTemplatesForSupplier")
+        Assert.DoesNotContain(stored.Rules, fun r -> r.Field = "Currency")
     )
 
 [<Theory; Trait("Level", "Contract")>]

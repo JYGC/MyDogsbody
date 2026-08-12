@@ -71,7 +71,7 @@ let ``AfterLabel returns the remainder of the first normalized line containing t
     | Ok invoice ->
         Assert.Equal("INV-1042", invoice.Reference)
         Assert.Equal(100.00m, invoice.Amount)
-        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(Some "AUD", invoice.Currency)
         Assert.Equal(zeroTermSupplierId, SupplierId.value invoice.SupplierId)
         Assert.Equal("T1", TemplateId.value invoice.TemplateId)
         Assert.Equal("msg-1", SourceMessageId.value invoice.SourceMessageId)
@@ -449,6 +449,6 @@ let ``a pathological pattern on an optional field times out to absent, and the r
     | Ok invoice ->
         Assert.Equal("OK-1.", invoice.Reference)
         Assert.Equal(100.00m, invoice.Amount)
-        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(Some "AUD", invoice.Currency)
         Assert.Equal(None, invoice.IssueDate)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

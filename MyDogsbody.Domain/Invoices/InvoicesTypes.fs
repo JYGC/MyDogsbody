@@ -42,13 +42,17 @@ type ScannedMessage =
 /// nothing), but ApplyTemplateWorkflow both extracts AND parses using the hint that selected
 /// it, so what comes out is named for what it is. Change #4's ValidInvoice is where
 /// constrained types appear.
+///
+/// Currency is optional, like IssueDate/DueDate: many measured documents never state one
+/// explicitly (or it is implied, e.g. a domestic biller), so requiring a rule for it forced
+/// every template to carry a FixedValue placeholder even when nothing in the document says so.
 type ExtractedInvoice =
     { SupplierId: SupplierId
       TemplateId: TemplateId
       SourceMessageId: SourceMessageId
       Reference: string
       Amount: decimal
-      Currency: string
+      Currency: string option
       IssueDate: System.DateTime option
       DueDate: System.DateTime option }
 

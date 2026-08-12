@@ -187,8 +187,9 @@ let applyTemplate
     let compiledPatterns = ValidTemplate.compiledPatterns template
     let findRule field = rules |> List.tryFind (fun rule -> rule.Field = field)
 
-    // Reference, Amount and Currency always have exactly one rule - ValidateTemplateWorkflow
-    // refuses to produce a ValidTemplate missing one, so this can never actually raise.
+    // Reference and Amount always have exactly one rule - ValidateTemplateWorkflow refuses to
+    // produce a ValidTemplate missing either, so this can never actually raise. Currency is not
+    // required (see ExtractedInvoice's doc comment) and is read via findRule below instead.
     let requiredRule field =
         match findRule field with
         | Some rule -> rule
@@ -211,13 +212,18 @@ let applyTemplate
             | NotFound -> Error (TemplateMatchedNothing(templateId, Amount))
             | TimedOut -> Error (RuleTimedOut(templateId, Amount))
 
-        let! currency =
-            let rule = requiredRule Currency
-
-            match runRule compiledPatterns Currency rule.Rule content with
-            | Found raw -> Ok raw
-            | NotFound -> Error (TemplateMatchedNothing(templateId, Currency))
-            | TimedOut -> Error (RuleTimedOut(templateId, Currency))
+        // Currency is optional: no rule, "found nothing" and a timeout all yield None rather
+        // than an error, the same treatment IssueDate/DueDate get below. Currency has no parse
+        // step of its own (the raw match IS the value), so unlike a date or an amount there is
+        // no "found but unparseable" case to report either.
+        let currency =
+            match findRule Currency with
+            | None -> None
+            | Some rule ->
+                match runRule compiledPatterns Currency rule.Rule content with
+                | Found raw -> Some raw
+                | NotFound
+                | TimedOut -> None
 
         // IssueDate and DueDate are optional: no rule, "found nothing" and a timeout all yield
         // None rather than an error - only a rule that DID find text but could not parse it is an

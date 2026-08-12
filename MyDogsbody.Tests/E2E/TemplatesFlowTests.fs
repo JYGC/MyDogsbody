@@ -5,6 +5,7 @@ open Bunit
 open Fun.Blazor
 open MudBlazor
 open Microsoft.Extensions.DependencyInjection
+open Microsoft.AspNetCore.Components.Forms
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UI.Portal.ModuleCreators
 open MyDogsbody.UI.Types
@@ -49,6 +50,15 @@ let private aTemplate supplierIdString : TemplateUiTypeWithoutId =
 let private renderEditor (harness: TemplatesHarness) (supplierIdString: string) (rules: TemplateFieldRuleUiType list) =
     let template = { aTemplate supplierIdString with Rules = rules }
 
+    // MudPopoverProvider is needed here (unlike SuppliersFlowTests.renderEditor's dialog) because
+    // this dialog's test panel renders a MudFileUpload, which needs the popover service - the
+    // real app registers both providers side by side in Frame.razor.
+    harness.Render<MudPopoverProvider>(fun builder ->
+        builder.OpenComponent<MudPopoverProvider>(0)
+        builder.CloseComponent()
+    )
+    |> ignore
+
     let provider =
         harness.Render<MudDialogProvider>(fun builder ->
             builder.OpenComponent<MudDialogProvider>(0)
@@ -73,6 +83,9 @@ let private renderEditor (harness: TemplatesHarness) (supplierIdString: string) 
 
 let private occurrencesOf (needle: string) (haystack: string) =
     haystack.Split(needle).Length - 1
+
+let private findRunTestButton (rendered: Bunit.IRenderedFragment) =
+    rendered.FindAll("button") |> Seq.find (fun el -> el.TextContent.Trim() = "Run test")
 
 [<Fact; Trait("Level", "E2E")>]
 let ``a template added through the module appears as a row in the rendered table`` () =
@@ -258,12 +271,11 @@ let ``the test panel shows normalized text and extracts a value across a non-bre
 
         // U+00A0 between the label and the value - TextNormalization folds it to an ordinary
         // space before AfterLabel ever sees the line.
-        let sampleText = "Invoice: INV-42\nTotal: 99.00"
+        let sampleText = "Invoice: INV-42\nTotal: 99.00"
 
         rendered.Find("textarea").Input sampleText
 
-        let runTestButton =
-            rendered.FindAll("button") |> Seq.find (fun el -> el.TextContent.Trim() = "Run test")
+        let runTestButton = findRunTestButton rendered
 
         runTestButton.Click()
 
@@ -271,4 +283,36 @@ let ``the test panel shows normalized text and extracts a value across a non-bre
             Assert.Contains("Invoice: INV-42", rendered.Markup)
             Assert.Contains("INV-42", rendered.Markup)
         )
+    )
+
+[<Fact; Trait("Level", "E2E")>]
+let ``the run test button is disabled and shows a hint when a required field has no rule`` () =
+    withTemplatesHarness (fun harness supplierIdString ->
+        let onlyAmount: TemplateFieldRuleUiType list =
+            [ { Field = "Amount"; RuleKind = "AfterLabel"; RuleText = "Amount Due"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsMoney"; HintText = "." } ]
+
+        let rendered = renderEditor harness supplierIdString onlyAmount
+
+        Assert.True((findRunTestButton rendered).HasAttribute "disabled")
+        Assert.Contains("Add a rule for: Reference", rendered.Markup)
+    )
+
+[<Fact; Trait("Level", "E2E")>]
+let ``the run test button is enabled once Reference and Amount have rules, even without Currency`` () =
+    withTemplatesHarness (fun harness supplierIdString ->
+        let noCurrency = validRules |> List.filter (fun r -> r.Field <> "Currency")
+
+        let rendered = renderEditor harness supplierIdString noCurrency
+
+        Assert.False((findRunTestButton rendered).HasAttribute "disabled")
+        Assert.DoesNotContain("Add a rule for:", rendered.Markup)
+    )
+
+[<Fact; Trait("Level", "E2E")>]
+let ``the sample attachment field renders as a file picker, not a text box`` () =
+    withTemplatesHarness (fun harness supplierIdString ->
+        let rendered = renderEditor harness supplierIdString validRules
+
+        Assert.Contains("Choose attachment file", rendered.Markup)
+        Assert.NotNull(rendered.FindComponent<InputFile>())
     )

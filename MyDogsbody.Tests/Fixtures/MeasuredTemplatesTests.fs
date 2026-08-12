@@ -28,7 +28,7 @@ let ``invoice-management platform: every field extracts, and the due date is der
     | Ok invoice ->
         Assert.Equal("SYN-1001", invoice.Reference)
         Assert.Equal(245.00m, invoice.Amount)
-        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(Some "AUD", invoice.Currency)
         Assert.Equal(Some (DateTime(2026, 7, 14)), invoice.IssueDate)
         Assert.Equal(Some (DateTime(2026, 8, 13)), invoice.DueDate)
 
@@ -56,7 +56,7 @@ let ``water utility: the Due date template extracts every field for a Due date c
     | Ok invoice ->
         Assert.Equal("WU-88213", invoice.Reference)
         Assert.Equal(142.50m, invoice.Amount)
-        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(Some "AUD", invoice.Currency)
         Assert.Equal(Some (DateTime(2026, 8, 22)), invoice.DueDate)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
@@ -88,7 +88,7 @@ let ``accounting platform: every field extracts using a different rule kind per 
     | Ok invoice ->
         Assert.Equal("ACC-77410", invoice.Reference) // LinesAfterLabel
         Assert.Equal(389.20m, invoice.Amount) // RegexCapture
-        Assert.Equal("AUD", invoice.Currency) // FixedValue
+        Assert.Equal(Some "AUD", invoice.Currency) // FixedValue
         Assert.Equal(Some (DateTime(2026, 9, 11)), invoice.DueDate) // AfterLabel
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
@@ -101,7 +101,7 @@ let ``energy retailer: every field extracts, including both Date of Issue and Du
     | Ok invoice ->
         Assert.Equal("ER-50291", invoice.Reference)
         Assert.Equal(210.75m, invoice.Amount)
-        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(Some "AUD", invoice.Currency)
         Assert.Equal(Some (DateTime(2026, 7, 1)), invoice.IssueDate)
         Assert.Equal(Some (DateTime(2026, 7, 29)), invoice.DueDate)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
