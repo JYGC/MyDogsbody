@@ -24,9 +24,9 @@
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
     <Compile Include="Integrations\Pdf\PdfDocumentReaderTests.fs" />
     <Compile Include="Logging\ExceptionStoreTests.fs" />
+    <Compile Include="Database\MigrationTestHelpers.fs" />
     <Compile Include="Database\MigrationsTests.fs" />
     <Compile Include="Database\SupplierMigrationsTests.fs" />
-    <Compile Include="Database\MigrationTestHelpers.fs" />
     <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
