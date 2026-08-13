@@ -1,61 +1,13 @@
 module MyDogsbody.Tests.Database.SupplierMigrationsTests
 
 open System
-open System.IO
 open Xunit
 open Microsoft.Data.Sqlite
 open MyDogsbody.Database.Migrations
+open MyDogsbody.Tests.Database.MigrationTestHelpers
 
 // The migrations are the schema source of truth for the main database, so a test never writes
 // its own DDL - it calls setupMigrations and asserts what that produced.
-
-let private withTempDatabase (test: string -> unit) =
-    let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
-
-    try
-        test connectionString
-    finally
-        SqliteConnection.ClearAllPools()
-        try File.Delete databaseFilePath with _ -> ()
-
-let private queryScalar (connectionString: string) (sql: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- sql
-    command.ExecuteScalar()
-
-let private exec (connectionString: string) (sql: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- "PRAGMA foreign_keys = ON;" + sql
-    command.ExecuteNonQuery() |> ignore
-
-let private tableNames (connectionString: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
-    use reader = command.ExecuteReader()
-
-    [
-        while reader.Read() do
-            yield reader.GetString 0
-    ]
-
-let private columnNames (connectionString: string) (tableName: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- $"PRAGMA table_info('{tableName}')"
-    use reader = command.ExecuteReader()
-
-    [
-        while reader.Read() do
-            yield reader.GetString 1
-    ]
 
 [<Fact; Trait("Level", "Integration")>]
 let ``MigrateUp creates the Suppliers table with its expected columns`` () =

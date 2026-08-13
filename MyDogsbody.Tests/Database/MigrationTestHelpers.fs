@@ -1,7 +1,7 @@
-/// Shared connection/query helpers for migration tests run against a fresh temp SQLite file.
-/// Extracted so a new migration test file doesn't become a third copy of the same
-/// connection-open/command boilerplate that MigrationsTests.fs and SupplierMigrationsTests.fs each
-/// already carry their own copy of.
+/// Shared connection/query helpers for migration tests run against a fresh temp SQLite file. Used
+/// by all three migration test files - MigrationsTests.fs, SupplierMigrationsTests.fs and
+/// InvoiceTemplateMigrationsTests.fs - which each used to carry their own independent copy of this
+/// boilerplate.
 module MyDogsbody.Tests.Database.MigrationTestHelpers
 
 open System
@@ -14,15 +14,23 @@ open Microsoft.Data.Sqlite
 /// helper having to remember to prepend the PRAGMA by hand. Microsoft.Data.Sqlite pools
 /// connections, so a pooled handle can keep the file locked on Windows - the pool is cleared
 /// before the delete.
-let withTempDatabase (test: string -> unit) =
+///
+/// Hands back the file path as well as the connection string - DatabaseContextSetup.createDatabaseContext
+/// takes a path, not a connection string, so the one caller that exercises it needs both.
+/// `withTempDatabase` below is the same setup/teardown for the (more common) callers that only
+/// need the connection string.
+let withTempDatabaseAndPath (test: string -> string -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let connectionString = $"Data Source={databaseFilePath};Foreign Keys=True"
 
     try
-        test connectionString
+        test databaseFilePath connectionString
     finally
         SqliteConnection.ClearAllPools()
         try File.Delete databaseFilePath with _ -> ()
+
+let withTempDatabase (test: string -> unit) =
+    withTempDatabaseAndPath (fun _ connectionString -> test connectionString)
 
 let queryScalar (connectionString: string) (sql: string) =
     use connection = new SqliteConnection(connectionString)

@@ -1,62 +1,19 @@
 module MyDogsbody.Tests.Database.MigrationsTests
 
 open System
-open System.IO
 open Xunit
 open Microsoft.Data.Sqlite
 open MyDogsbody.Database
 open MyDogsbody.Database.Migrations
+open MyDogsbody.Tests.Database.MigrationTestHelpers
 
 // The migrations are the schema source of truth for the main database, so a test never writes
 // its own DDL - it calls setupMigrations and asserts what that produced. Nothing else verifies a
 // migration before it runs against real data.
 
-/// Fresh temp database per test. Microsoft.Data.Sqlite pools connections, so a pooled handle can
-/// keep the file locked on Windows - the pool is cleared before the delete.
-let private withTempDatabase (test: string -> string -> unit) =
-    let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
-
-    try
-        test databaseFilePath connectionString
-    finally
-        SqliteConnection.ClearAllPools()
-        try File.Delete databaseFilePath with _ -> ()
-
-let private queryScalar (connectionString: string) (sql: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- sql
-    command.ExecuteScalar()
-
-let private tableNames (connectionString: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
-    use reader = command.ExecuteReader()
-
-    [
-        while reader.Read() do
-            yield reader.GetString 0
-    ]
-
-let private columnNames (connectionString: string) (tableName: string) =
-    use connection = new SqliteConnection(connectionString)
-    connection.Open()
-    use command = connection.CreateCommand()
-    command.CommandText <- $"PRAGMA table_info('{tableName}')"
-    use reader = command.ExecuteReader()
-
-    [
-        while reader.Read() do
-            yield reader.GetString 1
-    ]
-
 [<Fact; Trait("Level", "Integration")>]
 let ``MigrateUp on an empty file creates the Blogs table with its expected columns`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Act
         MigrationSetup.setupMigrations connectionString
 
@@ -71,7 +28,7 @@ let ``MigrateUp on an empty file creates the Blogs table with its expected colum
 
 [<Fact; Trait("Level", "Integration")>]
 let ``MigrateUp on an empty file creates the Comments table with its expected columns`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Act
         MigrationSetup.setupMigrations connectionString
 
@@ -86,7 +43,7 @@ let ``MigrateUp on an empty file creates the Comments table with its expected co
 
 [<Fact; Trait("Level", "Integration")>]
 let ``MigrateUp records the applied migrations in the version table`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Act
         MigrationSetup.setupMigrations connectionString
 
@@ -102,7 +59,7 @@ let ``MigrateUp records the applied migrations in the version table`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``MigrateUp is idempotent when run twice against the same database`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Act
         MigrationSetup.setupMigrations connectionString
         MigrationSetup.setupMigrations connectionString
@@ -114,7 +71,7 @@ let ``MigrateUp is idempotent when run twice against the same database`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``the migrated schema accepts a row in each table`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Arrange
         MigrationSetup.setupMigrations connectionString
 
@@ -137,7 +94,7 @@ let ``the migrated schema accepts a row in each table`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``Down reverses the migrations, leaving no domain tables behind`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Arrange
         MigrationSetup.setupMigrations connectionString
         Assert.Contains("Blogs", tableNames connectionString)
@@ -155,7 +112,7 @@ let ``Down reverses the migrations, leaving no domain tables behind`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``MigrateUp after a full rollback rebuilds the schema`` () =
-    withTempDatabase (fun _ connectionString ->
+    withTempDatabase (fun connectionString ->
         // Arrange - proves Down() left nothing behind that would block a re-apply
         MigrationSetup.setupMigrations connectionString
         MigrationSetup.rollbackAll connectionString
@@ -174,7 +131,7 @@ let ``MigrateUp after a full rollback rebuilds the schema`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``createDatabaseContext opens a connection against a migrated database`` () =
-    withTempDatabase (fun databaseFilePath connectionString ->
+    withTempDatabaseAndPath (fun databaseFilePath connectionString ->
         // Arrange
         MigrationSetup.setupMigrations connectionString
 
