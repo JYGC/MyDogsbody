@@ -115,3 +115,49 @@ let ``editTemplate propagates a validation refusal with its payload, and never r
     | other -> Assert.Fail($"Expected Error(TemplateNameInvalid _), but got {other}")
 
     Assert.Empty received
+
+/// A stored template holding a specific Position - what the two tests below turn on.
+let private storedTemplateAt id supplierId position : StoredTemplate =
+    { Id = TemplateId.create id |> valueOrFail
+      Template =
+        ValidateTemplateWorkflow.validateTemplate { unvalidatedTemplate supplierId validRules with Position = position }
+        |> function
+            | Ok validated -> validated
+            | Error error -> failwith $"Test setup produced an invalid template: {error}" }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``editTemplate keeps the stored position rather than the one the caller submitted`` () =
+    // Position is not the caller's to set: addTemplate computes it and reorderTemplates is the only
+    // workflow that changes it. UnvalidatedTemplate is the untrusted type, so an edit trusting
+    // input.Position would let any int through - here 999, which no sibling holds and no reorder
+    // authorised.
+    let existing = storedTemplateAt "10" "1" 2
+    let update, received = recordingUpdate [ existing ] ()
+    let edited = { unvalidatedTemplate "1" validRules with Position = 999 }
+
+    let actual = EditTemplateWorkflow.editTemplate (loadTemplates [ existing ]) update "10" edited
+
+    match actual with
+    | Ok stored -> Assert.Equal(2, ValidTemplate.position stored.Template)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+    let (_, savedTemplate) = Assert.Single received
+    Assert.Equal(2, ValidTemplate.position savedTemplate)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``editTemplate keeps the edited template's own position, not a sibling's`` () =
+    // Two templates, and the one being edited is not the first in the loaded list - so a lookup
+    // that grabbed the wrong row, or the head of the list, would show up here.
+    let first = storedTemplateAt "10" "1" 0
+    let second = storedTemplateAt "11" "1" 1
+    let update, received = recordingUpdate [ first; second ] ()
+    let edited = { unvalidatedTemplate "1" validRules with Position = -7 }
+
+    let actual = EditTemplateWorkflow.editTemplate (loadTemplates [ first; second ]) update "11" edited
+
+    match actual with
+    | Ok stored -> Assert.Equal(1, ValidTemplate.position stored.Template)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+    let (_, savedTemplate) = Assert.Single received
+    Assert.Equal(1, ValidTemplate.position savedTemplate)
