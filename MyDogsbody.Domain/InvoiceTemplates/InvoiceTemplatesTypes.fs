@@ -124,6 +124,10 @@ type StoredTemplate =
 ///    reuses TemplateNotFound (an exact semantic fit); an existing template left out of the
 ///    submitted order has no existing case to reuse, so this one carries every id left out, not
 ///    only the first, the same way MultipleSuppliersMatched carries every match rather than one.
+///  - ReorderDuplicate: an order naming the same template twice is neither foreign (the id IS the
+///    supplier's) nor incomplete (Set.ofList collapses the repeat, so nothing looks missing), so
+///    neither existing case describes it. Carries the repeated id, the same way TemplateNotFound
+///    carries the offending one.
 type TemplateError =
     | TemplateNameInvalid of reason: string
     | TemplateIdInvalid of reason: string
@@ -138,6 +142,7 @@ type TemplateError =
     | DerivationSourceNotADate of source: TargetField
     | DerivationSourceIsSelf of field: TargetField
     | ReorderIncomplete of missing: TemplateId list
+    | ReorderDuplicate of duplicate: TemplateId
     | TemplateNotFound of TemplateId
     | TemplateSupplierNotFound of SupplierId
     | TemplateStoreFailed of message: string

@@ -1,10 +1,24 @@
 module MyDogsbody.Tests.Domain.InvoiceTemplates.ValidateTemplateWorkflowTests
 
 open System
+open System.Globalization
 open System.Text.RegularExpressions
 open Xunit
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
+
+/// Runs body with the ambient culture pinned, restoring it afterwards. Both of the culture rules
+/// this file pins are invisible from the default culture: Regex captures its case-folding table at
+/// construction time, and DateTime formatting resolves the calendar against CurrentCulture - so a
+/// regression in either shows up only from inside one of these.
+let private withCulture (name: string) (body: unit -> unit) =
+    let original = CultureInfo.CurrentCulture
+
+    try
+        CultureInfo.CurrentCulture <- CultureInfo name
+        body ()
+    finally
+        CultureInfo.CurrentCulture <- original
 
 // compilePattern: NonBacktracking first, backtracking-with-timeout as fallback. Both branches
 // carry a 250ms match timeout - the timeout is the availability guarantee, NonBacktracking is
@@ -297,3 +311,149 @@ let ``validateTemplate refuses a DateFromField naming its own field as the sourc
     match actual with
     | Error (DerivationSourceIsSelf field) -> Assert.Equal<TargetField>(DueDate, field)
     | other -> Assert.Fail($"Expected Error(DerivationSourceIsSelf _), but got {other}")
+
+// A null pattern is reachable: UnvalidatedTemplate is the untrusted type and TemplateName.create
+// already guards isNull on the field beside it. Regex(null, ...) throws ArgumentNullException,
+// which neither `with` clause in compilePattern names, so it would leave the domain as an
+// exception rather than as a Result.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``compilePattern refuses a null pattern with a reason rather than throwing`` () =
+    let actual = ValidateTemplateWorkflow.compilePattern null
+
+    match actual with
+    | Error reason -> Assert.Equal("Pattern must not be empty.", reason)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses a null pattern with PatternInvalid naming the field, rather than throwing`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ { Field = Reference; Rule = RegexCapture null; Hint = AsText }
+                  validAmountRule
+                  validCurrencyRule ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (PatternInvalid (field, reason)) ->
+        Assert.Equal<TargetField>(Reference, field)
+        Assert.Equal("Pattern must not be empty.", reason)
+    | other -> Assert.Fail($"Expected Error(PatternInvalid _), but got {other}")
+
+// RegexOptions.IgnoreCase alone folds case against CultureInfo.CurrentCulture, captured when the
+// Regex is constructed. Under tr-TR / az-AZ the dotless i makes 'I' fold to 'ı' rather than 'i',
+// so a stored template that matches on one machine silently matches nothing on another - no
+// error, no refusal. CultureInvariant pins the folding table; these two tests are the only thing
+// in the suite that would catch its removal.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``compilePattern folds case invariantly, so a pattern still matches under a culture with different case rules`` () =
+    withCulture "tr-TR" (fun () ->
+        match ValidateTemplateWorkflow.compilePattern @"INVOICE (\S+)" with
+        | Ok regex ->
+            Assert.True(regex.Options.HasFlag RegexOptions.CultureInvariant)
+            Assert.True(regex.IsMatch "invoice INV-42", "Turkish-I case folding broke a case-insensitive match")
+        | Error reason -> Assert.Fail($"Expected Ok, but got Error: {reason}"))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``compilePattern's backtracking fallback folds case invariantly too`` () =
+    withCulture "tr-TR" (fun () ->
+        // A lookahead forces the fallback engine - the fix has to reach both constructions.
+        match ValidateTemplateWorkflow.compilePattern @"INVOICE (?=INV)(\S+)" with
+        | Ok regex ->
+            Assert.False(regex.Options.HasFlag RegexOptions.NonBacktracking)
+            Assert.True(regex.Options.HasFlag RegexOptions.CultureInvariant)
+            Assert.True(regex.IsMatch "invoice INV-42", "Turkish-I case folding broke the fallback engine's match")
+        | Error reason -> Assert.Fail($"Expected Ok, but got Error: {reason}"))
+
+// A date format is validated with the operation it will be used for - parsing - not merely with
+// formatting. DateTime.ToString rejects only a lone unknown standard specifier or an unterminated
+// quote; every other unrecognised character is emitted as a literal, so a format-only check
+// accepts "yyyy-MM-DD" and "dd/mm/yyyy" (mm is minutes) and each then silently matches nothing at
+// scan time - the failure mode tasks.md calls the most dangerous one.
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("yyyy-MM-DD")>] // DD is a literal, so the day never parses back
+[<InlineData("YYYY-MM-DD")>] // YYYY is a literal too
+[<InlineData("dd/mm/yyyy")>] // mm is MINUTES - the most realistic typo of the set
+[<InlineData("qq")>] // no specifier at all
+[<InlineData("HH:mm")>] // formats and parses, but carries no date
+[<InlineData("")>] // renders under the general format, cannot be parsed back
+let ``validateTemplate refuses a date format that cannot read back the date it writes`` (format: string) =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate format } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (DateFormatInvalid (field, reason)) ->
+        Assert.Equal<TargetField>(IssueDate, field)
+        Assert.Contains(format, reason)
+    | other -> Assert.Fail($"Expected Error(DateFormatInvalid _) for '{format}', but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses a null date format with DateFormatInvalid naming the field`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate null } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (DateFormatInvalid (field, reason)) ->
+        Assert.Equal<TargetField>(IssueDate, field)
+        Assert.False(String.IsNullOrWhiteSpace reason)
+    | other -> Assert.Fail($"Expected Error(DateFormatInvalid _), but got {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("yyyy-MM-dd")>]
+[<InlineData("dd/MM/yyyy")>]
+[<InlineData("d MMM yyyy")>]
+[<InlineData("dddd, d MMMM yyyy")>]
+[<InlineData("yyyyMMdd")>]
+[<InlineData("dd-MM-yy")>]
+[<InlineData("yyyy-MM-dd HH:mm")>]
+[<InlineData("d")>] // a standard specifier, not a custom one
+let ``validateTemplate accepts a date format that round-trips a whole calendar date`` (format: string) =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate format } ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Ok _ -> ()
+    | Error error -> Assert.Fail($"Expected Ok for '{format}', but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate judges a date format identically under any ambient culture`` () =
+    // The probe renders as 2569-03-04 under th-TH and 1447-09-15 under ar-SA if the calendar is
+    // taken from CurrentCulture, so a template's acceptance would depend on the machine that saved
+    // it. Pinning InvariantCulture at both ends of the check is what this asserts - and the fixed
+    // probe date it needs is also why the domain no longer reads DateTime.Now here.
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate "yyyy-MM-dd" } ] }
+
+    for culture in [ "en-AU"; "th-TH"; "ar-SA"; "tr-TR" ] do
+        withCulture culture (fun () ->
+            match ValidateTemplateWorkflow.validateTemplate input with
+            | Ok _ -> ()
+            | Error error -> Assert.Fail($"Expected Ok under {culture}, but got Error: {error}"))

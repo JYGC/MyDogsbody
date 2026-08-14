@@ -75,3 +75,41 @@ let ``reorderTemplates refuses an order that omits one of the supplier's existin
     | other -> Assert.Fail($"Expected Error(ReorderIncomplete _), but got {other}")
 
     Assert.Empty received
+
+[<Fact; Trait("Level", "Unit")>]
+let ``reorderTemplates refuses an order naming the same template twice, and never reaches the store`` () =
+    // Neither of the other two checks can see a duplicate: Set.ofList collapses it, so the
+    // omission check's difference stays empty, and the duplicate is one of the supplier's own
+    // templates so it is not foreign either. Left unchecked, [1;1;2;3] writes four positions for
+    // three templates - template 1 at 0 and again at 1, 2 and 3 at 2 and 3 - leaving nothing at
+    // position 0 and silently reshuffling which template an invoice is matched against first.
+    let reorder, received = recordingReorder ()
+
+    let actual = ReorderTemplatesWorkflow.reorderTemplates loadTemplates reorder "1" [ "1"; "1"; "2"; "3" ]
+
+    match actual with
+    | Error (ReorderDuplicate templateId) -> Assert.Equal("1", TemplateId.value templateId)
+    | other -> Assert.Fail($"Expected Error(ReorderDuplicate _), but got {other}")
+
+    Assert.Empty received
+
+[<Fact; Trait("Level", "Unit")>]
+let ``reorderTemplates refuses a duplicate before it loads the supplier's templates`` () =
+    // A duplicate is a property of the submitted list alone, so it is decided ahead of the two
+    // checks that need the store - the load never happens.
+    let reorder, received = recordingReorder ()
+    let loadCalls = ResizeArray<SupplierId>()
+
+    let recordingLoad: LoadTemplatesForSupplier =
+        fun supplierId ->
+            loadCalls.Add supplierId
+            Ok existingTemplates
+
+    let actual = ReorderTemplatesWorkflow.reorderTemplates recordingLoad reorder "1" [ "2"; "2" ]
+
+    match actual with
+    | Error (ReorderDuplicate templateId) -> Assert.Equal("2", TemplateId.value templateId)
+    | other -> Assert.Fail($"Expected Error(ReorderDuplicate _), but got {other}")
+
+    Assert.Empty loadCalls
+    Assert.Empty received

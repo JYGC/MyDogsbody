@@ -27,23 +27,22 @@ let private foldSpecialSpaces (text: string) : string =
 /// Runs of plain spaces and tabs collapsed to one space. Only recognises ' ' and '\t' - it must
 /// run after NFKC, which is what turns a non-breaking space into a plain space (and therefore
 /// into something collapseRuns can see) in the first place.
+///
+/// A fold carrying "was the previous character a space?" alongside the accumulated characters,
+/// rather than a StringBuilder and a mutable flag: the domain centre takes no `mutable` and no
+/// statement loops. Accumulating characters in reverse and reversing once keeps it O(n) - the
+/// reason not to fold with string concatenation, which would be O(n²) over every line of every
+/// scanned document - and is the same shape normalize itself uses below.
 let private collapseRuns (text: string) : string =
-    let result = StringBuilder(text.Length)
-    let mutable previousWasSpace = false
+    let collapsed, _ =
+        (([], false), text)
+        ||> Seq.fold (fun (accumulated, previousWasSpace) c ->
+            if c = ' ' || c = '\t' then
+                (if previousWasSpace then accumulated else ' ' :: accumulated), true
+            else
+                c :: accumulated, false)
 
-    for c in text do
-        let isSpaceOrTab = c = ' ' || c = '\t'
-
-        if isSpaceOrTab then
-            if not previousWasSpace then
-                result.Append(' ') |> ignore
-
-            previousWasSpace <- true
-        else
-            result.Append(c) |> ignore
-            previousWasSpace <- false
-
-    result.ToString()
+    String(collapsed |> List.rev |> List.toArray)
 
 let private sentenceTerminators = set [ '.'; '!'; '?'; ':' ]
 
@@ -56,11 +55,28 @@ let private isContinuation (previous: string) (current: string) : bool =
     && not (String.IsNullOrEmpty previous)
     && not (sentenceTerminators.Contains previous.[previous.Length - 1])
 
+/// NFKC is the one step here that is not total. String.Normalize raises ArgumentException for any
+/// string carrying an unpaired surrogate, and the input is text extracted from PDFs and email
+/// bodies - the least trustworthy source in the system, where a truncated or mis-decoded
+/// extraction is exactly how a lone surrogate arrives. IsNormalized raises on the same input, so
+/// checking first would not avoid the try.
+///
+/// normalize promises TextLine list -> TextLine list with no failure channel, and an exception
+/// escaping here would unwind out of the domain, past a composition root that maps values rather
+/// than catching, into a UI with no alert for it - which CLAUDE.md rules out in either ring. So a
+/// line that cannot be normalized degrades to its un-normalized self: one malformed glyph costs
+/// that line its NFKC folding rather than taking down the whole scan. The remaining steps are
+/// per-character and total, so they still apply to it.
 let private normalizeText (text: string) : string =
-    text.Normalize(NormalizationForm.FormKC)
-    |> foldSpecialSpaces
-    |> collapseRuns
-    |> fun s -> s.Trim()
+    let safe = if isNull text then "" else text
+
+    let composed =
+        try
+            safe.Normalize(NormalizationForm.FormKC)
+        with :? ArgumentException ->
+            safe
+
+    composed |> foldSpecialSpaces |> collapseRuns |> fun s -> s.Trim()
 
 /// Finding 4's contract, in one place, applied identically at authoring time and at scan time.
 /// Public so the test panel can display exactly what the rules will see - Q7.6.6.
