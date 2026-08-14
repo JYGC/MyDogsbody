@@ -64,21 +64,24 @@ let ``addTemplate saves a valid template and returns every stored field`` () =
 
     Assert.Single received |> ignore
 
+/// A stored template holding a specific Position - the fixture the positioning tests turn on, so
+/// it is set explicitly rather than inherited from unvalidatedTemplate's deliberately-wrong 999.
+let private storedTemplateAt id position : StoredTemplate =
+    { Id = TemplateId.create id |> valueOrFail
+      Template =
+        ValidateTemplateWorkflow.validateTemplate { unvalidatedTemplate "1" with Position = position }
+        |> function
+            | Ok validated -> validated
+            | Error error -> failwith $"Test setup produced an invalid template: {error}" }
+
 [<Fact; Trait("Level", "Unit")>]
 let ``addTemplate positions a new template last in the supplier's existing order`` () =
     let save, received = recordingSave ()
-    let existingSupplier = storedSupplier "1"
-    let existingOne: StoredTemplate =
-        { Id = TemplateId.create "10" |> valueOrFail
-          Template =
-            ValidateTemplateWorkflow.validateTemplate (unvalidatedTemplate "1")
-            |> function Ok t -> t | Error e -> failwith $"{e}" }
-    let existingTwo = { existingOne with Id = TemplateId.create "11" |> valueOrFail }
 
     let actual =
         AddTemplateWorkflow.addTemplate
-            (loadSuppliers [ existingSupplier ])
-            (loadTemplates [ existingOne; existingTwo ])
+            (loadSuppliers [ storedSupplier "1" ])
+            (loadTemplates [ storedTemplateAt "10" 0; storedTemplateAt "11" 1 ])
             save
             (unvalidatedTemplate "1")
 
@@ -88,6 +91,43 @@ let ``addTemplate positions a new template last in the supplier's existing order
 
     let saved = Assert.Single received
     Assert.Equal(2, ValidTemplate.position saved)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``addTemplate positions a new template past the highest position in use, not past the count`` () =
+    // Nothing renumbers the survivors after a delete, so gaps are the normal state: deleting the
+    // first of three leaves positions 1 and 2. A count-derived position would hand the new
+    // template position 2, which template "12" already holds - and since ListTemplatesWorkflow's
+    // sort is stable, the tie would be broken by whatever order the store happened to return,
+    // making both the displayed order and the matching precedence nondeterministic.
+    let save, received = recordingSave ()
+
+    let actual =
+        AddTemplateWorkflow.addTemplate
+            (loadSuppliers [ storedSupplier "1" ])
+            (loadTemplates [ storedTemplateAt "11" 1; storedTemplateAt "12" 2 ])
+            save
+            (unvalidatedTemplate "1")
+
+    match actual with
+    | Ok _ -> ()
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+    let saved = Assert.Single received
+    Assert.Equal(3, ValidTemplate.position saved)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``addTemplate positions the first template of a supplier at zero`` () =
+    let save, received = recordingSave ()
+
+    let actual =
+        AddTemplateWorkflow.addTemplate (loadSuppliers [ storedSupplier "1" ]) (loadTemplates []) save (unvalidatedTemplate "1")
+
+    match actual with
+    | Ok _ -> ()
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+    let saved = Assert.Single received
+    Assert.Equal(0, ValidTemplate.position saved)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``addTemplate refuses a supplier id that names no stored supplier, and never reaches the store`` () =

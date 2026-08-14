@@ -1,5 +1,6 @@
 module MyDogsbody.Tests.Domain.InvoiceTemplates.TextNormalizationTests
 
+open System
 open Xunit
 open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.InvoiceTemplates
@@ -108,3 +109,40 @@ let ``measured failure mode 3: a label separated from its value by blank lines i
     let actual = TextNormalization.normalize [ line 0 "Due Date:"; line 0 ""; line 0 "14 Jul 2026" ]
 
     Assert.Equal<TextLine list>([ line 0 "Due Date:"; line 0 "14 Jul 2026" ], actual)
+
+// normalize's signature promises TextLine list -> TextLine list with no failure channel, but its
+// input is text extracted from PDFs and email bodies - the least trustworthy source in the system.
+// String.Normalize raises ArgumentException for any string carrying an unpaired surrogate, which
+// is exactly what a truncated or mis-decoded extraction produces, and IsNormalized raises on the
+// same input so a check-first guard would not help. An exception escaping here would unwind out of
+// the domain, past a composition root that maps values rather than catching, and into a UI with no
+// alert for it.
+
+/// A line ending in an unpaired high surrogate, built from chars so no literal-encoding step can
+/// quietly repair it.
+let private loneSurrogateText = String([| 'T'; 'o'; 't'; 'a'; 'l'; ':'; ' '; '4'; '1'; '2'; char 0xD83D |])
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalize returns a line carrying an unpaired surrogate rather than throwing`` () =
+    let actual = TextNormalization.normalize [ line 0 loneSurrogateText ]
+
+    // Degraded to the un-normalized line: NFKC is skipped for this one line, every other step
+    // still applies. One malformed glyph costs that line its folding, not the whole scan.
+    Assert.Equal<TextLine list>([ line 0 loneSurrogateText ], actual)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalize still normalizes the surrounding lines when one carries an unpaired surrogate`` () =
+    let actual =
+        TextNormalization.normalize [ line 0 "Invoice:   INV-42"; line 1 loneSurrogateText; line 2 "Due:   1 Jan" ]
+
+    Assert.Equal<TextLine list>(
+        [ line 0 "Invoice: INV-42"; line 1 loneSurrogateText; line 2 "Due: 1 Jan" ],
+        actual
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalize drops a line whose text is null rather than throwing`` () =
+    let actual = TextNormalization.normalize [ line 0 "Invoice: INV-42"; line 1 null ]
+
+    // A null becomes an empty line, and empty lines are dropped by the last step like any other.
+    Assert.Equal<TextLine list>([ line 0 "Invoice: INV-42" ], actual)

@@ -1,6 +1,7 @@
 module MyDogsbody.Domain.InvoiceTemplates.ValidateTemplateWorkflow
 
 open System
+open System.Globalization
 open System.Text.RegularExpressions
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
@@ -14,23 +15,36 @@ open MyDogsbody.Domain.Suppliers
 /// NonBacktracking rejecting a construct throws NotSupportedException, not ArgumentException -
 /// verified empirically, since a plausible-looking version of this function that caught
 /// ArgumentException instead would let that exception escape uncaught. A malformed pattern throws
-/// RegexParseException (itself an ArgumentException) on either engine.
+/// RegexParseException (itself an ArgumentException) on either engine. A NULL pattern throws
+/// ArgumentNullException, which neither of those clauses names - and UnvalidatedTemplate is the
+/// untrusted type, so it is guarded ahead of them rather than left to escape as an exception
+/// thrown out of a domain workflow.
 ///
 /// Whether the result used the fallback is readable off its own Options - HasFlag
 /// RegexOptions.NonBacktracking - so no separate flag needs to be threaded through this result.
 let compilePattern (pattern: string) : Result<Regex, string> =
-    let timeout = TimeSpan.FromMilliseconds 250.0
+    if isNull pattern then
+        Error "Pattern must not be empty."
+    else
+        let timeout = TimeSpan.FromMilliseconds 250.0
 
-    try
-        Ok (Regex(pattern, RegexOptions.NonBacktracking ||| RegexOptions.IgnoreCase, timeout))
-    with
-    | :? NotSupportedException ->
+        // CultureInvariant pins the case-folding table IgnoreCase uses. Without it .NET folds case
+        // against CultureInfo.CurrentCulture, captured when the Regex is constructed - and under
+        // tr-TR / az-AZ the dotless i makes 'I' fold to 'ı' rather than 'i', so a stored pattern
+        // that matches on one machine silently matches nothing on another. Bound once so both the
+        // NonBacktracking construction and the fallback are guaranteed to agree.
+        let caseFolding = RegexOptions.IgnoreCase ||| RegexOptions.CultureInvariant
+
         try
-            Ok (Regex(pattern, RegexOptions.IgnoreCase, timeout))
-        with :? RegexParseException as ex ->
+            Ok (Regex(pattern, RegexOptions.NonBacktracking ||| caseFolding, timeout))
+        with
+        | :? NotSupportedException ->
+            try
+                Ok (Regex(pattern, caseFolding, timeout))
+            with :? RegexParseException as ex ->
+                Error ex.Message
+        | :? RegexParseException as ex ->
             Error ex.Message
-    | :? RegexParseException as ex ->
-        Error ex.Message
 
 let private hasCaptureGroup (regex: Regex) : bool =
     regex.GetGroupNumbers() |> Array.exists (fun number -> number > 0)
@@ -42,6 +56,45 @@ let private MinimumOffset = 0
 let private MaximumOffset = 20
 
 let private requiredFields = [ Reference; Amount; Currency ]
+
+/// The fixed date every AsDate format is probed with - a constant, not DateTime.Now, because the
+/// domain centre reads no clock and because a validation result that depended on today's date
+/// would be untestable. Chosen so day (4), month (3), hour (13) and minute (45) are all distinct
+/// from each other and from the 1/1/0001 defaults a parser substitutes for a component the format
+/// never supplies.
+let private dateFormatProbe = DateTime(2026, 3, 4, 13, 45, 56)
+
+/// An AsDate format is validated with the operation it will actually be used for - parsing - not
+/// merely with formatting.
+///
+/// DateTime.ToString rejects only two things: a lone unknown standard specifier, and an
+/// unterminated quote. Every other unrecognised character is emitted as a literal, so a
+/// format-only check accepts "yyyy-MM-DD" (DD is literal text), "YYYY-MM-DD", "qq" and
+/// "dd/mm/yyyy" (mm is MINUTES) - each of which then silently matches nothing at scan time rather
+/// than reporting anything, the failure mode tasks.md calls the most dangerous one.
+///
+/// Round-tripping the probe and requiring the whole calendar date back rejects all of those: a
+/// format that cannot read back the day, month and year it just wrote cannot read a date off an
+/// invoice either. Requiring the full date (rather than merely that parsing succeeds) is what
+/// catches the literal-text cases - "yyyy-MM-DD" parses its own output happily, but comes back
+/// with the day defaulted.
+///
+/// InvariantCulture at both ends, deliberately - ParseHint's own comment states the rule. Under
+/// ambient culture the probe renders as 2569-03-04 in th-TH and 1447-09-15 in ar-SA, so whether a
+/// template could be saved would otherwise depend on the machine that saved it.
+let private validateDateFormat (field: TargetField) (format: string) : Result<unit, TemplateError> =
+    let rendered =
+        try
+            Some (dateFormatProbe.ToString(format, CultureInfo.InvariantCulture))
+        with :? FormatException ->
+            None
+
+    match rendered with
+    | None -> Error (DateFormatInvalid(field, $"'{format}' is not a usable date format."))
+    | Some text ->
+        match DateTime.TryParseExact(text, format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
+        | true, parsed when parsed.Date = dateFormatProbe.Date -> Ok ()
+        | _ -> Error (DateFormatInvalid(field, $"'{format}' cannot read back the date it writes ('{text}')."))
 
 let private ensureRequiredFieldsHaveRules (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
     let covered = rules |> List.map (fun rule -> rule.Field) |> Set.ofList
@@ -104,12 +157,7 @@ let private validateRule
     result {
         do!
             match rule.Hint with
-            | AsDate format ->
-                try
-                    DateTime.Now.ToString(format: string) |> ignore
-                    Ok ()
-                with :? FormatException as ex ->
-                    Error (DateFormatInvalid(rule.Field, ex.Message))
+            | AsDate format -> validateDateFormat rule.Field format
             | AsText | AsMoney _ -> Ok ()
 
         match rule.Rule with
