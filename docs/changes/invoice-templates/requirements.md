@@ -52,7 +52,8 @@ WHEN a letter-spaced heading such as `TA X INVOICE` is present THE SYSTEM SHALL 
 
 WHEN a template field rule is defined THE SYSTEM SHALL offer exactly these seven kinds: `AfterLabel`, `LinesAfterLabel`, `RegexCapture`, `FixedValue`, `SubjectCapture`, `AttachmentName`, `DateFromField` (Q7.6.1).
 WHEN `AfterLabel` is applied THE SYSTEM SHALL return the remainder of the first normalized line containing the label, after the label.
-WHEN `LinesAfterLabel` is applied THE SYSTEM SHALL return the content line the given offset below the first normalized line containing the label.
+WHEN `LinesAfterLabel` is applied THE SYSTEM SHALL find the label in the normalized text — joined lines included, so a hard-wrapped label is still found — and SHALL count the offset over the lines **as the document laid them out**, starting from the laid-out line the label ends on.
+WHEN a value on its own line would be joined to its label as a wrapped continuation THE SYSTEM SHALL still return that value at offset 1, because whether a template works must not depend on the case of the first character of a value its author does not control.
 WHEN `RegexCapture` is applied THE SYSTEM SHALL return the first capture group of the first match.
 WHEN `FixedValue` is applied THE SYSTEM SHALL return that value without consulting the text at all.
 WHEN `SubjectCapture` is applied THE SYSTEM SHALL run its pattern against the message subject, not the document body.
@@ -207,6 +208,9 @@ WHEN this change is complete THE SYSTEM SHALL build the whole solution with zero
 WHEN a label appears more than once in a document THE SYSTEM SHALL use the first occurrence, and the test panel SHALL show which line it took.
 WHEN `LinesAfterLabel` is given an offset that runs past the end of the block THE SYSTEM SHALL report that the rule found nothing, not an index error.
 WHEN a `LinesAfterLabel` offset is negative or greater than 20 THE SYSTEM SHALL refuse the save.
+WHEN an `AfterLabel` or `LinesAfterLabel` label is empty, whitespace-only or absent THE SYSTEM SHALL refuse the save, because such a label matches the first line of every document and stores the whole of it.
+WHEN a template scoped to the message body carries an `AttachmentName` rule THE SYSTEM SHALL refuse the save, because that rule reads a list of filenames the selector leaves empty and the field would be silently absent on every message.
+WHEN a derived due date would fall outside the range of representable dates THE SYSTEM SHALL report that, naming the template, the issue date and the payment term — never raise out of the workflow.
 WHEN a regular expression compiles but has no capture group THE SYSTEM SHALL refuse the save, because `RegexCapture` returns the first capture group.
 WHEN an amount is written with a leading currency symbol, a thousands separator, or a trailing `CR`/`DR` THE SYSTEM SHALL parse the number and ignore the decoration.
 WHEN an amount is negative or zero THE SYSTEM SHALL extract it as found — deciding whether a credit note is an invoice is not this change's job.

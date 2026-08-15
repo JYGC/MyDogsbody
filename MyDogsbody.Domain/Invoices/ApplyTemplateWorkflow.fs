@@ -17,8 +17,13 @@ open MyDogsbody.Domain.InvoiceTemplates
 /// List.collect over every selected part, so a label on the last line of cover-note.pdf with an
 /// offset of 1 returned the first line of the NEXT attachment - a different document whose
 /// BlockIndex numbering is unrelated.
+///
+/// GroupedByPart carries the same text with its provenance - which laid-out lines each joined line
+/// was built from - because LinesAfterLabel counts laid-out lines while every other rule reads
+/// joined ones. See TextNormalization.NormalizedLine for why the two differ.
 type private SelectedContent =
     { LinesByPart: TextLine list list
+      GroupedByPart: TextNormalization.NormalizedLine list list
       AttachmentNames: string list
       Subject: string }
 
@@ -36,14 +41,17 @@ let private partMatchesSelector (selector: DocumentPart) (part: MessagePart) : b
 let private selectContent (part: DocumentPart) (message: NormalizedMessage) : SelectedContent =
     let selectedParts =
         NormalizedMessage.parts message
-        |> List.filter (fun (messagePart, _) -> partMatchesSelector part messagePart)
+        |> List.filter (fun selected -> partMatchesSelector part selected.Part)
 
     {
-        LinesByPart = selectedParts |> List.map snd
+        LinesByPart =
+            selectedParts
+            |> List.map (fun selected -> selected.Lines |> List.map (fun grouped -> grouped.Line))
+        GroupedByPart = selectedParts |> List.map (fun selected -> selected.Lines)
         AttachmentNames =
             selectedParts
-            |> List.choose (fun (messagePart, _) ->
-                match messagePart with
+            |> List.choose (fun selected ->
+                match selected.Part with
                 | AttachmentPart(name, _) -> Some name
                 | BodyPart | SubjectPart -> None)
         Subject = NormalizedMessage.subject message
@@ -66,8 +74,14 @@ type private RuleOutcome =
 /// for), a successful match whose capture group did not participate, and a FixedValue of "".
 /// For Reference and Currency that empty value went straight into ExtractedInvoice - and an empty
 /// reference collides in change #4's natural key, turning every such invoice into one ledger row.
+///
+/// The TRIM lives here for the same reason the emptiness check does: it belongs to every outcome,
+/// not to whichever call site remembers it. AfterLabel used to trim its own substring, so
+/// FixedValue and a capture group were the two paths that did not - and Currency is the one field
+/// with no later parse step to trim it, so " AUD " reached ExtractedInvoice verbatim and would
+/// split change #4's natural key against a sibling template's "AUD".
 let private foundUnlessEmpty (text: string) : RuleOutcome =
-    if String.IsNullOrWhiteSpace text then NotFound else Found text
+    if String.IsNullOrWhiteSpace text then NotFound else Found (text.Trim())
 
 let private runRegexOnce (regex: Regex) (input: string) : RuleOutcome =
     // Regex.Match null throws ArgumentNullException, which the timeout clause below does not
@@ -104,8 +118,15 @@ let private runRegexAcross (regex: Regex) (candidates: string list) : RuleOutcom
         | TimedOut as outcome -> Some outcome)
     |> Option.defaultValue NotFound
 
+/// String.IndexOf(null, StringComparison) RAISES ArgumentNullException, and a label reaches here
+/// from a stored FieldRule - across the outer-ring boundary, where a NULL column is how a null
+/// string arrives. ValidateTemplateWorkflow refuses an empty or null label at save time, so the
+/// only door to a ValidTemplate cannot produce one; this guard is the same defence in depth
+/// runRegexOnce keeps behind compilePattern's own null check, for the same reason - an exception
+/// escaping here would unwind out of the domain, past a composition root that maps values rather
+/// than catching, into a UI with no alert for it.
 let private lineCarriesLabel (label: string) (line: TextLine) : bool =
-    line.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase) >= 0
+    not (isNull label) && line.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase) >= 0
 
 /// The first line carrying the label, searched part by part in order - the same line a flattened
 /// search would have found, returned together with the part it belongs to so an offset can be
@@ -116,6 +137,47 @@ let private tryFindLabelledLine (label: string) (linesByPart: TextLine list list
         partLines
         |> List.tryFindIndex (lineCarriesLabel label)
         |> Option.map (fun index -> partLines, index))
+
+/// Which of a joined line's laid-out segments a given character position falls in. Segments are
+/// joined with exactly one space, so segment k occupies [start, start + length - 1] and the next
+/// one starts a single character later. A position landing on a joining space belongs to the
+/// segment that follows it, which is the answer a label ending in a space wants.
+let rec private segmentIndexOf (position: int) (index: int) (segments: TextLine list) : int =
+    match segments with
+    | []
+    | [ _ ] -> index
+    | current :: rest ->
+        if position < current.Text.Length then
+            index
+        else
+            segmentIndexOf (position - current.Text.Length - 1) (index + 1) rest
+
+/// Where a label sits in a part's LAID-OUT lines: those lines, and the index of the one the
+/// label's match ends on.
+///
+/// Both halves are deliberate. The SEARCH runs over the joined text, so requirements.md's "WHEN a
+/// label hard-wrapped across two lines is matched THE SYSTEM SHALL find the value" still holds -
+/// "Amount" / "due:" is one joined line and the label "Amount due" is on it. The OFFSET is then
+/// counted over the laid-out lines, because the join is not a line the document has: a value on
+/// its own line looks exactly like a wrapped continuation, so counting joined lines made
+/// LinesAfterLabel("Reference", 1) return the value on "Reference" / "WU-88213" and the line after
+/// it on "Reference" / "wu-88213". The label's END, not its start, is what the offset counts from -
+/// on a hard-wrapped label the value follows the line the label finishes on.
+let private tryFindLabelInLaidOutLines
+    (label: string)
+    (groupsByPart: TextNormalization.NormalizedLine list list)
+    : (TextLine list * int) option =
+    groupsByPart
+    |> List.tryPick (fun groups ->
+        groups
+        |> List.tryFindIndex (fun grouped -> lineCarriesLabel label grouped.Line)
+        |> Option.map (fun groupIndex ->
+            let grouped = List.item groupIndex groups
+            let labelStart = grouped.Line.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase)
+            let precedingLines = groups |> List.truncate groupIndex |> List.sumBy (fun g -> List.length g.Segments)
+            let laidOutLines = groups |> List.collect (fun g -> g.Segments)
+
+            laidOutLines, precedingLines + segmentIndexOf (labelStart + label.Length - 1) 0 grouped.Segments))
 
 let private runRule
     (compiledPatterns: Map<TargetField, Regex>)
@@ -129,21 +191,23 @@ let private runRule
         | Some (partLines, index) ->
             let matchedLine = List.item index partLines
             let labelIndex = matchedLine.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase)
-            foundUnlessEmpty (matchedLine.Text.Substring(labelIndex + label.Length).Trim())
+            // No Trim here: foundUnlessEmpty trims every outcome, which is what closed the two
+            // paths this call site's own Trim never covered.
+            foundUnlessEmpty (matchedLine.Text.Substring(labelIndex + label.Length))
         | None -> NotFound
     | LinesAfterLabel(label, offset) ->
-        match tryFindLabelledLine label content.LinesByPart with
-        | Some (partLines, labelIndex) ->
+        match tryFindLabelInLaidOutLines label content.GroupedByPart with
+        | Some (laidOutLines, labelIndex) ->
             let targetIndex = labelIndex + offset
 
-            if targetIndex >= 0 && targetIndex < partLines.Length then
-                let target = List.item targetIndex partLines
+            if targetIndex >= 0 && targetIndex < laidOutLines.Length then
+                let target = List.item targetIndex laidOutLines
 
                 // requirements.md: "WHEN LinesAfterLabel is given an offset that runs past the
                 // end of the BLOCK THE SYSTEM SHALL report that the rule found nothing." A label
                 // on the last line of a table cell must not read the first line of the next one,
                 // which is the whole reason TextLine carries a BlockIndex.
-                if target.BlockIndex = (List.item labelIndex partLines).BlockIndex then
+                if target.BlockIndex = (List.item labelIndex laidOutLines).BlockIndex then
                     foundUnlessEmpty target.Text
                 else
                     NotFound
@@ -163,6 +227,10 @@ let private runRule
 let private thousandsSeparatorFor (decimalSeparator: char) : char =
     if decimalSeparator = ',' then '.' else ','
 
+/// A maximal run of number-shaped characters, and the character immediately before it - which is
+/// the only thing that tells a credit note's "-245.00" apart from the "-1042" inside "INV-1042".
+type private NumericRun = { Text: string; PrecededBy: char option }
+
 /// Every maximal run of number-shaped characters in the text, in order.
 ///
 /// Splitting into runs is what makes "Total for INV-1042: $245.00" two candidates rather than one
@@ -170,25 +238,54 @@ let private thousandsSeparatorFor (decimalSeparator: char) : char =
 /// global String.filter and parsed the concatenation, so - measured - that line booked
 /// -1042245.00, "245.00 due 14/07/2026" booked 245.0014072026, and "Ref 2 items $10.50" booked
 /// 210.50. All three silently, with no AmountUnparseable and nothing to notice them by.
-let private numericRuns (decimalSeparator: char) (raw: string) : string list =
+let private numericRuns (decimalSeparator: char) (raw: string) : NumericRun list =
     let thousandsSeparator = thousandsSeparatorFor decimalSeparator
     let isNumberShaped c = Char.IsDigit c || c = decimalSeparator || c = thousandsSeparator || c = '-'
-    let asRun (chars: char list) = String(chars |> List.rev |> List.toArray)
 
-    let completed, trailing =
-        (([], []), raw)
-        ||> Seq.fold (fun (completed, current) character ->
-            if isNumberShaped character then completed, character :: current
-            elif List.isEmpty current then completed, []
-            else asRun current :: completed, [])
+    let asRun precededBy (chars: char list) =
+        { Text = String(chars |> List.rev |> List.toArray); PrecededBy = precededBy }
 
-    (if List.isEmpty trailing then completed else asRun trailing :: completed) |> List.rev
+    let completed, trailing, precededBy, _ =
+        (([], [], None, None), raw)
+        ||> Seq.fold (fun (completed, current, precededBy, previous) character ->
+            if isNumberShaped character then
+                // The character before the run STARTED, remembered on the way past it.
+                let precededBy = if List.isEmpty current then previous else precededBy
+                completed, character :: current, precededBy, Some character
+            elif List.isEmpty current then
+                completed, [], precededBy, Some character
+            else
+                asRun precededBy current :: completed, [], None, Some character)
+
+    (if List.isEmpty trailing then completed else asRun precededBy trailing :: completed) |> List.rev
+
+/// Whether a run's leading '-' is a SIGN rather than a joiner inside something that is not a
+/// number. A sign appears at the start of the text, after whitespace, after a currency symbol or
+/// after punctuation - never immediately after a letter or a digit.
+///
+/// Without this, a hyphenated token that is the only number-shaped run in the text passed the
+/// "exactly one candidate" guard and was booked as a negative amount: measured, "INV-1042" gave
+/// -1042, "Net-30" gave -30 and "PO-77" gave -77. An Amount rule whose label also appears on a
+/// reference line - AfterLabel "Total" against "Total items INV-1042" - is all it takes, and the
+/// wrong amount arrives with nothing to notice it by. The shape alone cannot tell that from a
+/// genuine credit note; the character in front of it can.
+let private hasSignInSignPosition (run: NumericRun) : bool =
+    if run.Text.StartsWith '-' then
+        match run.PrecededBy with
+        | None -> true
+        | Some character -> not (Char.IsLetterOrDigit character)
+    else
+        true
 
 /// One number out of the text, or nothing. Currency symbols, thousands separators, a trailing
 /// CR/DR suffix and a full stop ending the sentence all fall away; a SECOND number anywhere in
 /// the text does not. Two candidates is an ambiguity this reports rather than resolves - guessing
 /// puts a wrong amount in the ledger with nothing to notice it by, which is the failure
 /// requirements.md's "never a default ... silently substituted" is written against.
+///
+/// A run whose '-' is not in a sign position is not an amount at all, and does not become one by
+/// being the only number-shaped thing on the line - so it falls through to the same refusal two
+/// candidates get rather than to a second, quieter answer.
 ///
 /// Known limitation, stated rather than hidden: a document that groups thousands with a SPACE
 /// ("1 234,56") reads as two candidates and is refused. That is a reported AmountUnparseable the
@@ -201,12 +298,12 @@ let private parseAmount (decimalSeparator: char) (raw: string) : decimal option 
         numericRuns decimalSeparator raw
         // A run can END on a separator that was really punctuation - "$245.00." - but never
         // STARTS on one that was, since ".50" is a legitimate way to write half a unit.
-        |> List.map (fun run -> run.TrimEnd(decimalSeparator, thousandsSeparator))
-        |> List.filter (Seq.exists Char.IsDigit)
+        |> List.map (fun run -> { run with Text = run.Text.TrimEnd(decimalSeparator, thousandsSeparator) })
+        |> List.filter (fun run -> run.Text |> Seq.exists Char.IsDigit)
 
     match candidates with
-    | [ single ] ->
-        let withoutGrouping = single.Replace(string thousandsSeparator, "")
+    | [ single ] when hasSignInSignPosition single ->
+        let withoutGrouping = single.Text.Replace(string thousandsSeparator, "")
 
         let normalized =
             if decimalSeparator <> '.' then withoutGrouping.Replace(decimalSeparator, '.') else withoutGrouping
@@ -352,10 +449,22 @@ let applyTemplate
             | Some rule ->
                 match rule.Rule with
                 | DateFromField _ ->
-                    // Pure arithmetic over an already-computed value - never fails, so this
-                    // branch has no Error case of its own. The source is IssueDate, because
-                    // validation admits no other.
-                    Ok (issueDate |> Option.map (fun date -> date.AddDays(float (PaymentTermDays.value paymentTerm))))
+                    // Arithmetic over an already-computed value - but NOT total: DateTime.AddDays
+                    // raises ArgumentOutOfRangeException once the result leaves DateTime's range,
+                    // and an issue date read as 31 Dec 9999 with any positive term does exactly
+                    // that. This branch used to claim it never failed and had no Error case, so
+                    // the exception unwound out of a workflow whose signature promises a Result.
+                    // PaymentTermDays is constrained to 0..365, so only the upper end can
+                    // overflow. The source is IssueDate, because validation admits no other.
+                    match issueDate with
+                    | None -> Ok None
+                    | Some date ->
+                        let days = PaymentTermDays.value paymentTerm
+
+                        if float days > (DateTime.MaxValue - date).TotalDays then
+                            Error (DueDateOutOfRange(templateId, date, days))
+                        else
+                            Ok (Some (date.AddDays(float days)))
                 | _ ->
                     match runRule compiledPatterns DueDate rule.Rule content with
                     | Found raw -> extractDate DueDate rule.Hint raw |> Result.map Some

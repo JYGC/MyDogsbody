@@ -78,8 +78,22 @@ let private normalizeText (text: string) : string =
 
     composed |> foldSpecialSpaces |> collapseRuns |> fun s -> s.Trim()
 
-/// Finding 4's contract, in one place, applied identically at authoring time and at scan time.
-/// Public so the test panel can display exactly what the rules will see - Q7.6.6.
+/// One normalized line, together with the lines the document actually laid out to produce it.
+///
+/// Segments is what makes a line-oriented rule possible at all on top of the continuation join.
+/// The join is right for reading text - a hard-wrapped label has to be findable - but it is wrong
+/// for COUNTING lines, and LinesAfterLabel counts them. A value on its own line is
+/// indistinguishable from a wrapped continuation (both start lower-case under a predecessor that
+/// ends in no sentence terminator), so joining silently shifted every offset below a bare label
+/// whose value happened to start lower-case: "Reference" / "wu-88213" merged, and
+/// LinesAfterLabel("Reference", 1) then returned the line AFTER the value. Whether a template
+/// worked depended on the case of the first character of a value its author does not control.
+///
+/// A line that absorbed no continuation carries exactly itself, so Segments is never empty.
+type NormalizedLine = { Line: TextLine; Segments: TextLine list }
+
+/// Finding 4's contract, in one place, applied identically at authoring time and at scan time,
+/// with the provenance every consumer needs kept alongside the result.
 ///
 /// Order matters and is asserted (TextNormalizationTests): NFKC first - it turns some ligatures
 /// and fixed-width forms into their plain equivalents, and it is what turns most non-breaking
@@ -87,15 +101,31 @@ let private normalizeText (text: string) : string =
 /// then space folding, then collapse, then trim, then the within-block join, then drop empties.
 /// Running collapse before NFKC would see untouched non-breaking spaces rather than a collapsible
 /// run of plain ones, and leave them all in the output.
-let normalize (lines: TextLine list) : TextLine list =
+///
+/// Empty lines are dropped LAST, after the join, which is what stops a blank line between two
+/// lines being read as a wrapped continuation of the first. A dropped line takes its own segment
+/// with it: an empty line neither joins nor is joined to (isContinuation is false in both
+/// directions), so it is always a group of one.
+let normalizeGrouped (lines: TextLine list) : NormalizedLine list =
     lines
-    |> List.map (fun line -> { line with Text = normalizeText line.Text })
+    |> List.map (fun line -> { Line = { line with Text = normalizeText line.Text }; Segments = [] })
     |> List.fold
-        (fun acc line ->
+        (fun acc (grouped: NormalizedLine) ->
+            let line = grouped.Line
+
             match acc with
-            | previous :: rest when previous.BlockIndex = line.BlockIndex && isContinuation previous.Text line.Text ->
-                { previous with Text = previous.Text + " " + line.Text } :: rest
-            | _ -> line :: acc)
+            | previous :: rest when
+                previous.Line.BlockIndex = line.BlockIndex && isContinuation previous.Line.Text line.Text
+                ->
+                { Line = { previous.Line with Text = previous.Line.Text + " " + line.Text }
+                  Segments = previous.Segments @ [ line ] }
+                :: rest
+            | _ -> { grouped with Segments = [ line ] } :: acc)
         []
     |> List.rev
-    |> List.filter (fun line -> not (String.IsNullOrEmpty line.Text))
+    |> List.filter (fun grouped -> not (String.IsNullOrEmpty grouped.Line.Text))
+
+/// The normalized text itself. Public so the test panel can display exactly what the rules will
+/// see - Q7.6.6.
+let normalize (lines: TextLine list) : TextLine list =
+    normalizeGrouped lines |> List.map (fun grouped -> grouped.Line)

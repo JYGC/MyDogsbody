@@ -59,6 +59,7 @@
     <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
     <Compile Include="Contracts\SupplierApiContractTests.fs" />
     <Compile Include="Contracts\SupplierPersistedShapeTests.fs" />
+    <Compile Include="Contracts\MessageNormalizationContractTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />

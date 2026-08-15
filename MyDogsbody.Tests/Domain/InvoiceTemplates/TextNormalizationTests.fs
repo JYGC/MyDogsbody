@@ -146,3 +146,55 @@ let ``normalize drops a line whose text is null rather than throwing`` () =
 
     // A null becomes an empty line, and empty lines are dropped by the last step like any other.
     Assert.Equal<TextLine list>([ line 0 "Invoice: INV-42" ], actual)
+
+// PR #11 review round 2, finding 2: normalizeGrouped is normalize plus the provenance a
+// line-oriented rule needs. The join is right for READING text and wrong for COUNTING lines, so
+// the lines a document laid out have to survive the join rather than being reconstructed later
+// by a second function that could disagree with this one.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalizeGrouped keeps the laid-out lines a joined line was built from`` () =
+    let actual = TextNormalization.normalizeGrouped [ line 0 "Please contact"; line 0 "us for help." ]
+
+    match actual with
+    | [ grouped ] ->
+        Assert.Equal<TextLine>(line 0 "Please contact us for help.", grouped.Line)
+        Assert.Equal<TextLine list>([ line 0 "Please contact"; line 0 "us for help." ], grouped.Segments)
+    | other -> Assert.Fail($"Expected one grouped line, but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalizeGrouped gives a line that absorbed no continuation exactly itself as its one segment`` () =
+    // Segments is never empty, which is what lets a caller flatten every group into the laid-out
+    // lines without a special case for the lines that were never joined.
+    let actual = TextNormalization.normalizeGrouped [ line 0 "Reference"; line 0 "WU-88213" ]
+
+    Assert.Equal<TextLine list list>(
+        [ [ line 0 "Reference" ]; [ line 0 "WU-88213" ] ],
+        actual |> List.map (fun grouped -> grouped.Segments))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalizeGrouped normalizes each segment, so the laid-out lines are normalized too`` () =
+    // The segments are the NORMALIZED laid-out lines, not the raw input - a rule counting them
+    // must see the same text every other rule sees.
+    let actual = TextNormalization.normalizeGrouped [ line 0 "Reference"; line 0 "  wu\u00A0 88213  " ]
+
+    match actual with
+    | [ grouped ] -> Assert.Equal<TextLine list>([ line 0 "Reference"; line 0 "wu 88213" ], grouped.Segments)
+    | other -> Assert.Fail($"Expected one grouped line, but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``normalize is normalizeGrouped with the provenance dropped`` () =
+    // The two cannot drift: one is defined as the other. Pinned over an input that exercises
+    // every step - NFKC, space folding, the join, a block boundary and an empty line.
+    let input =
+        [ line 0 "Invoice\u00A0 Reference"
+          line 0 "wu-88213"
+          line 0 "   "
+          line 1 "Total"
+          line 1 "$142.50" ]
+
+    let actual = TextNormalization.normalize input
+
+    Assert.Equal<TextLine list>(
+        TextNormalization.normalizeGrouped input |> List.map (fun grouped -> grouped.Line),
+        actual)

@@ -137,6 +137,17 @@ type StoredTemplate =
 ///    belongs here. DerivationUnsupported carries both ends of the derivation because the message
 ///    has to name the pair; FieldHintMismatch carries the hint actually given, since "which hint
 ///    did I choose?" is the question the user needs answered.
+///  - LabelIsEmpty: "".IndexOf returns 0 against any string, so an AfterLabel with an empty label
+///    matches the FIRST LINE of every document and returns the whole of it, and
+///    LinesAfterLabel("", 1) returns the second. Both then pass the engine's empty check and store
+///    a confidently wrong value - worse than the two cases above, which merely drop a field. Null
+///    counts as empty here: a label arrives from a stored row, and a NULL column is how one
+///    reaches the domain.
+///  - RuleUnreachableForPart: an AttachmentName rule on a Body-scoped template reads a list of
+///    filenames that is empty by construction, so the field is silently absent on every message
+///    forever. validateTemplate sees both the Part and the Rules, so the contradiction is
+///    refusable at the only moment the user is standing in front of the editor. Carries both ends
+///    for the same reason DerivationUnsupported does - the message has to name the pair.
 type TemplateError =
     | TemplateNameInvalid of reason: string
     | TemplateIdInvalid of reason: string
@@ -145,6 +156,8 @@ type TemplateError =
     | PatternHasNoCaptureGroup of field: TargetField
     | DateFormatInvalid of field: TargetField * reason: string
     | OffsetOutOfRange of field: TargetField * offset: int
+    | LabelIsEmpty of field: TargetField
+    | RuleUnreachableForPart of field: TargetField * part: DocumentPart
     | RequiredFieldHasNoRule of TargetField
     | DuplicateRuleForField of TargetField
     | DerivationSourceMissing of source: TargetField

@@ -35,6 +35,14 @@ type ScannedMessage =
       ReceivedAt: System.DateTime
       Parts: (MessagePart * TextLine list) list }
 
+/// One part of a message, its text normalized once, with the provenance a line-oriented rule
+/// needs: TextNormalization.NormalizedLine carries both the joined line every text-reading rule
+/// sees and the laid-out lines LinesAfterLabel counts. Keeping them together is what stops the two
+/// views drifting apart - they are produced by one pass, not by two functions that must agree.
+type NormalizedPart =
+    { Part: MessagePart
+      Lines: TextNormalization.NormalizedLine list }
+
 /// A ScannedMessage whose text has been through TextNormalization exactly once - every part's
 /// lines, the subject, and every attachment filename.
 ///
@@ -53,7 +61,7 @@ type NormalizedMessage =
     private
         { SourceMessageId': SourceMessageId
           Subject': string
-          Parts': (MessagePart * TextLine list) list }
+          Parts': NormalizedPart list }
 
 module NormalizedMessage =
 
@@ -83,6 +91,15 @@ type ExtractedInvoice =
 
 /// What can go wrong turning a message into an invoice. Change #4 adds the storage and
 /// mail-store cases to this same union.
+///
+/// DueDateOutOfRange is the one case here that is not about text: DateTime.AddDays RAISES
+/// ArgumentOutOfRangeException once the result leaves DateTime's range, and an issue date read as
+/// 31 Dec 9999 with any positive payment term does exactly that. The DateFromField branch that
+/// derives a due date promised a Result and had no failure channel of its own, so the exception
+/// would have unwound out of the domain, past a composition root that maps values rather than
+/// catching, into a UI with no alert for it. Reaching it needs an absurd date on the document AND
+/// a format that accepts it - unlikely, in the same way the null cases this file already guards
+/// are unlikely. Carries both ends of the arithmetic, since neither alone says what happened.
 type InvoiceError =
     | SupplierNotRecognised of sender: string
     | MultipleSuppliersMatched of sender: string * suppliers: SupplierId list
@@ -90,4 +107,5 @@ type InvoiceError =
     | TemplateMatchedNothing of template: TemplateId * field: TargetField
     | AmountUnparseable of field: TargetField * raw: string
     | DateUnparseable of field: TargetField * raw: string * format: string
+    | DueDateOutOfRange of template: TemplateId * issueDate: System.DateTime * paymentTermDays: int
     | RuleTimedOut of template: TemplateId * field: TargetField
