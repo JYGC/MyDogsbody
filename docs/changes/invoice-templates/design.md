@@ -226,6 +226,10 @@ type NormalizedLine = { Line: TextLine; Segments: TextLine list }
 
 /// normalize with that provenance kept. normalize is defined AS this with the provenance
 /// dropped, so the two views of the same text cannot drift apart.
+///
+/// The TEST PANEL needs both: Line is what the rules read and is what "show the text after
+/// normalization" means, but Segments is what LinesAfterLabel counts, so it is Segments the
+/// panel numbers. Numbering Line instead shows one line wherever the engine counts two.
 let normalizeGrouped (lines: TextLine list) : NormalizedLine list = …
 
 /// Whether a line looks like a wrapped continuation of its predecessor. Private, but its
@@ -365,20 +369,37 @@ SelectTemplateWorkflow (pure)
    │      (AnyPart matches everything; Attachment Pdf needs a Pdf part present)
    │
    ├─ template 1 ──► ApplyTemplateWorkflow
-   │                    ├─ TextNormalization.normalize on the selected parts
-   │                    ├─ Reference rule  → "INV-1042"
-   │                    ├─ Amount rule     → 412.50   (AsMoney '.')
-   │                    ├─ Currency rule   → "AUD"    (FixedValue)
-   │                    ├─ IssueDate rule  → 2026-07-14  (AsDate "d MMM yyyy")
-   │                    ├─ DueDate rule    → DateFromField IssueDate
-   │                    │                    + PaymentTermDays 30 → 2026-08-13
-   │                    └─ Ok ExtractedInvoice
+   │                    │  (text already normalized once, above this loop)
+   │                    ├─ candidate documents = subject + body + AT MOST ONE attachment,
+   │                    │      one candidate per matching attachment, in message order
+   │                    │
+   │                    ├─ candidate 1 = subject + body + cover-letter.pdf
+   │                    │      └─ Reference rule → nothing → TemplateMatchedNothing
+   │                    ├─ candidate 2 = subject + body + 445566.pdf
+   │                    │      ├─ Reference rule  → "445566"
+   │                    │      ├─ Amount rule     → 412.50   (AsMoney '.')
+   │                    │      ├─ Currency rule   → "AUD"    (FixedValue)
+   │                    │      ├─ IssueDate rule  → 2026-07-14  (AsDate "d MMM yyyy")
+   │                    │      ├─ DueDate rule    → DateFromField IssueDate
+   │                    │      │                    + PaymentTermDays 30 → 2026-08-13
+   │                    │      └─ Ok ExtractedInvoice
+   │                    └─ FIRST complete candidate wins; if all fail, the LAST error
    └─ FIRST Ok wins. Its TemplateId is recorded on the result (Q7.6.3).
 
    If template 1 returns TemplateMatchedNothing, try template 2 …
    If ALL fail, return the error from the LAST template tried - a real diagnostic,
    not "nothing worked".
 ```
+
+**Why the attachments are iterated and the body is not.** What gets tried in turn is what a message
+can have several of. A message has one subject and one body, so both stay in scope for every
+candidate — the subject always did, which is why `SubjectCapture` works under any `DocumentPart`,
+and `MeasuredTemplates.AttachmentNameVariant` is a measured template that reads its reference off a
+filename and its amount out of the covering email. Attachments are the plural thing, so they are
+taken one at a time. Pooling them instead let `tryFindLabelledLine` take the first *part* carrying a
+label while `runRegexAcross` took the first *filename* a pattern matched, with nothing requiring the
+two to be the same document: measured, that produced an `Ok` invoice with the reference off one
+attachment and the amount off another — a ledger row that exists in neither.
 
 The measured case this exists for: one water utility labels the same field `Due date` for most
 customers and `Direct debit` for direct-debit ones. Two templates, one supplier, tried in order.
