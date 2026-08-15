@@ -6,11 +6,11 @@ open MyDogsbody.Domain.InvoiceTemplates
 let private messageCarries (part: DocumentPart) (message: NormalizedMessage) : bool =
     match part with
     | AnyPart -> true
-    | Body -> NormalizedMessage.parts message |> List.exists (fun (messagePart, _) -> messagePart = BodyPart)
+    | Body -> NormalizedMessage.parts message |> List.exists (fun part -> part.Part = BodyPart)
     | Attachment wantedFormat ->
         NormalizedMessage.parts message
-        |> List.exists (fun (messagePart, _) ->
-            match messagePart with
+        |> List.exists (fun part ->
+            match part.Part with
             | AttachmentPart(_, format) -> format = wantedFormat
             | BodyPart
             | SubjectPart -> false)

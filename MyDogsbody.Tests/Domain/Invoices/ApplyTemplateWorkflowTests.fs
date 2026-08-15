@@ -712,3 +712,205 @@ let ``AttachmentName matches a filename whose digits arrive in full-width form``
               AttachmentPart("９０３４５２１.pdf", Pdf), [] ]
 
     apply template scanned |> assertWholeInvoice "9034521"
+
+// PR #11 review round 2, finding 1: a '-' is a sign only where a sign can legitimately appear.
+// The round-1 rewrite fixed every line carrying TWO numbers; a hyphenated reference that is the
+// only number on the line still passed the "exactly one candidate" guard and booked itself as a
+// negative amount.
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("Total items INV-1042")>]
+[<InlineData("Total terms Net-30")>]
+[<InlineData("Total order PO-77")>]
+let ``AsMoney refuses a hyphenated reference rather than booking the digits after the hyphen as a negative amount``
+    (rawLine: string)
+    =
+    // Measured on the round-1 implementation: these booked -1042, -30 and -77 respectively,
+    // silently, because numericRuns treated the '-' inside INV-1042 as the run's sign. A label
+    // collision - an Amount rule whose label also appears on a reference line - is all it takes.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 rawLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (AmountUnparseable (field, _)) -> Assert.Equal<TargetField>(Amount, field)
+    | other -> Assert.Fail($"Expected Error(AmountUnparseable _), but got {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("Total: -245.00", -245.00)>]
+[<InlineData("Total: $-245.00", -245.00)>]
+[<InlineData("Total: -1,234.56", -1234.56)>]
+let ``AsMoney still reads a credit note, whose minus sign opens the number rather than following a letter``
+    (rawLine: string, expected: float)
+    =
+    // The other half of the finding: the shape alone cannot tell -1042 in "INV-1042" from a
+    // genuine credit note, but the CONTEXT can - a sign at the start of the text, after
+    // whitespace or after a currency symbol is a sign; one following a letter or a digit is a
+    // joiner inside a reference or a date. This pins the half that must keep working.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 rawLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal(decimal expected, invoice.Amount)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review round 2, finding 2: LinesAfterLabel counts the lines the document laid out, not
+// the lines TextNormalization's within-block continuation join left behind.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel finds a value that starts lower-case, which the continuation join folds into its label line`` () =
+    // "wu-88213" starts lower-case and "Reference" ends in no sentence terminator, so the join
+    // treats the value as a wrapped continuation and merges the two lines. Counting the merged
+    // lines then returns the line AFTER the value - "Total: 100.00" - as the reference.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = LinesAfterLabel("Reference", 1); Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Reference"; line 0 "wu-88213"; stableAmountLine ]
+
+    apply template scanned |> assertWholeInvoice "wu-88213"
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("WU-88213")>]
+[<InlineData("wu-88213")>]
+let ``LinesAfterLabel returns the same line whether or not the value happens to start upper-case`` (reference: string) =
+    // The defect stated as the property that matters: whether a template works must not depend on
+    // the case of the first character of a value the template author does not control. The same
+    // supplier's documents carry references in both cases.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = LinesAfterLabel("Reference", 1); Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Reference"; line 0 reference; stableAmountLine ]
+
+    apply template scanned |> assertWholeInvoice reference
+
+[<Fact; Trait("Level", "Unit")>]
+let ``AfterLabel still reads a label hard-wrapped across two lines, which is what the join is for`` () =
+    // requirements.md: "WHEN a label hard-wrapped across two lines is matched THE SYSTEM SHALL
+    // find the value." The join stays, and every rule but LinesAfterLabel still reads its output -
+    // fixing the offset must not cost this.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = AfterLabel "Invoice reference:"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Invoice"; line 0 "reference: INV-77"; stableAmountLine ]
+
+    apply template scanned |> assertWholeInvoice "INV-77"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel counts from the laid-out line a hard-wrapped label ENDS on`` () =
+    // The two halves of the fix meeting: the label is searched for in the JOINED text, so
+    // "Invoice" / "reference:" is one line carrying "Invoice reference" and the label is found;
+    // the offset is then counted over the LAID-OUT lines from the one the label finishes on, so
+    // offset 1 is the line after "reference:" rather than the line after "Invoice". Counting from
+    // where the label starts would return "reference:" itself.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = LinesAfterLabel("Invoice reference", 1); Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Invoice"; line 0 "reference:"; line 0 "INV-77"; stableAmountLine ]
+
+    apply template scanned |> assertWholeInvoice "INV-77"
+
+// PR #11 review round 2, finding 5: no exception leaves the domain, including from the one branch
+// documented as pure arithmetic that never fails.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a derived due date that would fall outside DateTime's range is reported, not raised`` () =
+    // DateTime.AddDays raises ArgumentOutOfRangeException once the result passes DateTime.MaxValue,
+    // and the DateFromField branch had no failure channel at all - so the exception unwound out of
+    // a workflow whose signature promises a Result.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule
+              { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate "d MMM yyyy" }
+              { Field = DueDate; Rule = DateFromField IssueDate; Hint = AsDate "d MMM yyyy" } ]
+    let scanned = bodyMessage "" [ line 0 "Date: 31 Dec 9999"; stableAmountLine ]
+    let thirtyDayTerm = PaymentTermDays.create 30 |> valueOrFail
+
+    let actual =
+        ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId template (MessageNormalization.normalizeMessage scanned)
+
+    match actual with
+    | Error (DueDateOutOfRange (templateId, issueDate, paymentTermDays)) ->
+        Assert.Equal("T1", TemplateId.value templateId)
+        Assert.Equal(DateTime(9999, 12, 31), issueDate)
+        Assert.Equal(30, paymentTermDays)
+    | other -> Assert.Fail($"Expected Error(DueDateOutOfRange _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a derived due date that lands exactly on DateTime's last representable day is still produced`` () =
+    // The boundary from the other side, so the overflow guard cannot be written one day too eager.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule
+              { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate "d MMM yyyy" }
+              { Field = DueDate; Rule = DateFromField IssueDate; Hint = AsDate "d MMM yyyy" } ]
+    let scanned = bodyMessage "" [ line 0 "Date: 1 Dec 9999"; stableAmountLine ]
+    let thirtyDayTerm = PaymentTermDays.create 30 |> valueOrFail
+
+    let actual =
+        ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId template (MessageNormalization.normalizeMessage scanned)
+
+    match actual with
+    | Ok invoice -> Assert.Equal(Some (DateTime(9999, 12, 31)), invoice.DueDate)
+    | other -> Assert.Fail($"Expected Ok, but got {other}")
+
+// PR #11 review round 2, finding 6: Currency was the one extracted field returned without
+// normalization, and it is change #4's natural key.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an extracted currency arrives trimmed, so two spellings of it cannot split one ledger row`` () =
+    // extractMoney and extractDate both trim on their way through a parse step; Currency has no
+    // parse step and was handed back raw. " AUD " and "AUD" from a sibling template are different
+    // strings in change #4's natural key - cheapest to close before there is stored data.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = FixedValue "  AUD  "; Hint = AsText } ]
+    let scanned = bodyMessage "" [ stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal("AUD", invoice.Currency)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a currency captured by a pattern arrives trimmed as well, not only a fixed one`` () =
+    // The trim belongs to every outcome rather than to the one call site that remembered it:
+    // AfterLabel trimmed its own substring, so the two paths that did not - FixedValue and a
+    // capture group - were the ones that stored the whitespace.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = SubjectCapture @"\((.+)\)"; Hint = AsText } ]
+    let scanned = bodyMessage "Invoice ( AUD )" [ stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal("AUD", invoice.Currency)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

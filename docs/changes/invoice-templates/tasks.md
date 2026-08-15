@@ -284,6 +284,12 @@ until normalization is correct, so it goes first.
       fixture. *Adding a rule kind should break this test until it is finished — that is its job.*
 - [ ] **10.4** Persisted-shape test: assert `InvoiceTemplates` and `TemplateFieldRules` column names
       by reading the table schema.
+- [x] **10.5** `Contracts/MessageNormalizationContractTests.fs` — `MessageNormalization.normalizeMessage`
+      is the sole door to `NormalizedMessage`, and `applyTemplate` is written against the guarantee
+      that anything holding that type has had its subject, its filenames and both views of every
+      part's lines normalized exactly once. Pins that guarantee, so a later route into the type
+      breaks here rather than silently in the engine. *Added in PR #11's second review round; the
+      error-translation rows stay with 10.2, which needs `TemplateApiMappers` from PR #12.*
 
 ## Phase 11 — End to end (required)
 

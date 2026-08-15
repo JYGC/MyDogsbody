@@ -18,6 +18,11 @@ open MyDogsbody.Domain.InvoiceTemplates
 /// Each part's lines are normalized on their own, so the within-block continuation join never
 /// runs across two parts: they are different documents and their BlockIndex numbering is
 /// unrelated.
+///
+/// normalizeGrouped rather than normalize: the grouped form carries which laid-out lines each
+/// joined line was built from, which is what LinesAfterLabel counts its offset over. Producing it
+/// here, in the one pass that already runs once per message, is what keeps the two views of the
+/// same text from ever disagreeing.
 let normalizeMessage (message: ScannedMessage) : NormalizedMessage =
     let normalizePart (part: MessagePart) : MessagePart =
         match part with
@@ -28,5 +33,8 @@ let normalizeMessage (message: ScannedMessage) : NormalizedMessage =
     {
         SourceMessageId' = message.SourceMessageId
         Subject' = InvoiceText.normalizeLine message.Subject
-        Parts' = message.Parts |> List.map (fun (part, lines) -> normalizePart part, TextNormalization.normalize lines)
+        Parts' =
+            message.Parts
+            |> List.map (fun (part, lines) ->
+                { Part = normalizePart part; Lines = TextNormalization.normalizeGrouped lines })
     }

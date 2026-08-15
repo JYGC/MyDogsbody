@@ -48,8 +48,8 @@ let ``normalizeMessage normalizes every attachment filename`` () =
 
     let names =
         NormalizedMessage.parts actual
-        |> List.choose (fun (part, _) ->
-            match part with
+        |> List.choose (fun part ->
+            match part.Part with
             | AttachmentPart(name, _) -> Some name
             | BodyPart
             | SubjectPart -> None)
@@ -64,8 +64,8 @@ let ``normalizeMessage normalizes each part's lines and drops the empty ones`` (
         )
 
     match NormalizedMessage.parts actual with
-    | [ (BodyPart, lines) ] ->
-        Assert.Equal<string list>([ "Total: 100.00"; "AUD" ], lines |> List.map (fun l -> l.Text))
+    | [ { Part = BodyPart; Lines = lines } ] ->
+        Assert.Equal<string list>([ "Total: 100.00"; "AUD" ], lines |> List.map (fun l -> l.Line.Text))
     | other -> Assert.Fail($"Expected one body part, but got {other}")
 
 [<Fact; Trait("Level", "Unit")>]
@@ -81,7 +81,9 @@ let ``normalizeMessage never joins a wrapped continuation across two parts`` () 
                   AttachmentPart("second.pdf", Pdf), [ line 0 "continued overleaf" ] ]
         )
 
-    let allLines = NormalizedMessage.parts actual |> List.collect (fun (_, lines) -> lines |> List.map (fun l -> l.Text))
+    let allLines =
+        NormalizedMessage.parts actual
+        |> List.collect (fun part -> part.Lines |> List.map (fun l -> l.Line.Text))
 
     Assert.Equal<string list>([ "Invoice for"; "continued overleaf" ], allLines)
 
@@ -107,11 +109,16 @@ let ``normalizing an already-normalized message changes nothing`` () =
 
     let once = MessageNormalization.normalizeMessage raw
 
-    // Feed the normalized text back in as if it were a freshly scanned message.
+    // Feed the normalized text back in as if it were a freshly scanned message - the LAID-OUT
+    // lines, which is what a scanned message carries. Feeding the joined lines instead would lose
+    // the layout they were joined from, which is a property of joining rather than of this
+    // function; Contracts/MessageNormalizationContractTests pins both halves.
     let twice =
         MessageNormalization.normalizeMessage
             { raw with
                 Subject = NormalizedMessage.subject once
-                Parts = NormalizedMessage.parts once }
+                Parts =
+                    NormalizedMessage.parts once
+                    |> List.map (fun part -> part.Part, part.Lines |> List.collect (fun l -> l.Segments)) }
 
     Assert.Equal<NormalizedMessage>(once, twice)

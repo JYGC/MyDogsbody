@@ -4,6 +4,7 @@ open System
 open System.Globalization
 open System.Text.RegularExpressions
 open Xunit
+open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
 
@@ -587,3 +588,123 @@ let ``validateTemplate judges a date format identically under any ambient cultur
             match ValidateTemplateWorkflow.validateTemplate input with
             | Ok _ -> ()
             | Error error -> Assert.Fail($"Expected Ok under {culture}, but got Error: {error}"))
+
+// PR #11 review round 2, finding 4: an empty label matches the first line of every document.
+// "".IndexOf returns 0 against any string, so AfterLabel "" returns the whole of line one and
+// LinesAfterLabel("", 1) returns line two - both then pass the engine's empty check and store a
+// confidently wrong value. Refusing at save time is the only moment a person is there to correct
+// it.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses an AfterLabel rule whose label is empty`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = AfterLabel ""; Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Error (LabelIsEmpty field) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(LabelIsEmpty Reference), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses a whitespace-only label, which matches every line carrying a space`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = AfterLabel "   "; Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Error (LabelIsEmpty field) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(LabelIsEmpty Reference), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses a null label rather than letting IndexOf raise out of the engine`` () =
+    // A label arrives from a stored row, and a NULL column is how one reaches the domain.
+    // String.IndexOf(null, StringComparison) throws ArgumentNullException, which would unwind out
+    // of applyTemplate - a pure workflow whose signature promises a Result. Refused here, at the
+    // only door to ValidTemplate, so the engine can never be handed one.
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = AfterLabel null; Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Error (LabelIsEmpty field) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(LabelIsEmpty Reference), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses a LinesAfterLabel rule whose label is empty, naming that field`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  { Field = Amount; Rule = LinesAfterLabel("", 1); Hint = AsMoney '.' }
+                  validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Error (LabelIsEmpty field) -> Assert.Equal<TargetField>(Amount, field)
+    | other -> Assert.Fail($"Expected Error(LabelIsEmpty Amount), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate still accepts a label that is merely short`` () =
+    // The refusal is "empty", not "implausible" - a one-character label is a template author's
+    // business, and rejecting it would be this check over-reaching.
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = AfterLabel "#"; Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Ok _ -> ()
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review round 2, finding 7: an AttachmentName rule on a Body-scoped template reads a list
+// of filenames that is empty by construction, so the field is silently absent on every message
+// forever. validateTemplate sees both the Part and the Rules, so the contradiction is refusable.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses an AttachmentName rule on a Body-scoped template, which could never match`` () =
+    let input =
+        { minimalValidTemplate with
+            Part = Body
+            Rules =
+                [ { Field = Reference; Rule = AttachmentName @"^(\d+)\.pdf$"; Hint = AsText }
+                  validAmountRule
+                  validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Error (RuleUnreachableForPart (field, part)) ->
+        Assert.Equal<TargetField>(Reference, field)
+        Assert.Equal<DocumentPart>(Body, part)
+    | other -> Assert.Fail($"Expected Error(RuleUnreachableForPart _), but got {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData(false)>]
+[<InlineData(true)>]
+let ``validateTemplate accepts an AttachmentName rule wherever attachments are actually selected`` (anyPart: bool) =
+    // The two selectors that DO put filenames in front of the rule. Pinned so the refusal above
+    // cannot broaden into "AttachmentName is suspicious" - it is only the Body pairing that is
+    // contradictory.
+    let input =
+        { minimalValidTemplate with
+            Part = (if anyPart then AnyPart else Attachment Pdf)
+            Rules =
+                [ { Field = Reference; Rule = AttachmentName @"^(\d+)\.pdf$"; Hint = AsText }
+                  validAmountRule
+                  validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Ok _ -> ()
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate accepts a SubjectCapture rule on a Body-scoped template`` () =
+    // The subject is always available regardless of which part a template selects, so this is the
+    // pairing the refusal must NOT catch.
+    let input =
+        { minimalValidTemplate with
+            Part = Body
+            Rules =
+                [ { Field = Reference; Rule = SubjectCapture @"Ref (\w+)"; Hint = AsText }
+                  validAmountRule
+                  validCurrencyRule ] }
+
+    match ValidateTemplateWorkflow.validateTemplate input with
+    | Ok _ -> ()
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

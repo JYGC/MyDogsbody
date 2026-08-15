@@ -206,11 +206,46 @@ let private ensureHintsMatchFields (rules: TemplateFieldRule list) : Result<unit
     | Some error -> Error error
     | None -> Ok ()
 
+/// A rule that reads a part the template never selects can never match, so the field it fills is
+/// silently absent on every message forever - the scan-time silence this whole validation boundary
+/// exists to convert into a save-time refusal.
+///
+/// Exactly one pairing is contradictory today: AttachmentName on a Body-scoped template, whose
+/// selected content carries no filenames by construction. Not SubjectCapture - the subject is
+/// available whichever part a template selects - and not the text-reading kinds, which read
+/// whichever part was selected. AnyPart and Attachment both put filenames in front of the rule, so
+/// only Body is refused.
+let private ensureRulesCanReachTheirPart (part: DocumentPart) (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
+    let unreachable =
+        match part with
+        | Body ->
+            rules
+            |> List.tryPick (fun rule ->
+                match rule.Rule with
+                | AttachmentName _ -> Some (RuleUnreachableForPart(rule.Field, part))
+                | AfterLabel _ | LinesAfterLabel _ | RegexCapture _ | FixedValue _ | SubjectCapture _ | DateFromField _ ->
+                    None)
+        | Attachment _
+        | AnyPart -> None
+
+    match unreachable with
+    | Some error -> Error error
+    | None -> Ok ()
+
 /// Per-rule checks that need no context beyond the rule itself: the date format (any rule may
-/// carry an AsDate hint), the offset range (LinesAfterLabel only), and - for the three
-/// pattern-carrying kinds - that the pattern compiles and has a capture group. Builds the
-/// compiled-pattern map as it goes, so a template with no regex-based rules produces an empty one
-/// rather than a separate pass.
+/// carry an AsDate hint), the label (the two label-carrying kinds), the offset range
+/// (LinesAfterLabel only), and - for the three pattern-carrying kinds - that the pattern compiles
+/// and has a capture group. Builds the compiled-pattern map as it goes, so a template with no
+/// regex-based rules produces an empty one rather than a separate pass.
+///
+/// The label check is IsNullOrWhiteSpace rather than an emptiness test, and it is the most
+/// damaging of the save-time gaps this file closes. "".IndexOf returns 0 against any string, so
+/// AfterLabel "" matched the first line of every document and returned the whole of it, and
+/// LinesAfterLabel("", 1) returned the second - both then passed the engine's own empty check and
+/// stored a confidently wrong value rather than dropping a field. A whitespace-only label does the
+/// same on the first line carrying a space. Null counts too: a label arrives from a stored row,
+/// and a NULL column is how one reaches the domain - where String.IndexOf(null, StringComparison)
+/// would raise out of a pure workflow.
 let private validateRule
     (compiledSoFar: Map<TargetField, Regex>)
     (rule: TemplateFieldRule)
@@ -222,8 +257,15 @@ let private validateRule
             | AsText | AsMoney _ -> Ok ()
 
         match rule.Rule with
-        | LinesAfterLabel(_, offset) ->
-            if offset < MinimumOffset || offset > MaximumOffset then
+        | AfterLabel label ->
+            if String.IsNullOrWhiteSpace label then
+                return! Error (LabelIsEmpty rule.Field)
+            else
+                return compiledSoFar
+        | LinesAfterLabel(label, offset) ->
+            if String.IsNullOrWhiteSpace label then
+                return! Error (LabelIsEmpty rule.Field)
+            elif offset < MinimumOffset || offset > MaximumOffset then
                 return! Error (OffsetOutOfRange(rule.Field, offset))
             else
                 return compiledSoFar
@@ -236,7 +278,6 @@ let private validateRule
                 return Map.add rule.Field regex compiledSoFar
             else
                 return! Error (PatternHasNoCaptureGroup rule.Field)
-        | AfterLabel _
         | FixedValue _
         | DateFromField _ ->
             return compiledSoFar
@@ -244,8 +285,8 @@ let private validateRule
 
 /// The only door to ValidTemplate. Order follows design.md's sequence diagram: name, then every
 /// required field has a rule, no duplicate field, each pattern compiles and has a capture group,
-/// each date format is real, DateFromField sources are sound - and, ahead of all of that, the
-/// supplier id itself parses. design.md's diagram never shows a "parse the supplier id" step, but
+/// each label is a label, each date format is real, DateFromField sources are sound, no rule reads
+/// a part the template never selects - and, ahead of all of that, the supplier id itself parses. design.md's diagram never shows a "parse the supplier id" step, but
 /// EditSupplierWorkflow.validate is the established precedent for this exact shape of problem
 /// (an id arriving as an untrusted string): it parses the id itself rather than deferring to its
 /// caller, and TemplateSupplierIdInvalid mirrors SupplierIdInvalid for the same reason.
@@ -258,6 +299,7 @@ let validateTemplate (input: UnvalidatedTemplate) : Result<ValidTemplate, Templa
         do! ensureDateFromFieldSourcesValid input.Rules
         do! ensureDerivationsSupported input.Rules
         do! ensureHintsMatchFields input.Rules
+        do! ensureRulesCanReachTheirPart input.Part input.Rules
 
         let! compiledPatterns =
             input.Rules

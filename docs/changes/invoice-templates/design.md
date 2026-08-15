@@ -219,6 +219,15 @@ module MyDogsbody.Domain.InvoiceTemplates.TextNormalization
 /// within-block join, then drop empties. Reordering any two of these changes what matches.
 let normalize (lines: TextLine list) : TextLine list = …
 
+/// One normalized line and the lines the document laid out to produce it. Added in PR #11's
+/// second review round: the join is right for READING text and wrong for COUNTING lines, and
+/// LinesAfterLabel counts them - see requirements.md -> Rule kinds.
+type NormalizedLine = { Line: TextLine; Segments: TextLine list }
+
+/// normalize with that provenance kept. normalize is defined AS this with the provenance
+/// dropped, so the two views of the same text cannot drift apart.
+let normalizeGrouped (lines: TextLine list) : NormalizedLine list = …
+
 /// Whether a line looks like a wrapped continuation of its predecessor. Private, but its
 /// behaviour is asserted through normalize: a line that starts lower-case and whose predecessor
 /// does not end in a sentence terminator, within the same block.
