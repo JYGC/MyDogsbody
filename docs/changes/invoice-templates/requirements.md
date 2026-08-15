@@ -54,6 +54,8 @@ WHEN a template field rule is defined THE SYSTEM SHALL offer exactly these seven
 WHEN `AfterLabel` is applied THE SYSTEM SHALL return the remainder of the first normalized line containing the label, after the label.
 WHEN `LinesAfterLabel` is applied THE SYSTEM SHALL find the label in the normalized text — joined lines included, so a hard-wrapped label is still found — and SHALL count the offset over the lines **as the document laid them out**, starting from the laid-out line the label ends on.
 WHEN a value on its own line would be joined to its label as a wrapped continuation THE SYSTEM SHALL still return that value at offset 1, because whether a template works must not depend on the case of the first character of a value its author does not control.
+WHEN the laid-out line an offset lands on is the **start** of a line the document wrapped THE SYSTEM SHALL return the whole wrapped line, so a value split across two laid-out lines comes back complete rather than truncated to its first.
+WHEN the laid-out line an offset lands on is a **continuation inside** the label's own line THE SYSTEM SHALL return that continuation alone, not the joined line the label is part of.
 WHEN `RegexCapture` is applied THE SYSTEM SHALL return the first capture group of the first match.
 WHEN `FixedValue` is applied THE SYSTEM SHALL return that value without consulting the text at all.
 WHEN `SubjectCapture` is applied THE SYSTEM SHALL run its pattern against the message subject, not the document body.
@@ -73,6 +75,8 @@ WHEN a value is parsed as text THE SYSTEM SHALL return it as normalized, with no
 
 WHEN a template is defined THE SYSTEM SHALL state which part of the message it applies to — the body, an attachment of a stated format, or any part.
 WHEN a template is applied THE SYSTEM SHALL consider only the parts its document part selects.
+WHEN a template is applied THE SYSTEM SHALL apply it to **one candidate document at a time** — the message's subject and body, which there is one of, together with **at most one attachment** — and SHALL take the first candidate that yields every required field, because an invoice assembled out of two documents is a ledger row that exists in neither.
+WHEN a template would take one field from one attachment and another field from a different attachment THE SYSTEM SHALL instead report that no single attachment yielded every required field.
 
 ### Validation — the boundary that replaces the compiler
 
@@ -168,6 +172,8 @@ WHEN a template operation fails THE SYSTEM SHALL display the message in a `MudAl
 WHEN a user opens the test panel THE SYSTEM SHALL accept sample text, a sample subject and a sample attachment filename, and run the template against them.
 WHEN the test panel displays the text THE SYSTEM SHALL show it **after normalization** (Q7.6.6) — three of the measured failure modes are silent non-matches, and a panel showing raw text would cheerfully agree with a template that cannot work.
 WHEN the test panel displays the text THE SYSTEM SHALL also make the **raw** text available, so a letter-spaced heading or an unexpected character is diagnosable.
+WHEN the test panel numbers lines for a `LinesAfterLabel` offset THE SYSTEM SHALL number them over the **laid-out** view — normalized per line, but not joined — because that is the view the engine counts, and the joined view shows one line wherever the engine counts two.
+WHEN the test panel shows the joined normalized text THE SYSTEM SHALL present it as *what the rules read*, never as *what the offsets count*, so a user cannot pick an offset off the wrong view and store a template that looks right and cannot work.
 WHEN the test panel runs a template THE SYSTEM SHALL show, per field, which rule ran, what it extracted, what it parsed to, and — where it failed — why.
 WHEN the test panel runs a template with a `DateFromField` rule THE SYSTEM SHALL show both the source date it used and the derived due date, with the payment term it applied.
 WHEN a rule in the test panel times out THE SYSTEM SHALL report the timeout against that rule and leave the rest of the panel usable.
@@ -213,6 +219,7 @@ WHEN a template scoped to the message body carries an `AttachmentName` rule THE 
 WHEN a derived due date would fall outside the range of representable dates THE SYSTEM SHALL report that, naming the template, the issue date and the payment term — never raise out of the workflow.
 WHEN a regular expression compiles but has no capture group THE SYSTEM SHALL refuse the save, because `RegexCapture` returns the first capture group.
 WHEN an amount is written with a leading currency symbol, a thousands separator, or a trailing `CR`/`DR` THE SYSTEM SHALL parse the number and ignore the decoration.
+WHEN an amount is wrapped in parentheses THE SYSTEM SHALL read it as a credit — `(245.00)` is −245.00 — and SHALL require **both** brackets, so an unbalanced one is left alone rather than guessed at.
 WHEN an amount is negative or zero THE SYSTEM SHALL extract it as found — deciding whether a credit note is an invoice is not this change's job.
 WHEN a two-digit year is parsed THE SYSTEM SHALL resolve it by the explicit format string given, and the templates page SHALL warn that `d/M/yy` is ambiguous.
 WHEN a date is stated as `02/08/2016` and the template says `d/M/yyyy` THE SYSTEM SHALL read 2 August, and a template saying `M/d/yyyy` SHALL read 8 February — the format string is the only thing that decides, and there is a test for each.

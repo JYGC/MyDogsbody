@@ -183,6 +183,11 @@ let ``several attachments are each tried in turn`` () =
     // The template targets Attachment Pdf, so the Amount rule (AfterLabel, searching
     // content.Lines) only sees text from PDF attachment parts - the amount line has to live in
     // one of those, not the body, or Amount finds nothing regardless of the Reference outcome.
+    //
+    // PR #11 review round 3, finding 1: putting both halves in the SAME attachment is what makes
+    // this test pass whether the engine pools every matching attachment or applies the template
+    // to one at a time. It is still the right test for "the second attachment is reached at all";
+    // the test below is the one that tells the two designs apart.
     let scanned =
         message
             [ BodyPart, []
@@ -194,6 +199,33 @@ let ``several attachments are each tried in turn`` () =
     match actual with
     | Ok invoice -> Assert.Equal("445566", invoice.Reference)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an invoice is never assembled out of two different attachments`` () =
+    // The halves split across two documents: the cover letter carries an amount, the invoice
+    // carries the matching filename. Measured on 6e510c2 this returned Ok with Reference off
+    // 445566.pdf and Amount off cover-letter.pdf - a ledger row that exists in neither. Applying
+    // the template to one attachment at a time, neither is complete on its own and the LAST
+    // failure is reported.
+    let template =
+        storedTemplate
+            "1"
+            [ { Field = Reference; Rule = AttachmentName @"^(\d+)\.pdf$"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+            (Attachment Pdf)
+    let scanned =
+        message
+            [ AttachmentPart("cover-letter.pdf", Pdf), [ stableAmountLine ]
+              AttachmentPart("445566.pdf", Pdf), [ line 0 "No total on this page" ] ]
+
+    let actual = select [ template ] scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (templateId, field)) ->
+        Assert.Equal<TargetField>(Amount, field)
+        Assert.Equal("1", TemplateId.value templateId)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing (_, Amount)), but got {other}")
 
 // PR #11 review, finding 5: stored Position decides which template wins, so the sort is this
 // workflow's job and not the store's. ListTemplatesWorkflow makes the same point for display

@@ -12,13 +12,15 @@ let private valueOrFail (result: Result<'T, string>) =
     | Ok value -> value
     | Error reason -> failwith $"Test setup built an invalid value: {reason}"
 
-let private validTemplate (rules: TemplateFieldRule list) : ValidTemplate =
+let private validTemplateFor (part: DocumentPart) (rules: TemplateFieldRule list) : ValidTemplate =
     let unvalidated: UnvalidatedTemplate =
-        { SupplierId = "1"; Name = "Test template"; Part = AnyPart; Position = 0; Rules = rules }
+        { SupplierId = "1"; Name = "Test template"; Part = part; Position = 0; Rules = rules }
 
     match ValidateTemplateWorkflow.validateTemplate unvalidated with
     | Ok template -> template
     | Error error -> failwith $"Test setup produced an invalid template: {error}"
+
+let private validTemplate (rules: TemplateFieldRule list) : ValidTemplate = validTemplateFor AnyPart rules
 
 let private line blockIndex text : TextLine = { Text = text; BlockIndex = blockIndex }
 
@@ -914,3 +916,228 @@ let ``a currency captured by a pattern arrives trimmed as well, not only a fixed
     match actual with
     | Ok invoice -> Assert.Equal("AUD", invoice.Currency)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review round 3, finding 1: selectContent pooled every part the template's selector
+// matched into one bag, and each rule then searched that bag on its own - so a reference could
+// come off one attachment and an amount off another, producing a ledger row that exists in
+// neither document. requirements.md: "WHEN a message carries several attachments THE SYSTEM SHALL
+// apply an attachment-part template to EACH IN TURN and take the first that yields every required
+// field."
+
+let private attachmentNameReference =
+    { Field = Reference; Rule = AttachmentName @"^(\d+)\.pdf$"; Hint = AsText }
+
+/// The whole invoice, for the tests below that vary Reference AND Amount together and so cannot
+/// use assertWholeInvoice's fixed 100.00.
+let private assertReferenceAndAmount expectedReference expectedAmount (actual: Result<ExtractedInvoice, InvoiceError>) =
+    match actual with
+    | Ok invoice ->
+        Assert.Equal(expectedReference, invoice.Reference)
+        Assert.Equal(expectedAmount, invoice.Amount)
+        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(zeroTermSupplierId, SupplierId.value invoice.SupplierId)
+        Assert.Equal("T1", TemplateId.value invoice.TemplateId)
+        Assert.Equal("msg-1", SourceMessageId.value invoice.SourceMessageId)
+        Assert.Equal(None, invoice.IssueDate)
+        Assert.Equal(None, invoice.DueDate)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``two attachments cannot fill one invoice between them`` () =
+    // Measured on 6e510c2: Reference = "445566" off the SECOND attachment and Amount = 999.99 off
+    // the FIRST. A remittance advice or a covering note attached beside the invoice is all it
+    // takes, and the wrong amount arrives with nothing to notice it by.
+    let template =
+        validTemplateFor (Attachment Pdf) [ attachmentNameReference; stableAmountRule; stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ AttachmentPart("cover-letter.pdf", Pdf), [ line 0 "Total: 999.99" ]
+              AttachmentPart("445566.pdf", Pdf), [ line 0 "Total: 245.00" ] ]
+
+    apply template scanned |> assertReferenceAndAmount "445566" 245.00m
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an attachment yielding every required field wins over an earlier one yielding none`` () =
+    // requirements.md's "take the FIRST that yields every required field" - the half of the
+    // requirement pooling happened to satisfy, pinned so the per-attachment loop keeps satisfying
+    // it rather than stopping at the first attachment tried.
+    let template =
+        validTemplateFor (Attachment Pdf) [ attachmentNameReference; stableAmountRule; stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ AttachmentPart("cover-letter.pdf", Pdf), [ line 0 "Please see the invoice attached" ]
+              AttachmentPart("445566.pdf", Pdf), [ line 0 "Total: 245.00" ] ]
+
+    apply template scanned |> assertReferenceAndAmount "445566" 245.00m
+
+[<Fact; Trait("Level", "Unit")>]
+let ``when no attachment yields every required field the reported error is the last one tried`` () =
+    // The cover letter carries the amount but no matching filename; the invoice matches the
+    // filename but carries no amount. Pooled, those two halves made an Ok invoice out of nothing;
+    // tried one at a time each fails on its own missing half, and the LAST failure is reported -
+    // the same rule SelectTemplateWorkflow.tryInOrder follows one level up.
+    let template =
+        validTemplateFor (Attachment Pdf) [ attachmentNameReference; stableAmountRule; stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ AttachmentPart("cover-letter.pdf", Pdf), [ line 0 "Total: 245.00" ]
+              AttachmentPart("445566.pdf", Pdf), [ line 0 "No total on this page" ] ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (templateId, field)) ->
+        Assert.Equal<TargetField>(Amount, field)
+        Assert.Equal("T1", TemplateId.value templateId)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing (_, Amount)), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an AnyPart template is held to the same one-attachment-at-a-time rule`` () =
+    // AnyPart had the milder version of the same exposure - measured on 6e510c2 it took the
+    // reference off the second attachment and the amount off the first, exactly as the
+    // attachment-scoped template did.
+    let template = validTemplate [ attachmentNameReference; stableAmountRule; stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ BodyPart, []
+              AttachmentPart("cover-letter.pdf", Pdf), [ line 0 "Total: 999.99" ]
+              AttachmentPart("445566.pdf", Pdf), [ line 0 "Total: 245.00" ] ]
+
+    apply template scanned |> assertReferenceAndAmount "445566" 245.00m
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the message body stays in scope for every attachment, because a message carries one of it`` () =
+    // What is iterated is what is PLURAL. The subject was always available whichever part a
+    // template selected, for exactly this reason; the body is the same, and the attachments are
+    // the only part of a message there can be several of. So a template reading its reference
+    // from a filename and its amount from the covering email still works - what it can no longer
+    // do is read two halves out of two different attachments.
+    let template = validTemplate [ attachmentNameReference; stableAmountRule; stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ BodyPart, [ stableAmountLine ]
+              AttachmentPart("cover-note.pdf", Pdf), []
+              AttachmentPart("9034521.pdf", Pdf), [] ]
+
+    apply template scanned |> assertWholeInvoice "9034521"
+
+// PR #11 review round 3, finding 2: round 2 moved LinesAfterLabel's counting onto the laid-out
+// lines, which fixed the offset and truncated the value. A value the DOCUMENT hard-wrapped came
+// back as its first physical line only, and foundUnlessEmpty cannot tell a truncated value from a
+// complete one.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel returns the whole value when the document hard-wrapped it across two lines`` () =
+    // Measured on 6e510c2: "Annual subscription", with "renewal for 2026" silently dropped.
+    // Currency rather than Reference, because Reference folds its internal whitespace away and
+    // would hide which half of the value arrived.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = LinesAfterLabel("Description", 1); Hint = AsText } ]
+    let scanned =
+        bodyMessage
+            ""
+            [ line 0 "Description"; line 0 "Annual subscription"; line 0 "renewal for 2026"; stableAmountLine ]
+
+    match apply template scanned with
+    | Ok invoice -> Assert.Equal("Annual subscription renewal for 2026", invoice.Currency)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel returns only the value when the label's own line absorbed it`` () =
+    // Round 2's case from the other side, and the reason the refinement is "the target line
+    // STARTS a group" rather than "return the group": here the target laid-out line is a
+    // CONTINUATION inside the label's own joined line, so the answer stays "wu-88213" and must
+    // not become "Reference wu-88213".
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = LinesAfterLabel("Reference", 1); Hint = AsText } ]
+    let scanned = bodyMessage "" [ line 0 "Reference"; line 0 "wu-88213"; stableAmountLine ]
+
+    match apply template scanned with
+    | Ok invoice -> Assert.Equal("wu-88213", invoice.Currency)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel at offset 0 returns the whole joined line the label starts`` () =
+    // Offset 0 targets the label's own laid-out line, which starts a group like any other, so the
+    // same rule applies to it with no carve-out: the whole logical line comes back. Reading the
+    // remainder AFTER a label is what AfterLabel is for.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = LinesAfterLabel("Reference", 0); Hint = AsText } ]
+    let scanned = bodyMessage "" [ line 0 "Reference"; line 0 "wu-88213"; stableAmountLine ]
+
+    match apply template scanned with
+    | Ok invoice -> Assert.Equal("Reference wu-88213", invoice.Currency)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review round 3, finding 4: "(245.00)" is the other common way an accounting document
+// writes a credit, alongside the trailing CR/DR requirements.md already ignores. Measured on
+// 6e510c2 it booked +245.00 - the same silent wrong-sign failure round 2's finding 1 closed from
+// the other direction.
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("Total: (245.00)", -245.00)>]
+[<InlineData("Total: ($245.00)", -245.00)>]
+[<InlineData("Total: (1,234.56)", -1234.56)>]
+[<InlineData("Total: (245.00) CR", -245.00)>]
+[<InlineData("Total: (-245.00)", -245.00)>]
+let ``AsMoney reads an amount wrapped in accounting parentheses as a credit`` (rawLine: string, expected: float) =
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 rawLine ]
+
+    match apply template scanned with
+    | Ok invoice -> Assert.Equal(decimal expected, invoice.Amount)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("Total: (net) 245.00", 245.00)>] // a bracket that closes before the number
+[<InlineData("Total: 245.00 (net)", 245.00)>] // and one that opens after it
+[<InlineData("Total: 245.00 CR", 245.00)>]
+[<InlineData("Total: $1,234.56", 1234.56)>]
+[<InlineData("Total: -245.00", -245.00)>]
+let ``AsMoney does not read a bracket that merely sits near the number as a credit`` (rawLine: string, expected: float) =
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 rawLine ]
+
+    match apply template scanned with
+    | Ok invoice -> Assert.Equal(decimal expected, invoice.Amount)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``AsMoney still refuses a trailing sign rather than guessing which end the sign belonged to`` () =
+    // Not a parenthesis case, but the same function and the same failure mode - pinned here
+    // because closing the parenthesis gap is a change to numericRuns, and "245.00-" reporting
+    // rather than guessing is the behaviour that must survive it.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Total: 245.00-" ]
+
+    match apply template scanned with
+    | Error (AmountUnparseable (field, raw)) ->
+        Assert.Equal<TargetField>(Amount, field)
+        Assert.Equal("245.00-", raw)
+    | other -> Assert.Fail($"Expected Error(AmountUnparseable _), but got {other}")

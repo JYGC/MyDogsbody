@@ -139,6 +139,29 @@ until normalization is correct, so it goes first.
       *Note:* `InvoiceReference` itself is a change #4 type. Fold the whitespace **here**, where the
       two sources first meet, and have #4's `create` reuse it.
       *Depends on:* 4.1.
+- [x] **4.7** *(test-first)* **One candidate document at a time.** `applyTemplate` builds one
+      candidate per matching attachment — subject and body, which a message has one of, plus **at
+      most one attachment** — and takes the first that yields every required field, reporting the
+      last candidate's error when none does. This is requirements.md:220's "each in turn", which
+      neither `design.md` nor the engine had a step for: pooling every selected part let a
+      reference come off one attachment and an amount off another.
+      Tests: two attachments each carrying a different half yield the complete one, not a mixture;
+      an attachment yielding everything wins over an earlier one yielding nothing; when none is
+      complete the reported error is the last tried; `AnyPart` obeys the same rule; the body stays
+      in scope for every candidate (`MeasuredTemplates.AttachmentNameVariant` depends on it).
+      *Added in PR #11's third review round.* *Depends on:* 4.5.
+- [x] **4.8** *(test-first)* **`LinesAfterLabel` returns whole lines, not first segments.** An
+      offset landing on a laid-out line that *starts* a joined group returns the whole group, so a
+      value the document hard-wrapped comes back complete; an offset landing on a continuation
+      *inside* a group still returns that continuation alone, which is what round 2's fix bought.
+      Tests: a value wrapped across two laid-out lines returns whole; `"Reference"` / `"wu-88213"`
+      at offset 1 still returns `"wu-88213"`; offset 0 returns the label's whole joined line.
+      *Added in PR #11's third review round.* *Depends on:* 4.1.
+- [x] **4.9** *(test-first)* **A parenthesised amount is a credit.** `(245.00)` is −245.00, the
+      other common way an accounting document writes what `215`'s trailing `CR` writes; both
+      brackets required, whitespace and currency symbols stepped over so `($245.00)` reads the
+      same. Tests: four parenthesised shapes; four near-misses that must stay positive; `245.00-`
+      still reports rather than guessing. *Added in PR #11's third review round.* *Depends on:* 4.2.
 
 ## Phase 5 — The measured fixtures (required)
 
@@ -263,6 +286,12 @@ until normalization is correct, so it goes first.
       shows the text **after normalization**, keeps the raw text available, and shows per field:
       which rule ran, what it extracted, what it parsed to, and why it failed. For `DateFromField`
       it shows the source date, the payment term applied, and the derived due date.
+      **Line numbers for a `LinesAfterLabel` offset go on the laid-out view, not the joined one** —
+      `TextNormalization.normalizeGrouped` hands back both (`Segments` is the laid-out view, `Line`
+      the joined one), and the engine counts the laid-out one. Numbering the joined view shows one
+      line wherever the engine counts two, so a user reads an offset off the panel that the engine
+      does not apply. Raised by PR #11's third review round; requirements.md → *The test panel*
+      carries the rule.
       *Outcome:* it calls the **same** engine a scan calls — no reimplementation.
       *Depends on:* 9.4, 8.2.
 - [ ] **9.6** Reorder control on the templates list.
