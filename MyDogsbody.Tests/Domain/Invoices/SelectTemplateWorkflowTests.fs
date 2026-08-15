@@ -27,6 +27,20 @@ let private storedTemplate id (rules: TemplateFieldRule list) (part: DocumentPar
             | Error error -> failwith $"Test setup produced an invalid template: {error}"
     }
 
+/// As storedTemplate, but with the supplier and the stored Position spelled out - the two things
+/// the PR #11 review found selectTemplate was not actually consulting.
+let private storedTemplateFor id supplierId position (rules: TemplateFieldRule list) (part: DocumentPart) : StoredTemplate =
+    let unvalidated: UnvalidatedTemplate =
+        { SupplierId = supplierId; Name = $"Template {id}"; Part = part; Position = position; Rules = rules }
+
+    {
+        Id = TemplateId.create id |> valueOrFail
+        Template =
+            match ValidateTemplateWorkflow.validateTemplate unvalidated with
+            | Ok template -> template
+            | Error error -> failwith $"Test setup produced an invalid template: {error}"
+    }
+
 let private line blockIndex text : TextLine = { Text = text; BlockIndex = blockIndex }
 
 let private message (parts: (MessagePart * TextLine list) list) : ScannedMessage =
@@ -179,4 +193,130 @@ let ``several attachments are each tried in turn`` () =
 
     match actual with
     | Ok invoice -> Assert.Equal("445566", invoice.Reference)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review, finding 5: stored Position decides which template wins, so the sort is this
+// workflow's job and not the store's. ListTemplatesWorkflow makes the same point for display
+// order; here the stakes are higher, because the order picks the template rather than the row.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``selectTemplate tries templates in stored Position order, not the order the dependency returned them`` () =
+    // A LoadTemplatesForSupplier adapter returning rows in insertion or rowid order would
+    // otherwise silently override everything ReorderTemplatesWorkflow exists to let the user
+    // configure - and the result is a wrong-but-plausible invoice from the wrong template.
+    let first =
+        storedTemplateFor
+            "first-by-position"
+            "1"
+            0
+            [ { Field = Reference; Rule = AfterLabel "Ref A:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let second =
+        storedTemplateFor
+            "second-by-position"
+            "1"
+            1
+            [ { Field = Reference; Rule = AfterLabel "Ref B:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    // The document carries BOTH labels, so whichever template is tried first is the one that
+    // wins - and the list is handed over in the opposite order to the stored positions.
+    let scanned = message [ BodyPart, [ line 0 "Ref A: BY-POSITION"; line 0 "Ref B: BY-LIST-ORDER"; stableAmountLine ] ]
+
+    let actual = select [ second; first ] scanned
+
+    match actual with
+    | Ok invoice ->
+        Assert.Equal("BY-POSITION", invoice.Reference)
+        Assert.Equal("first-by-position", TemplateId.value invoice.TemplateId)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``two templates sharing a position keep the order the dependency returned them in`` () =
+    // List.sortBy is stable, so equal positions are left alone rather than reshuffled - worth
+    // pinning, since a supplier's rows can carry duplicate positions after a partial reorder.
+    let earlier =
+        storedTemplateFor
+            "earlier"
+            "1"
+            7
+            [ { Field = Reference; Rule = AfterLabel "Ref A:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let later =
+        storedTemplateFor
+            "later"
+            "1"
+            7
+            [ { Field = Reference; Rule = AfterLabel "Ref B:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let scanned = message [ BodyPart, [ line 0 "Ref A: FIRST"; line 0 "Ref B: SECOND"; stableAmountLine ] ]
+
+    let actual = select [ earlier; later ] scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal("earlier", TemplateId.value invoice.TemplateId)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review, finding 12: supplierId was read on exactly one line - the error case - so an
+// invoice could be filed under the template's supplier rather than the one the caller asked
+// about, silently.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``selectTemplate ignores a template belonging to another supplier`` () =
+    let otherSuppliersTemplate =
+        storedTemplateFor
+            "belongs-to-2"
+            "2"
+            0
+            [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let ownTemplate =
+        storedTemplateFor
+            "belongs-to-1"
+            "1"
+            1
+            [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let scanned = message [ BodyPart, [ line 0 "Ref: SHARED"; stableAmountLine ] ]
+
+    // testSupplierId is "1"; the other supplier's template sorts first and would otherwise win.
+    let actual = select [ otherSuppliersTemplate; ownTemplate ] scanned
+
+    match actual with
+    | Ok invoice ->
+        Assert.Equal("belongs-to-1", TemplateId.value invoice.TemplateId)
+        Assert.Equal("1", SupplierId.value invoice.SupplierId)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``selectTemplate reports NoTemplateForSupplier when every template belongs to another supplier`` () =
+    let otherSuppliersTemplate =
+        storedTemplateFor
+            "belongs-to-2"
+            "2"
+            0
+            [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let scanned = message [ BodyPart, [ line 0 "Ref: SHARED"; stableAmountLine ] ]
+
+    let actual = select [ otherSuppliersTemplate ] scanned
+
+    match actual with
+    | Error (NoTemplateForSupplier supplierId) -> Assert.Equal("1", SupplierId.value supplierId)
+    | other -> Assert.Fail($"Expected Error(NoTemplateForSupplier _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the invoice is filed under the supplier the caller asked about`` () =
+    let template =
+        storedTemplateFor
+            "1"
+            "1"
+            0
+            [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+            AnyPart
+    let scanned = message [ BodyPart, [ line 0 "Ref: OWN-1"; stableAmountLine ] ]
+
+    let actual = select [ template ] scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal("1", SupplierId.value invoice.SupplierId)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

@@ -27,7 +27,9 @@
     <Compile Include="Domain\InvoiceTemplates\DeleteTemplateWorkflowTests.fs" />
     <Compile Include="Domain\InvoiceTemplates\ListTemplatesWorkflowTests.fs" />
     <Compile Include="Domain\InvoiceTemplates\ReorderTemplatesWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\InvoiceTextTests.fs" />
     <Compile Include="Domain\Invoices\InvoicesTypesTests.fs" />
+    <Compile Include="Domain\Invoices\MessageNormalizationTests.fs" />
     <Compile Include="Domain\Invoices\MatchSupplierWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ApplyTemplateWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\SelectTemplateWorkflowTests.fs" />

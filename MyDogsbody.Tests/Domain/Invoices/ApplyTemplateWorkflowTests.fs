@@ -44,8 +44,27 @@ let private zeroTermSupplierId = "1"
 let private zeroPaymentTerm = PaymentTermDays.create 0 |> valueOrFail
 let private testTemplateId = TemplateId.create "T1" |> valueOrFail
 
+/// applyTemplate takes a NormalizedMessage, not a ScannedMessage - the type is what guarantees
+/// the normalization happened, and happened once, above whatever loop is trying templates.
 let private apply template scanned =
-    ApplyTemplateWorkflow.applyTemplate zeroPaymentTerm testTemplateId template scanned
+    ApplyTemplateWorkflow.applyTemplate zeroPaymentTerm testTemplateId template (MessageNormalization.normalizeMessage scanned)
+
+/// CLAUDE.md -> Testing in this codebase -> Unit: the Ok path asserts EVERY output field, not
+/// only the one a test is named for. Every rule-kind test below varies the Reference rule alone
+/// and leaves the stable amount and currency rules in place, so the other seven fields have one
+/// expected value between them - asserted here rather than restated eight times per test.
+let private assertWholeInvoice (expectedReference: string) (actual: Result<ExtractedInvoice, InvoiceError>) =
+    match actual with
+    | Ok invoice ->
+        Assert.Equal(expectedReference, invoice.Reference)
+        Assert.Equal(100.00m, invoice.Amount)
+        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(zeroTermSupplierId, SupplierId.value invoice.SupplierId)
+        Assert.Equal("T1", TemplateId.value invoice.TemplateId)
+        Assert.Equal("msg-1", SourceMessageId.value invoice.SourceMessageId)
+        Assert.Equal(None, invoice.IssueDate)
+        Assert.Equal(None, invoice.DueDate)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``ApplyTemplateWorkflow.applyTemplate takes no dependency parameters`` () =
@@ -55,8 +74,20 @@ let ``ApplyTemplateWorkflow.applyTemplate takes no dependency parameters`` () =
     // here because ExtractedInvoice.TemplateId and InvoiceError's template-carrying cases need
     // one and ValidTemplate itself carries none - a gap in design.md's listed signature.
     let template = validTemplate [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
-    let result = apply template (bodyMessage "" [ stableAmountLine ])
-    Assert.True(Result.isOk result)
+
+    let actual = apply template (bodyMessage "" [ stableAmountLine ])
+
+    match actual with
+    | Ok invoice ->
+        Assert.Equal("X", invoice.Reference)
+        Assert.Equal(100.00m, invoice.Amount)
+        Assert.Equal("AUD", invoice.Currency)
+        Assert.Equal(zeroTermSupplierId, SupplierId.value invoice.SupplierId)
+        Assert.Equal("T1", TemplateId.value invoice.TemplateId)
+        Assert.Equal("msg-1", SourceMessageId.value invoice.SourceMessageId)
+        Assert.Equal(None, invoice.IssueDate)
+        Assert.Equal(None, invoice.DueDate)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``AfterLabel returns the remainder of the first normalized line containing the label`` () =
@@ -86,11 +117,7 @@ let ``LinesAfterLabel returns the whole content line the given offset below the 
             [ { Field = Reference; Rule = LinesAfterLabel("Invoice number", 1); Hint = AsText }; stableAmountRule; stableCurrencyRule ]
     let scanned = bodyMessage "" [ line 0 "Invoice number"; line 0 "INV-2099"; stableAmountLine ]
 
-    let actual = apply template scanned
-
-    match actual with
-    | Ok invoice -> Assert.Equal("INV-2099", invoice.Reference)
-    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    apply template scanned |> assertWholeInvoice "INV-2099"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``RegexCapture returns the first capture group of the first match`` () =
@@ -99,11 +126,7 @@ let ``RegexCapture returns the first capture group of the first match`` () =
             [ { Field = Reference; Rule = RegexCapture @"INV-(\d+)"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
     let scanned = bodyMessage "" [ line 0 "Reference is INV-3344 for your records"; stableAmountLine ]
 
-    let actual = apply template scanned
-
-    match actual with
-    | Ok invoice -> Assert.Equal("3344", invoice.Reference)
-    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    apply template scanned |> assertWholeInvoice "3344"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``FixedValue returns that value without consulting the text at all`` () =
@@ -112,11 +135,7 @@ let ``FixedValue returns that value without consulting the text at all`` () =
             [ { Field = Reference; Rule = FixedValue "N/A"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
     let scanned = bodyMessage "" [ stableAmountLine ] // no reference-shaped text anywhere
 
-    let actual = apply template scanned
-
-    match actual with
-    | Ok invoice -> Assert.Equal("N/A", invoice.Reference)
-    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    apply template scanned |> assertWholeInvoice "N/A"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``SubjectCapture runs against the message subject, not the document body`` () =
@@ -125,11 +144,7 @@ let ``SubjectCapture runs against the message subject, not the document body`` (
             [ { Field = Reference; Rule = SubjectCapture @"Ref (\w+)"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
     let scanned = bodyMessage "Ref XY99 attached" [ stableAmountLine ]
 
-    let actual = apply template scanned
-
-    match actual with
-    | Ok invoice -> Assert.Equal("XY99", invoice.Reference)
-    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    apply template scanned |> assertWholeInvoice "XY99"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``AttachmentName runs against the attachment's filename, not its content`` () =
@@ -142,11 +157,7 @@ let ``AttachmentName runs against the attachment's filename, not its content`` (
             [ BodyPart, [ stableAmountLine ]
               AttachmentPart("778899.pdf", Pdf), [ line 0 "irrelevant content" ] ]
 
-    let actual = apply template scanned
-
-    match actual with
-    | Ok invoice -> Assert.Equal("778899", invoice.Reference)
-    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    apply template scanned |> assertWholeInvoice "778899"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a label appearing twice takes the first occurrence`` () =
@@ -155,11 +166,7 @@ let ``a label appearing twice takes the first occurrence`` () =
             [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
     let scanned = bodyMessage "" [ line 0 "Ref: FIRST"; line 0 "Ref: SECOND"; stableAmountLine ]
 
-    let actual = apply template scanned
-
-    match actual with
-    | Ok invoice -> Assert.Equal("FIRST", invoice.Reference)
-    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    apply template scanned |> assertWholeInvoice "FIRST"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``an offset past the end of a block reports the rule found nothing`` () =
@@ -354,7 +361,8 @@ let ``DateFromField IssueDate with a 30 day term and an issue date of 14 July gi
     let scanned = bodyMessage "" [ line 0 "Date: 14 Jul 2026"; stableAmountLine ]
     let thirtyDayTerm = PaymentTermDays.create 30 |> valueOrFail
 
-    let actual = ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId template scanned
+    let actual =
+        ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId template (MessageNormalization.normalizeMessage scanned)
 
     match actual with
     | Ok invoice -> Assert.Equal(Some (DateTime(2026, 8, 13)), invoice.DueDate)
@@ -395,8 +403,9 @@ let ``the payment term comes from the supplier, so two different templates deriv
     let scanned = bodyMessage "" [ line 0 "Date: 14 Jul 2026"; stableAmountLine ]
     let thirtyDayTerm = PaymentTermDays.create 30 |> valueOrFail
 
-    let actualA = ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId templateA scanned
-    let actualB = ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId templateB scanned
+    let normalized = MessageNormalization.normalizeMessage scanned
+    let actualA = ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId templateA normalized
+    let actualB = ApplyTemplateWorkflow.applyTemplate thirtyDayTerm testTemplateId templateB normalized
 
     match actualA, actualB with
     | Ok invoiceA, Ok invoiceB -> Assert.Equal(invoiceA.DueDate, invoiceB.DueDate)
@@ -431,7 +440,12 @@ let ``a pathological pattern on a required field fails that rule with RuleTimedO
     | other -> Assert.Fail($"Expected Error(RuleTimedOut _), but got {other}")
 
 [<Fact; Trait("Level", "Unit")>]
-let ``a pathological pattern on an optional field times out to absent, and the rest of the extraction is unaffected`` () =
+let ``a pathological pattern on an OPTIONAL field is still reported as RuleTimedOut, not swallowed as an absent value`` () =
+    // requirements.md -> Regex safety states two separate things: fail THAT rule with
+    // RuleTimedOut naming the field and the template, and allow the rest of the scan to finish.
+    // "The field is simply absent" satisfies neither - a user whose IssueDate pattern
+    // backtracks catastrophically would get no due date and nothing at all to diagnose from,
+    // which is the exact silence the 12% -> 39% derivation exists to prevent.
     let template =
         validTemplate
             [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }
@@ -446,9 +460,255 @@ let ``a pathological pattern on an optional field times out to absent, and the r
     let actual = apply template scanned
 
     match actual with
+    | Error (RuleTimedOut (templateId, field)) ->
+        Assert.Equal<TargetField>(IssueDate, field)
+        Assert.Equal("T1", TemplateId.value templateId)
+    | other -> Assert.Fail($"Expected Error(RuleTimedOut _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an optional field whose rule simply finds nothing is still absent rather than an error`` () =
+    // The other half of the same rule, pinned so the fix above cannot over-reach: NotFound and
+    // TimedOut are different outcomes and only one of them is an error.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule
+              { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate "d MMM yyyy" } ]
+    let scanned = bodyMessage "" [ line 0 "Ref: OK-1."; stableAmountLine ] // no "Date:" label at all
+
+    let actual = apply template scanned
+
+    match actual with
     | Ok invoice ->
         Assert.Equal("OK-1.", invoice.Reference)
         Assert.Equal(100.00m, invoice.Amount)
         Assert.Equal("AUD", invoice.Currency)
         Assert.Equal(None, invoice.IssueDate)
+        Assert.Equal(None, invoice.DueDate)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a rule that times out stops there rather than spending the whole timeout again on every later line`` () =
+    // runRegexAcross promises in its own doc comment to stop at the first TimedOut. Twenty
+    // candidate lines at 250ms of budget each is ~5s if the promise is not kept and ~250ms if
+    // it is; selectTemplate then multiplies whichever it gets by the number of candidate
+    // templates. requirements.md: "WHEN a rule times out THE SYSTEM SHALL NOT block the user
+    // interface."
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = RegexCapture pathologicalPattern; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    // Each line ends in '!' - a sentence terminator - so TextNormalization's within-block join
+    // leaves twenty separate candidates rather than merging them into one long line.
+    let scanned = bodyMessage "" (List.replicate 20 (line 0 longNonMatchingText) @ [ stableAmountLine ])
+    let stopwatch = Diagnostics.Stopwatch.StartNew()
+
+    let actual = apply template scanned
+
+    stopwatch.Stop()
+
+    match actual with
+    | Error (RuleTimedOut (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(RuleTimedOut _), but got {other}")
+
+    Assert.True(
+        stopwatch.ElapsedMilliseconds < 2000L,
+        $"Took {stopwatch.ElapsedMilliseconds}ms - the pattern was evaluated against later lines instead of stopping at the first timeout")
+
+// PR #11 review, finding 1: the amount must be ONE number read out of the line, never every
+// digit on the line concatenated together.
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("Total for INV-1042: $245.00")>]
+[<InlineData("Total 245.00 due 14/07/2026")>]
+[<InlineData("Total Ref 2 items $10.50")>]
+let ``AsMoney refuses a line carrying more than one number rather than fusing them into a plausible wrong amount``
+    (rawLine: string)
+    =
+    // AfterLabel "Total" without the colon, which is the shape the first line here needs and the
+    // one the finding was reported against. Measured on the old character-filter implementation,
+    // the remainders these leave booked -1042245.00, 245.0014072026 and 210.50 respectively -
+    // silently, with no error to notice.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 rawLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (AmountUnparseable (field, _)) -> Assert.Equal<TargetField>(Amount, field)
+    | other -> Assert.Fail($"Expected Error(AmountUnparseable _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``AsMoney reads an amount that ends the sentence, trailing full stop and all`` () =
+    // The flip side of the finding: tightening the scan must not start rejecting ordinary text.
+    // The old filter turned "$245.00." into "245.00." and failed to parse it at all.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Total: $245.00." ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal(245.00m, invoice.Amount)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review, finding 3: LinesAfterLabel indexes within one block of one part, never across
+// a boundary of either.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel does not step across a block boundary into the next block`` () =
+    // requirements.md: "WHEN LinesAfterLabel is given an offset that runs past the end of the
+    // block THE SYSTEM SHALL report that the rule found nothing". BlockIndex exists precisely
+    // because "LinesAfterLabel depends on the structure a block boundary marks" - a label on the
+    // last line of a table cell must not read the first line of the next one.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = LinesAfterLabel("Invoice number", 1); Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned =
+        bodyMessage "" [ line 0 "Invoice number"; line 1 "NOT-THE-REFERENCE"; line 1 "Total: 100.00" ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``LinesAfterLabel does not step from the end of one attachment into the next`` () =
+    // selectContent's own doc comment: a join must "never happen ACROSS two different parts -
+    // they are different documents, and their BlockIndex numbering is unrelated". The offset has
+    // to respect the same boundary, or a label ending cover-note.pdf reads the first line of the
+    // next attachment. Both lines here sit in block 0, so only the PART split can catch this.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = LinesAfterLabel("Reference", 1); Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ AttachmentPart("cover-note.pdf", Pdf), [ line 0 "Reference" ]
+              AttachmentPart("second.pdf", Pdf), [ line 0 "FROM-THE-NEXT-ATTACHMENT"; stableAmountLine ] ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing _), but got {other}")
+
+// PR #11 review, finding 4: requirements.md - "WHEN a rule finds nothing THE SYSTEM SHALL report
+// which field and which rule found nothing, never a default or an empty value silently
+// substituted." An empty extraction is a rule finding nothing.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``AfterLabel on a label-only line reports the rule found nothing rather than an empty reference`` () =
+    // The bare "Reference" line of the water-utility layout - the very shape LinesAfterLabel
+    // exists for. AfterLabel on it leaves nothing after the label at all.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = AfterLabel "Reference"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "Reference"; line 0 "WU-88213"; stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a regex that matches but whose capture group did not participate reports the rule found nothing`` () =
+    // (\d+)? can match while contributing nothing, so Groups.[1].Value is "" on a SUCCESSFUL
+    // match - an empty reference that would collide in change #4's natural key, turning every
+    // such invoice into the same ledger row.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = RegexCapture @"INV(\d+)?"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "INV follows on the next page"; stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``FixedValue of an empty string reports the rule found nothing rather than storing an empty reference`` () =
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue ""; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+    let scanned = bodyMessage "" [ stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a whitespace-only currency is refused rather than stored as a blank currency`` () =
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = FixedValue "   "; Hint = AsText } ]
+    let scanned = bodyMessage "" [ stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing (_, field)) -> Assert.Equal<TargetField>(Currency, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing _), but got {other}")
+
+// PR #11 review, finding 8: requirements.md - "WHEN ANY rule is evaluated THE SYSTEM SHALL first
+// apply a defined normalization to the text". The subject and the attachment filenames are text
+// a rule is evaluated against, so they go through the same normalization the body lines do.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``SubjectCapture matches a subject carrying a non-breaking space, as the authoring panel showed it`` () =
+    // Mailers insert U+00A0 around numbers, so a subject is one of the likeliest places to carry
+    // one. The test panel displays the NORMALIZED text, so a pattern authored against what the
+    // panel showed would otherwise match there and silently match nothing at scan time.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = SubjectCapture @"invoice (\S+) is attached"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    // The gap between "invoice" and the reference is U+00A0, not U+0020, so the pattern’s
+    // plain space cannot match it until NFKC has folded it. Written as an escape because a
+    // raw non-breaking space in a source file is invisible to the next reader.
+    let scanned = bodyMessage "Your invoice\u00A0REF-66201 is attached" [ stableAmountLine ]
+
+    apply template scanned |> assertWholeInvoice "REF-66201"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``AttachmentName matches a filename whose digits arrive in full-width form`` () =
+    // NFKC folds U+FF10..U+FF19 to plain ASCII digits. Without it \d still MATCHES the
+    // full-width digits, so the rule appears to work and quietly stores a reference made of
+    // characters no other source of the same reference will ever produce.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = AttachmentName @"^(\d+)\.pdf$"; Hint = AsText }
+              stableAmountRule
+              stableCurrencyRule ]
+    let scanned =
+        message
+            ""
+            [ BodyPart, [ stableAmountLine ]
+              AttachmentPart("９０３４５２１.pdf", Pdf), [] ]
+
+    apply template scanned |> assertWholeInvoice "9034521"

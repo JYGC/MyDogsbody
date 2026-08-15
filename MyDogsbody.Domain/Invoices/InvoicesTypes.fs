@@ -35,6 +35,35 @@ type ScannedMessage =
       ReceivedAt: System.DateTime
       Parts: (MessagePart * TextLine list) list }
 
+/// A ScannedMessage whose text has been through TextNormalization exactly once - every part's
+/// lines, the subject, and every attachment filename.
+///
+/// A distinct stage type rather than a flag or a convention, for the two reasons CLAUDE.md gives
+/// for stage types at all. It makes the normalization impossible to skip: applyTemplate takes one
+/// of these and there is no way to hand it raw text. And it makes the normalization impossible to
+/// repeat: it happens once per message in MessageNormalization, above the loop that tries a
+/// supplier's templates in turn, rather than once per candidate template inside it - NFKC over
+/// every line of every attachment is the most expensive thing in this pipeline, and it used to
+/// run once for each template tried.
+///
+/// Carries no Sender: MatchSupplierWorkflow answers "whose message is this?" from the raw
+/// ScannedMessage before a template is ever chosen, so nothing downstream of normalization needs
+/// one.
+type NormalizedMessage =
+    private
+        { SourceMessageId': SourceMessageId
+          Subject': string
+          Parts': (MessagePart * TextLine list) list }
+
+module NormalizedMessage =
+
+    // Read-only accessors; no constructor is exposed. MessageNormalization.normalizeMessage is
+    // the only function that builds the private record literal, the same arrangement
+    // ValidTemplate and ValidateTemplateWorkflow have.
+    let sourceMessageId (m: NormalizedMessage) = m.SourceMessageId'
+    let subject (m: NormalizedMessage) = m.Subject'
+    let parts (m: NormalizedMessage) = m.Parts'
+
 /// What a template pulled out and parsed with its own hints.
 ///
 /// Deliberately not named UnvalidatedInvoice - it is still untrusted in the domain sense

@@ -89,7 +89,13 @@ module SupplierMatcher =
         | Sender ->
             if value.Contains "@" then Ok () else Error "A sender address must contain '@'."
         | Domain ->
-            if value.Contains "@" then
+            // Emptiness is checked first and separately: an empty domain matcher used to save
+            // cleanly, and MatchSupplierWorkflow reads "" as the domain of a message with no
+            // sender at all, so that one matcher claimed every senderless message for its
+            // supplier. Subject already had this rule; Sender gets it for free from the '@' test.
+            if System.String.IsNullOrWhiteSpace value then
+                Error "A sender domain must not be empty."
+            elif value.Contains "@" then
                 Error "A sender domain must not contain '@' - enter a domain, not an address."
             else
                 Ok ()
