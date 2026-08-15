@@ -128,6 +128,15 @@ type StoredTemplate =
 ///    supplier's) nor incomplete (Set.ofList collapses the repeat, so nothing looks missing), so
 ///    neither existing case describes it. Carries the repeated id, the same way TemplateNotFound
 ///    carries the offending one.
+///  - DerivationUnsupported, FieldHintMismatch: both close a save-time gap that used to surface
+///    as a scan-time silence. The engine supports exactly one derivation (DueDate from IssueDate)
+///    and reads a date only from an AsDate hint and money only from AsMoney; a template naming a
+///    different derivation, or pairing a date field with AsText, previously saved without
+///    complaint and then extracted nothing on every message forever. requirements.md is explicit
+///    that a template is validated "at that moment, not when a scan next runs", so the refusal
+///    belongs here. DerivationUnsupported carries both ends of the derivation because the message
+///    has to name the pair; FieldHintMismatch carries the hint actually given, since "which hint
+///    did I choose?" is the question the user needs answered.
 type TemplateError =
     | TemplateNameInvalid of reason: string
     | TemplateIdInvalid of reason: string
@@ -141,6 +150,8 @@ type TemplateError =
     | DerivationSourceMissing of source: TargetField
     | DerivationSourceNotADate of source: TargetField
     | DerivationSourceIsSelf of field: TargetField
+    | DerivationUnsupported of field: TargetField * source: TargetField
+    | FieldHintMismatch of field: TargetField * hint: ParseHint
     | ReorderIncomplete of missing: TemplateId list
     | ReorderDuplicate of duplicate: TemplateId
     | TemplateNotFound of TemplateId

@@ -312,6 +312,136 @@ let ``validateTemplate refuses a DateFromField naming its own field as the sourc
     | Error (DerivationSourceIsSelf field) -> Assert.Equal<TargetField>(DueDate, field)
     | other -> Assert.Fail($"Expected Error(DerivationSourceIsSelf _), but got {other}")
 
+// PR #11 review, finding 9: the engine derives exactly one thing - DueDate from IssueDate. Any
+// other DateFromField pairing used to pass validation and then yield None on every message
+// forever, with no error, no field named, and nothing to diagnose from.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses deriving a due date from a source the engine cannot derive from`` () =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ { Field = Reference; Rule = AfterLabel "Ref:"; Hint = AsDate "d MMM yyyy" } // date-hinted, so the existing checks pass
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = DueDate; Rule = DateFromField Reference; Hint = AsDate "d MMM yyyy" } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (DerivationUnsupported (field, source)) ->
+        Assert.Equal<TargetField>(DueDate, field)
+        Assert.Equal<TargetField>(Reference, source)
+    | other -> Assert.Fail($"Expected Error(DerivationUnsupported _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate refuses deriving an issue date from a due date`` () =
+    // applyTemplate evaluates IssueDate before DueDate, so this direction could never work -
+    // it returned Ok None on line 231 rather than saying so.
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = DueDate; Rule = AfterLabel "Due:"; Hint = AsDate "d MMM yyyy" }
+                  { Field = IssueDate; Rule = DateFromField DueDate; Hint = AsDate "d MMM yyyy" } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (DerivationUnsupported (field, source)) ->
+        Assert.Equal<TargetField>(IssueDate, field)
+        Assert.Equal<TargetField>(DueDate, source)
+    | other -> Assert.Fail($"Expected Error(DerivationUnsupported _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate still accepts the one derivation the engine supports`` () =
+    // The regression lock on the two refusals above: DueDate from IssueDate is the 12% -> 39%
+    // rule and must keep saving.
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate "d MMM yyyy" }
+                  { Field = DueDate; Rule = DateFromField IssueDate; Hint = AsDate "d MMM yyyy" } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Ok template -> Assert.Equal(5, (ValidTemplate.rules template).Length)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #11 review, finding 10: a hint the engine cannot use for that field is a template that
+// looks correct and can never work. requirements.md - "WHEN a user saves a template THE SYSTEM
+// SHALL validate it AT THAT MOMENT, not when a scan next runs."
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("IssueDate")>]
+[<InlineData("DueDate")>]
+let ``validateTemplate refuses a date field whose rule reads text under a non-date hint`` (fieldName: string) =
+    // Without this, extractDate defaulted the format to "" and every message failed the WHOLE
+    // extraction with DateUnparseable(field, raw, "") - an error quoting an empty format string.
+    let field = if fieldName = "IssueDate" then IssueDate else DueDate
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = field; Rule = AfterLabel "Date:"; Hint = AsText } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (FieldHintMismatch (reportedField, hint)) ->
+        Assert.Equal<TargetField>(field, reportedField)
+        Assert.Equal<ParseHint>(AsText, hint)
+    | other -> Assert.Fail($"Expected Error(FieldHintMismatch _), but got {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("AsText")>]
+[<InlineData("AsDate")>]
+let ``validateTemplate refuses an amount field carrying a hint that is not AsMoney`` (hintName: string) =
+    // The mirror image: extractMoney silently defaulted the decimal separator to '.', so an
+    // Amount rule hinted AsText parsed money anyway rather than being refused.
+    let hint = if hintName = "AsText" then AsText else AsDate "d MMM yyyy"
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  { Field = Amount; Rule = AfterLabel "Total:"; Hint = hint }
+                  validCurrencyRule ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (FieldHintMismatch (field, reportedHint)) ->
+        Assert.Equal<TargetField>(Amount, field)
+        Assert.Equal<ParseHint>(hint, reportedHint)
+    | other -> Assert.Fail($"Expected Error(FieldHintMismatch _), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate leaves a DateFromField rule's own hint alone`` () =
+    // A derived DueDate never parses text, so its hint is not the engine's business - refusing
+    // one here would reject every measured template that derives a due date.
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate "d MMM yyyy" }
+                  { Field = DueDate; Rule = DateFromField IssueDate; Hint = AsText } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Ok template -> Assert.Equal(5, (ValidTemplate.rules template).Length)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
 // A null pattern is reachable: UnvalidatedTemplate is the untrusted type and TemplateName.create
 // already guards isNull on the field beside it. Regex(null, ...) throws ArgumentNullException,
 // which neither `with` clause in compilePattern names, so it would leave the domain as an

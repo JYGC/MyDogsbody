@@ -129,6 +129,20 @@ let ``SupplierMatcher.create rejects a sender domain containing an at sign`` () 
         Assert.Equal("A sender domain must not contain '@' - enter a domain, not an address.", reason)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData(null)>]
+[<InlineData("")>]
+[<InlineData("   ")>]
+let ``SupplierMatcher.create rejects an empty sender domain`` (entered: string) =
+    // PR #11 review, finding 7 (related): only Subject checked for empty, so an empty Domain
+    // matcher saved cleanly - and MatchSupplierWorkflow reads "" as the domain of a message with
+    // no sender at all, so that matcher claimed every senderless message for its supplier.
+    let actual = SupplierMatcher.create MyDogsbody.Domain.Suppliers.Domain entered
+
+    match actual with
+    | Error reason -> Assert.Equal("A sender domain must not be empty.", reason)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
 [<Fact; Trait("Level", "Unit")>]
 let ``SupplierMatcher.create accepts a non-empty subject pattern`` () =
     let actual = SupplierMatcher.create Subject "your invoice"

@@ -145,6 +145,67 @@ let private ensureDateFromFieldSourcesValid (rules: TemplateFieldRule list) : Re
     | Some error -> Error error
     | None -> Ok ()
 
+/// The only derivation the engine performs: a due date is an issue date plus the supplier's
+/// payment term. ApplyTemplateWorkflow evaluates fields in a fixed order and is deliberately not
+/// a general dependency solver, so every other pairing could only ever have yielded None on every
+/// message - a template the user authored, saved without complaint, and which then dropped the
+/// field forever with no error and no field named.
+///
+/// Two that used to save cleanly and extract nothing: DueDate from an AsDate-hinted Reference
+/// (the source is a date, so the checks above pass, but the engine only reads IssueDate), and
+/// IssueDate from DueDate (evaluated first, so the source does not exist yet). requirements.md
+/// asks for a template to be validated "at that moment, not when a scan next runs" - so the
+/// refusal belongs here, where the user is standing in front of the editor.
+///
+/// Runs AFTER ensureDateFromFieldSourcesValid so that a self-referencing or missing source keeps
+/// reporting the case that names it precisely, rather than being swallowed by this broader one.
+let private ensureDerivationsSupported (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
+    let unsupported =
+        rules
+        |> List.tryPick (fun rule ->
+            match rule.Rule with
+            | DateFromField source when not (rule.Field = DueDate && source = IssueDate) ->
+                Some (DerivationUnsupported(rule.Field, source))
+            | AfterLabel _ | LinesAfterLabel _ | RegexCapture _ | FixedValue _ | SubjectCapture _ | AttachmentName _
+            | DateFromField _ -> None)
+
+    match unsupported with
+    | Some error -> Error error
+    | None -> Ok ()
+
+/// A hint the engine cannot use for that field is a template that looks correct and can never
+/// work - the failure the whole validation boundary exists to prevent.
+///
+/// An IssueDate or DueDate rule that READS TEXT must be AsDate: extractDate otherwise defaulted
+/// its format to "" and every message failed the WHOLE extraction with
+/// DateUnparseable(field, raw, ""), an error quoting an empty format string. An Amount rule must
+/// be AsMoney: extractMoney otherwise defaulted its separator to '.' and parsed money anyway out
+/// of a rule the user had hinted as text. Both defaults are unreachable once this is in place,
+/// and both say so in their own doc comments.
+///
+/// A DateFromField rule is exempt. It never parses text, so its hint is not the engine's
+/// business, and requiring one would reject every measured template that derives a due date.
+let private ensureHintsMatchFields (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
+    let readsText (rule: TemplateFieldRule) =
+        match rule.Rule with
+        | DateFromField _ -> false
+        | AfterLabel _ | LinesAfterLabel _ | RegexCapture _ | FixedValue _ | SubjectCapture _ | AttachmentName _ -> true
+
+    let mismatch =
+        rules
+        |> List.tryPick (fun rule ->
+            match rule.Field, rule.Hint with
+            | Amount, AsMoney _ -> None
+            | Amount, (AsText | AsDate _) -> Some (FieldHintMismatch(rule.Field, rule.Hint))
+            | (IssueDate | DueDate), AsDate _ -> None
+            | (IssueDate | DueDate), (AsText | AsMoney _) when readsText rule ->
+                Some (FieldHintMismatch(rule.Field, rule.Hint))
+            | _ -> None)
+
+    match mismatch with
+    | Some error -> Error error
+    | None -> Ok ()
+
 /// Per-rule checks that need no context beyond the rule itself: the date format (any rule may
 /// carry an AsDate hint), the offset range (LinesAfterLabel only), and - for the three
 /// pattern-carrying kinds - that the pattern compiles and has a capture group. Builds the
@@ -195,6 +256,8 @@ let validateTemplate (input: UnvalidatedTemplate) : Result<ValidTemplate, Templa
         do! ensureRequiredFieldsHaveRules input.Rules
         do! ensureNoDuplicateField input.Rules
         do! ensureDateFromFieldSourcesValid input.Rules
+        do! ensureDerivationsSupported input.Rules
+        do! ensureHintsMatchFields input.Rules
 
         let! compiledPatterns =
             input.Rules
