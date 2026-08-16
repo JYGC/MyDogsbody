@@ -3,6 +3,7 @@ module MyDogsbody.Tests.Startup.TemplateApiMappersTests
 open System
 open Xunit
 open MyDogsbody.Exceptions.Types
+open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
 open MyDogsbody.Domain.Invoices
@@ -161,6 +162,163 @@ let ``toUiType and toUnvalidatedTemplate round trip a stored template unchanged`
     Assert.Equal(LinesAfterLabel("Total", 1), (roundTripped.Rules |> List.find (fun r -> r.Field = Amount)).Rule)
     Assert.Equal(AsMoney ',', (roundTripped.Rules |> List.find (fun r -> r.Field = Amount)).Hint)
     Assert.Equal(DateFromField IssueDate, (roundTripped.Rules |> List.find (fun r -> r.Field = DueDate)).Rule)
+
+// ---------- every union case, both directions ----------
+
+/// Puts a rule set through validation - the only door to ValidTemplate, so the round trip starts
+/// from a template the domain would actually have stored - then out through toUiType and back in
+/// through toUnvalidatedTemplateEdit. Hands back both halves: the UI columns the domain became, and
+/// the domain rebuilt from those columns.
+let private roundTrip (part: DocumentPart) (rules: TemplateFieldRule list) : TemplateUiType * UnvalidatedTemplate =
+    let unvalidated: UnvalidatedTemplate =
+        { SupplierId = "1"; Name = "Monthly statement"; Part = part; Position = 4; Rules = rules }
+
+    let validated =
+        match ValidateTemplateWorkflow.validateTemplate unvalidated with
+        | Ok template -> template
+        | Error error -> failwith $"Test setup produced an invalid template: {error}"
+
+    let uiType = TemplateApiMappers.toUiType { Id = TemplateId.create "7" |> valueOrFail; Template = validated }
+    let _, back = TemplateApiMappers.toUnvalidatedTemplateEdit uiType |> mappedOrFail
+
+    uiType, back
+
+/// The two required rules that keep a template validatable while a third is under test.
+let private requiredRulesBeside (rule: TemplateFieldRule) : TemplateFieldRule list =
+    [ { Field = Reference; Rule = AfterLabel "Invoice:"; Hint = AsText }
+      { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+      { Field = Currency; Rule = FixedValue "AUD"; Hint = AsText } ]
+    |> List.filter (fun beside -> beside.Field <> rule.Field)
+
+/// toFieldRuleUiColumns decides which kind string a stored rule is SHOWN and re-saved as, and the
+/// editor edits what it is shown: EditTemplate maps the shown string straight back to a FieldRule,
+/// so a kind swapped between two cases does not merely mislabel a row - the next save silently
+/// rewrites what the rule reads. SubjectCapture reads the subject and AttachmentName the filename,
+/// so that particular swap changes the answer on every message, forever, with nothing to notice it
+/// by.
+///
+/// Measured before this test existed: swapping SubjectCapture's and AttachmentName's kind strings
+/// passed the whole suite, 773 of 773. Only five of the seven kinds were round-tripped anywhere.
+///
+/// One row per FieldRule case, counted against the union by reflection, so an eighth kind fails
+/// here rather than being round-tripped by nothing.
+[<Fact; Trait("Level", "Contract")>]
+let ``every FieldRule kind survives the round trip carrying its own UI columns`` () =
+    // the rule under test, the rules it needs beside it, and the exact columns it must become
+    let cases: (TemplateFieldRule * TemplateFieldRule list * (string * string * int * string)) list =
+        [
+            let onReference rule : TemplateFieldRule = { Field = Reference; Rule = rule; Hint = AsText }
+
+            let plain rule columns =
+                let underTest = onReference rule
+                underTest, requiredRulesBeside underTest, columns
+
+            plain (AfterLabel "Invoice:") ("AfterLabel", "Invoice:", 0, "")
+            plain (LinesAfterLabel("Invoice", 3)) ("LinesAfterLabel", "Invoice", 3, "")
+            plain (RegexCapture @"INV-(\d+)") ("RegexCapture", @"INV-(\d+)", 0, "")
+            plain (FixedValue "REF-1") ("FixedValue", "REF-1", 0, "")
+            plain (SubjectCapture @"INV-(\d+)") ("SubjectCapture", @"INV-(\d+)", 0, "")
+            plain (AttachmentName @"(\d+)\.pdf") ("AttachmentName", @"(\d+)\.pdf", 0, "")
+
+            // The one kind that cannot sit on Reference: validation admits only DueDate from
+            // IssueDate, and the source needs an AsDate-hinted rule of its own.
+            let derived: TemplateFieldRule = { Field = DueDate; Rule = DateFromField IssueDate; Hint = AsDate "d MMM yyyy" }
+
+            derived,
+            requiredRulesBeside derived
+            @ [ { Field = IssueDate; Rule = AfterLabel "Dated:"; Hint = AsDate "d MMM yyyy" } ],
+            ("DateFromField", "", 0, "IssueDate")
+        ]
+
+    let declaredKinds = Reflection.FSharpType.GetUnionCases(typeof<FieldRule>) |> Array.length
+    Assert.Equal(declaredKinds, List.length cases)
+
+    for underTest, beside, (ruleKind, ruleText, ruleOffset, ruleSourceField) in cases do
+        let uiType, back = roundTrip AnyPart (beside @ [ underTest ])
+        let uiField = TemplateApiMappers.toTargetFieldUiString underTest.Field
+        let column = uiType.Rules |> List.find (fun rule -> rule.Field = uiField)
+
+        // Outbound: the exact columns, field for field.
+        Assert.Equal(ruleKind, column.RuleKind)
+        Assert.Equal(ruleText, column.RuleText)
+        Assert.Equal(ruleOffset, column.RuleOffset)
+        Assert.Equal(ruleSourceField, column.RuleSourceField)
+
+        // Inbound: the same rule back out of those columns, payload and all.
+        let rebuilt = back.Rules |> List.find (fun rule -> rule.Field = underTest.Field)
+        Assert.Equal(underTest.Rule, rebuilt.Rule)
+        Assert.Equal(underTest.Hint, rebuilt.Hint)
+
+/// The same argument one level up: DocumentPart and its DocumentFormat decide which part of a
+/// message the template is ever shown, and an edit re-saves whatever the columns said. A stored
+/// Attachment(Word) template shown as "Pdf" is re-saved as Attachment(Pdf) and then matches no
+/// message it used to match - silently, because a template that selects no part simply reports
+/// every field as unmatched.
+///
+/// Measured before this test existed: mapping Word to "Pdf" in toDocumentFormatUiString passed the
+/// whole suite, 773 of 773. No format was round-tripped in either mapper test, and only AnyPart was.
+[<Fact; Trait("Level", "Contract")>]
+let ``every DocumentPart and DocumentFormat survives the round trip carrying its own UI columns`` () =
+    let cases: (DocumentPart * (string * string)) list =
+        [
+            Body, ("Body", "")
+            AnyPart, ("AnyPart", "")
+            Attachment Pdf, ("Attachment", "Pdf")
+            Attachment Word, ("Attachment", "Word")
+            Attachment PlainText, ("Attachment", "PlainText")
+            Attachment EmailBody, ("Attachment", "EmailBody")
+        ]
+
+    // Every DocumentPart case, and every DocumentFormat an Attachment can carry.
+    let declaredParts = Reflection.FSharpType.GetUnionCases(typeof<DocumentPart>) |> Array.length
+    let declaredFormats = Reflection.FSharpType.GetUnionCases(typeof<DocumentFormat>) |> Array.length
+    Assert.Equal(declaredParts, cases |> List.map (fun (_, (partColumn, _)) -> partColumn) |> List.distinct |> List.length)
+    Assert.Equal(declaredFormats, cases |> List.filter (fun (_, (partColumn, _)) -> partColumn = "Attachment") |> List.length)
+
+    for part, (partColumn, formatColumn) in cases do
+        let rules =
+            [ { Field = Reference; Rule = AfterLabel "Invoice:"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              { Field = Currency; Rule = FixedValue "AUD"; Hint = AsText } ]
+
+        let uiType, back = roundTrip part rules
+
+        Assert.Equal(partColumn, uiType.DocumentPart)
+        Assert.Equal(formatColumn, uiType.AttachmentFormat)
+        Assert.Equal(part, back.Part)
+
+/// tasks.md 8.1: "an unrecognised string per union returns its error case rather than raising".
+/// The rule kind and the document part already had one each; the target field, the parse hint, the
+/// attachment format and the DateFromField source field did not, and each is a separate `match` in
+/// this file that a stored row or a bound control can miss.
+[<Fact; Trait("Level", "Contract")>]
+let ``an unrecognised string for every union the UI supplies is refused rather than raising`` () =
+    let template rules : TemplateUiTypeWithoutId =
+        { SupplierId = "1"; Name = "T"; DocumentPart = "AnyPart"; AttachmentFormat = ""; Position = 0; Rules = rules }
+
+    let cases: (string * TemplateUiTypeWithoutId * string) list =
+        [
+            "TargetField",
+            template [ uiRule "Bogus" "AfterLabel" "Invoice:" 0 "" "AsText" "" ],
+            "Target field 'Bogus' has no domain equivalent."
+
+            "ParseHint kind",
+            template [ uiRule "Reference" "AfterLabel" "Invoice:" 0 "" "Bogus" "" ],
+            "Hint kind 'Bogus' has no domain equivalent."
+
+            "DateFromField source field",
+            template [ uiRule "DueDate" "DateFromField" "" 0 "Bogus" "AsDate" "d MMM yyyy" ],
+            "Target field 'Bogus' has no domain equivalent."
+
+            "DocumentFormat",
+            { template validRulesUi with DocumentPart = "Attachment"; AttachmentFormat = "Bogus" },
+            "Document format 'Bogus' has no domain equivalent."
+        ]
+
+    for union, entered, expectedReason in cases do
+        match TemplateApiMappers.toUnvalidatedTemplate entered with
+        | Error (TemplateRuleShapeInvalid reason) -> Assert.Equal(expectedReason, reason)
+        | other -> Assert.Fail($"{union}: expected Error(TemplateRuleShapeInvalid _), but got {other}")
 
 // ---------- error translation ----------
 
