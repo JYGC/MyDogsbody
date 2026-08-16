@@ -226,28 +226,51 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.TemplateApi.reorderTemplates)
 
         // Runs the same engine a scan calls - ValidateTemplateWorkflow then ApplyTemplateWorkflow
-        // - over pasted text, never writing anything. A payment term of 0 is a placeholder: the
-        // test panel has no supplier context of its own to read one from (Q7.6.6 asks only that
-        // normalized text and per-field results are shown, not that DateFromField's arithmetic
-        // uses a real term here).
+        // - over pasted text, never writing anything.
+        //
+        // The payment term is the SUPPLIER'S, read through the same dependency AddTemplate uses.
+        // It was a hard-coded 0, on the stated grounds that "the test panel has no supplier context
+        // of its own to read one from" - which is not so: the input carries the SupplierId, and
+        // loadSuppliersForTemplates is bound right here. With 0, DateFromField derived a due date
+        // equal to its source and reported it as a SUCCESS, so the panel showed the author a due
+        // date their template will never produce, on the one screen the change exists to let them
+        // check extraction against, and for the single rule requirements.md calls "the rule that
+        // carries extraction from 12% to 39%". requirements.md is explicit in both directions:
+        // the derivation adds "the SUPPLIER'S payment term", and testing the template must PROVE
+        // DateFromField produces the due date its documents never state.
+        //
+        // Reading the term means the supplier has to exist, so an unknown one is reported the way
+        // AddTemplate reports it rather than silently testing against an invented term. Still no
+        // write - this reads suppliers and stores nothing.
         TestTemplate =
             fun input ->
+                let testTemplateAction = ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate
+
                 result {
                     let! validated =
                         input.Template
                         |> TemplateApiMappers.toUnvalidatedTemplate
                         |> Result.bind ValidateTemplateWorkflow.validateTemplate
-                        |> Result.mapError (toException ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate)
+                        |> Result.mapError (toException testTemplateAction)
+
+                    let supplierId = ValidTemplate.supplierId validated
+
+                    let! paymentTerm =
+                        loadSuppliersForTemplates ()
+                        |> Result.bind (fun suppliers ->
+                            match suppliers |> List.tryFind (fun supplier -> supplier.Id = supplierId) with
+                            | Some supplier -> Ok supplier.PaymentTermDays
+                            | None -> Error (TemplateSupplierNotFound supplierId))
+                        |> Result.mapError (toException testTemplateAction)
 
                     let message = toTestMessage (ValidTemplate.part validated) input
-                    let noTerm = PaymentTermDays.create 0 |> Result.defaultWith (fun _ -> failwith "unreachable: 0 is always in range")
                     let placeholderId = TemplateId.create "test" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
 
                     // normalizeMessage is the only door to NormalizedMessage, and applyTemplate
                     // takes one - so the panel runs the same normalization a scan runs, once,
                     // rather than handing the engine raw text.
                     let extracted =
-                        ApplyTemplateWorkflow.applyTemplate noTerm placeholderId validated (MessageNormalization.normalizeMessage message)
+                        ApplyTemplateWorkflow.applyTemplate paymentTerm placeholderId validated (MessageNormalization.normalizeMessage message)
                     let normalizedText =
                         TextNormalization.normalize (splitPastedTextIntoLines input.SampleText)
                         |> List.map (fun line -> line.Text)

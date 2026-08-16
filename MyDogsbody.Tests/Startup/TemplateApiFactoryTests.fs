@@ -471,14 +471,70 @@ let ``TestTemplate renders extracted dates as ISO whatever the machine's culture
             Assert.Equal("2026-03-04", issueDate.ParsedValue)
             Assert.Equal("2026-03-04", issueDate.RawValue)
 
-            // The payment term the panel applies is the documented placeholder 0, so a derived due
-            // date equals its source - which is what makes this assert the RENDERING and nothing else.
+            // withApi's supplier carries a 30-day term, so the derived due date is 3 April - a
+            // DIFFERENT date from its source, which is what keeps this asserting the rendering of a
+            // derived value rather than the rendering of the issue date twice.
             let dueDate = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
             Assert.True(dueDate.Succeeded, $"DueDate failed: {dueDate.FailureReason}")
-            Assert.Equal("2026-03-04", dueDate.ParsedValue)
+            Assert.Equal("2026-04-03", dueDate.ParsedValue)
         )
     finally
         Globalization.CultureInfo.CurrentCulture <- originalCulture
+
+/// requirements.md: "WHEN DateFromField is applied THE SYSTEM SHALL derive the date by adding the
+/// SUPPLIER'S payment term to the date the named source field yielded", and "WHEN the invoice-
+/// management platform's template is tested THE SYSTEM SHALL PROVE DateFromField produces the due
+/// date its documents never state - the rule that carries extraction from 12% to 39%."
+///
+/// A hard-coded term of 0 makes the panel report the issue date as the due date, marked Succeeded,
+/// on the one screen the change exists to let an author check extraction against. The supplier's
+/// real term is reachable: the input carries its SupplierId and the factory already binds
+/// loadSuppliersForTemplates for AddTemplate.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate derives a due date with the supplier's own payment term, not a placeholder`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template =
+                { aTemplate supplierId with
+                    Rules =
+                        validRulesUi
+                        @ [ uiRule "IssueDate" "AfterLabel" "Dated:" 0 "" "AsDate" "d MMM yyyy"
+                            uiRule "DueDate" "DateFromField" "" 0 "IssueDate" "AsDate" "d MMM yyyy" ] }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00\nDated: 4 Mar 2026"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let issueDate = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+        Assert.True(issueDate.Succeeded, $"IssueDate failed: {issueDate.FailureReason}")
+        Assert.Equal("2026-03-04", issueDate.ParsedValue)
+
+        // withApi inserts its supplier with PaymentTermDays = 30. 4 March + 30 days = 3 April.
+        let dueDate = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+        Assert.True(dueDate.Succeeded, $"DueDate failed: {dueDate.FailureReason}")
+        Assert.Equal("2026-04-03", dueDate.ParsedValue)
+        Assert.Equal("2026-04-03", dueDate.RawValue)
+        Assert.Equal("", dueDate.FailureReason)
+    )
+
+/// Reading the term means the supplier has to exist, so the panel now answers an unknown supplier
+/// the same way AddTemplate does rather than testing against an invented one.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports an unknown supplier rather than testing against an invented payment term`` () =
+    withApi (fun api _ ->
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate "9999" with SupplierId = "9999" }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> errorOrFail "TestTemplate"
+
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate, actual.ActionName)
+        Assert.Equal("No supplier was found with id '9999'.", actual.Message)
+        Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
+    )
 
 /// An amount the rule DID find but could not read is a different sentence from one it never found,
 /// and it quotes the text it choked on - that text is the whole diagnostic.
