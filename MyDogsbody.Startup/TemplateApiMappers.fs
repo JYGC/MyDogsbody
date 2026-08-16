@@ -203,14 +203,25 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
     | PatternHasNoCaptureGroup field -> expected $"The pattern for {toTargetFieldUiString field} needs a capture group."
     | DateFormatInvalid(field, reason) -> expected $"The date format for {toTargetFieldUiString field} is invalid: {reason}"
     | OffsetOutOfRange(field, offset) -> expected $"The offset {offset} for {toTargetFieldUiString field} must be between 0 and 20."
+    | LabelIsEmpty field -> expected $"The label for {toTargetFieldUiString field} must not be empty."
+    | RuleUnreachableForPart(field, part) ->
+        let partName, _ = toDocumentPartUiColumns part
+        expected $"The rule for {toTargetFieldUiString field} reads a part a {partName} template never sees."
     | RequiredFieldHasNoRule field -> expected $"{toTargetFieldUiString field} needs a rule."
     | DuplicateRuleForField field -> expected $"{toTargetFieldUiString field} has more than one rule."
     | DerivationSourceMissing source -> expected $"The derived date needs {toTargetFieldUiString source} to have a rule of its own."
     | DerivationSourceNotADate source -> expected $"{toTargetFieldUiString source} is not read as a date, so a date cannot be derived from it."
     | DerivationSourceIsSelf field -> expected $"{toTargetFieldUiString field} cannot derive its date from itself."
+    | DerivationUnsupported(field, source) ->
+        expected
+            $"{toTargetFieldUiString field} cannot have its date derived from {toTargetFieldUiString source} - only DueDate from IssueDate is supported."
+    | FieldHintMismatch(field, hint) ->
+        let hintName, _ = toParseHintUiColumns hint
+        expected $"{toTargetFieldUiString field} cannot be read with the {hintName} hint."
     | ReorderIncomplete missing ->
         let names = missing |> List.map TemplateId.value |> String.concat ", "
         expected $"The new order is missing template(s): {names}."
+    | ReorderDuplicate duplicate -> expected $"The new order names template '{TemplateId.value duplicate}' more than once."
     | TemplateNotFound id -> expected $"No template was found with id '{TemplateId.value id}'."
     | TemplateSupplierNotFound id -> expected $"No supplier was found with id '{SupplierId.value id}'."
     | TemplateStoreFailed message -> MyDogsbodyException(action, message)

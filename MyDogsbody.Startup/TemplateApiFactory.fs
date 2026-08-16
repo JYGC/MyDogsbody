@@ -35,23 +35,44 @@ let private splitPastedTextIntoLines (text: string) : TextLine list =
         (0, false, [])
     |> fun (_, _, acc) -> List.rev acc
 
-/// Builds the ScannedMessage TestTemplate applies against: the pasted text as the body, the
-/// pasted subject, and - only when a filename was given - a single attachment part carrying that
-/// name and no text of its own (AttachmentName matches a filename, not content).
+/// Builds the ScannedMessage TestTemplate applies against: the pasted subject, the sample
+/// filename, and the pasted text ON THE PART THE TEMPLATE ACTUALLY READS.
+///
+/// Which part that is, is not cosmetic. ApplyTemplateWorkflow.partMatchesSelector gives an
+/// Attachment-scoped template no sight of BodyPart at all, so pasted text parked on the body made
+/// the panel report every field of a perfectly sound template as unmatched - and a PDF attached to
+/// an email is the primary case this change exists for, so that is the template most likely to be
+/// tested and the one the panel was least able to answer. Body and AnyPart both read the body, so
+/// only the Attachment case moves.
+///
+/// An Attachment-scoped template gets its part whether or not a filename was supplied: the
+/// filename is what an AttachmentName rule reads, not what makes the document exist. Under Body
+/// and AnyPart the attachment part is still text-free and still appears only when a filename was
+/// given - AttachmentName matches a filename, not content, and duplicating the sample text onto a
+/// second part AnyPart already selects would offer the same label twice.
 let private toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) : ScannedMessage =
-    let attachmentParts =
-        if String.IsNullOrWhiteSpace input.SampleAttachmentFilename then
-            []
-        else
-            let format = match part with | Attachment f -> f | Body | AnyPart -> Pdf
-            [ AttachmentPart(input.SampleAttachmentFilename, format), [] ]
+    let sampleLines = splitPastedTextIntoLines input.SampleText
+    let attachmentFormat = match part with | Attachment format -> format | Body | AnyPart -> Pdf
+
+    let bodyLines, attachmentParts =
+        match part with
+        | Attachment _ -> [], [ AttachmentPart(input.SampleAttachmentFilename, attachmentFormat), sampleLines ]
+        | Body
+        | AnyPart ->
+            let namedAttachment =
+                if String.IsNullOrWhiteSpace input.SampleAttachmentFilename then
+                    []
+                else
+                    [ AttachmentPart(input.SampleAttachmentFilename, attachmentFormat), [] ]
+
+            sampleLines, namedAttachment
 
     {
         SourceMessageId = SourceMessageId.create "test-panel" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
         Sender = ""
         Subject = input.SampleSubject
         ReceivedAt = DateTime.Now
-        Parts = (BodyPart, splitPastedTextIntoLines input.SampleText) :: attachmentParts
+        Parts = (BodyPart, bodyLines) :: attachmentParts
     }
 
 let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
@@ -202,7 +223,11 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                     let noTerm = PaymentTermDays.create 0 |> Result.defaultWith (fun _ -> failwith "unreachable: 0 is always in range")
                     let placeholderId = TemplateId.create "test" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
 
-                    let extracted = ApplyTemplateWorkflow.applyTemplate noTerm placeholderId validated message
+                    // normalizeMessage is the only door to NormalizedMessage, and applyTemplate
+                    // takes one - so the panel runs the same normalization a scan runs, once,
+                    // rather than handing the engine raw text.
+                    let extracted =
+                        ApplyTemplateWorkflow.applyTemplate noTerm placeholderId validated (MessageNormalization.normalizeMessage message)
                     let normalizedText =
                         TextNormalization.normalize (splitPastedTextIntoLines input.SampleText)
                         |> List.map (fun line -> line.Text)

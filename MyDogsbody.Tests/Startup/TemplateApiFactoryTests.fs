@@ -173,6 +173,42 @@ let ``DeleteTemplate reports not found when no template carries that id`` () =
         Assert.Equal("No template was found with id '9999'.", actual.Message)
     )
 
+/// A save-time refusal the top mapper had no branch for reaches the UI as an alertable Error.
+/// An unmatched case raises MatchFailureException instead, out of an API the UI calls from
+/// Async.Start - so this asserts the sentence, not merely that a Result came back.
+[<Fact; Trait("Level", "Integration")>]
+let ``AddTemplate refuses a rule that cannot reach the template's part, as an Error rather than a raise`` () =
+    withApi (fun api supplierId ->
+        let actual =
+            api.AddTemplate
+                { aTemplate supplierId with
+                    DocumentPart = "Body"
+                    Rules =
+                        [ uiRule "Reference" "AttachmentName" @"(INV-\d+)" 0 "" "AsText" ""
+                          uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+                          uiRule "Currency" "FixedValue" "AUD" 0 "" "AsText" "" ] }
+            |> errorOrFail "AddTemplate"
+
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.addTemplate, actual.ActionName)
+        Assert.Equal("The rule for Reference reads a part a Body template never sees.", actual.Message)
+        Assert.Empty(api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``ReorderTemplates refuses an order naming the same template twice, as an Error rather than a raise`` () =
+    withApi (fun api supplierId ->
+        api.AddTemplate { aTemplate supplierId with Name = "First" } |> okOrFail "AddTemplate"
+        api.AddTemplate { aTemplate supplierId with Name = "Second" } |> okOrFail "AddTemplate"
+
+        let stored = api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier"
+        let firstId = (stored |> List.find (fun t -> t.Name = "First")).Id
+
+        let actual = api.ReorderTemplates supplierId [ firstId; firstId ] |> errorOrFail "ReorderTemplates"
+
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.reorderTemplates, actual.ActionName)
+        Assert.Equal($"The new order names template '{firstId}' more than once.", actual.Message)
+    )
+
 [<Fact; Trait("Level", "Integration")>]
 let ``a validation failure is never written to the log`` () =
     let logged = ResizeArray<MyDogsbodyException>()
@@ -240,6 +276,56 @@ let ``TestTemplate runs the same engine a scan calls, over pasted text, and retu
         let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
         Assert.True amountResult.Succeeded
         Assert.Equal("245.00", amountResult.ParsedValue)
+    )
+
+/// The pasted text has to reach the part the template actually reads. An attachment-scoped
+/// template never sees BodyPart (ApplyTemplateWorkflow.partMatchesSelector), so sample text put
+/// only on the body makes the panel report every field of a perfectly good PDF template as
+/// unmatched - and a PDF attached to an email is the primary case this change exists for.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate runs an attachment-scoped template against the pasted sample text`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            {
+                Template = { aTemplate supplierId with DocumentPart = "Attachment"; AttachmentFormat = "Pdf" }
+                SampleText = "Invoice: INV-9001\nTotal: 245.00"
+                SampleSubject = ""
+                SampleAttachmentFilename = "invoice.pdf"
+            }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.True(referenceResult.Succeeded, $"Reference failed: {referenceResult.FailureReason}")
+        Assert.Equal("INV-9001", referenceResult.ParsedValue)
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.True(amountResult.Succeeded, $"Amount failed: {amountResult.FailureReason}")
+        Assert.Equal("245.00", amountResult.ParsedValue)
+    )
+
+/// AttachmentName reads the filename, and the filename alone - putting the sample text on the
+/// attachment must not also make it readable as a name.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate matches an AttachmentName rule against the sample filename`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            {
+                Template =
+                    { aTemplate supplierId with
+                        Rules =
+                            [ uiRule "Reference" "AttachmentName" @"(INV-\d+)" 0 "" "AsText" ""
+                              uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+                              uiRule "Currency" "FixedValue" "AUD" 0 "" "AsText" "" ] }
+                SampleText = "Total: 245.00"
+                SampleSubject = ""
+                SampleAttachmentFilename = "INV-9001.pdf"
+            }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.True(referenceResult.Succeeded, $"Reference failed: {referenceResult.FailureReason}")
+        Assert.Equal("INV-9001", referenceResult.ParsedValue)
     )
 
 [<Fact; Trait("Level", "Integration")>]

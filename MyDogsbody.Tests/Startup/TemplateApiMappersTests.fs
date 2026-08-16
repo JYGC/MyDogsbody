@@ -170,12 +170,17 @@ let ``every TemplateError case produces a non-empty message and the expected/une
             PatternHasNoCaptureGroup Reference
             DateFormatInvalid(IssueDate, "f")
             OffsetOutOfRange(Reference, 99)
+            LabelIsEmpty Reference
+            RuleUnreachableForPart(Reference, Body)
             RequiredFieldHasNoRule Amount
             DuplicateRuleForField Amount
             DerivationSourceMissing IssueDate
             DerivationSourceNotADate IssueDate
             DerivationSourceIsSelf DueDate
+            DerivationUnsupported(Reference, Amount)
+            FieldHintMismatch(Amount, AsText)
             ReorderIncomplete [ templateId ]
+            ReorderDuplicate templateId
             TemplateNotFound templateId
             TemplateSupplierNotFound supplierId
             TemplateStoreFailed "g"
@@ -194,6 +199,32 @@ let ``every TemplateError case produces a non-empty message and the expected/une
         match case with
         | TemplateStoreFailed _ -> Assert.Null actual.InnerException
         | _ -> Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
+
+/// The five cases the mapper had no branch for. An unmatched case does not fall through to a
+/// default - it raises MatchFailureException, out of a mapper the UI reaches from Async.Start,
+/// where nothing catches it and neither an alert nor a log ever sees it. Each is asserted by its
+/// exact sentence rather than merely "did not raise", because the sentence is what the alert says.
+[<Fact; Trait("Level", "Contract")>]
+let ``the five save-time and reorder refusals become sentences rather than raising`` () =
+    let templateId = TemplateId.create "7" |> valueOrFail
+
+    let expectations: (TemplateError * string) list =
+        [
+            LabelIsEmpty Reference, "The label for Reference must not be empty."
+            RuleUnreachableForPart(Reference, Body),
+            "The rule for Reference reads a part a Body template never sees."
+            DerivationUnsupported(Reference, Amount),
+            "Reference cannot have its date derived from Amount - only DueDate from IssueDate is supported."
+            FieldHintMismatch(Amount, AsText), "Amount cannot be read with the AsText hint."
+            ReorderDuplicate templateId, "The new order names template '7' more than once."
+        ]
+
+    for error, expectedMessage in expectations do
+        let actual = TemplateApiMappers.toMyDogsbodyException anAction error
+
+        Assert.Equal(anAction, actual.ActionName)
+        Assert.Equal(expectedMessage, actual.Message)
+        Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
 
 [<Fact; Trait("Level", "Contract")>]
 let ``an adapter exception becomes TemplateStoreFailed carrying its message`` () =
