@@ -309,3 +309,66 @@ let ``validateTemplate refuses a DateFromField naming its own field as the sourc
     match actual with
     | Error (DerivationSourceIsSelf field) -> Assert.Equal<TargetField>(DueDate, field)
     | other -> Assert.Fail($"Expected Error(DerivationSourceIsSelf _), but got {other}")
+
+// PR #14 review: a blank label / value passed validation, and a blank label matches EVERY
+// document - String.IndexOf("") returns 0, so AfterLabel "" resolves against line 0 of anything
+// and hands back that whole line as the value. The three pattern-carrying kinds were already
+// covered by accident (a blank pattern compiles, but has no capture group, so
+// PatternHasNoCaptureGroup rejects it); AfterLabel / LinesAfterLabel / FixedValue had nothing
+// checking them at all.
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("")>]
+[<InlineData("   ")>]
+[<InlineData("\t")>]
+let ``validateTemplate refuses an AfterLabel whose label is blank with RuleTextEmpty naming the field`` (label: string) =
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = AfterLabel label; Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (RuleTextEmpty field) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(RuleTextEmpty Reference), but got {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("")>]
+[<InlineData("   ")>]
+let ``validateTemplate refuses a LinesAfterLabel whose label is blank with RuleTextEmpty naming the field`` (label: string) =
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = LinesAfterLabel(label, 1); Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (RuleTextEmpty field) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(RuleTextEmpty Reference), but got {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("")>]
+[<InlineData("   ")>]
+let ``validateTemplate refuses a FixedValue whose value is blank with RuleTextEmpty naming the field`` (value: string) =
+    let input =
+        { minimalValidTemplate with
+            Rules = [ validReferenceRule; validAmountRule; { Field = Currency; Rule = FixedValue value; Hint = AsText } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (RuleTextEmpty field) -> Assert.Equal<TargetField>(Currency, field)
+    | other -> Assert.Fail($"Expected Error(RuleTextEmpty Currency), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``validateTemplate still accepts a label that is merely short rather than blank`` () =
+    // The guard is "blank", not "short" - a one-character label is legitimate.
+    let input =
+        { minimalValidTemplate with
+            Rules = [ { Field = Reference; Rule = AfterLabel "#"; Hint = AsText }; validAmountRule; validCurrencyRule ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Ok template -> Assert.Equal(3, (ValidTemplate.rules template).Length)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

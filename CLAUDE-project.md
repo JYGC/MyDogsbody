@@ -94,9 +94,9 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **709 tests — 339 Unit, 109 Integration, 234 Contract, 27 E2E**, zero skips. If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **739 tests — 357 Unit, 114 Integration, 238 Contract, 30 E2E**, zero skips. If the build breaks now, assume you broke it.
 
-Measured directly against a real `main` checkout while closing `invoice-templates` (change #2): `main` as cut stood at **400 tests — 162 Unit, 75 Integration, 146 Contract, 17 E2E** (one more Integration test than this file had previously claimed — the old "399" figure predated a merge and was never reverified, exactly the gap `invoice-templates`'s own Phase 12 gate flagged before trusting it). `invoice-templates` added **309 tests** on top of that verified baseline.
+Measured directly against a real `main` checkout while closing `invoice-templates` (change #2): `main` as cut stood at **400 tests — 162 Unit, 75 Integration, 146 Contract, 17 E2E** (one more Integration test than this file had previously claimed — the old "399" figure predated a merge and was never reverified, exactly the gap `invoice-templates`'s own Phase 12 gate flagged before trusting it). `invoice-templates` added **339 tests** on top of that verified baseline. Re-measure the branch figure as well as `main`'s before quoting either: the first number recorded for this change (`709`) was 5 short of what the branch actually produced, and the review round that caught it added 25 more.
 
 The suite was run eight times consecutively while closing the `architecture-compliance` change to confirm it is not flaky. If you see an intermittent failure, do not re-run until it passes — see the note on LiteDB's global `BsonMapper` under *Per-integration databases*.
 

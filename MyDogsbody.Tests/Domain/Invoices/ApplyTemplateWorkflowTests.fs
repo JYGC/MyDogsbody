@@ -452,3 +452,67 @@ let ``a pathological pattern on an optional field times out to absent, and the r
         Assert.Equal(Some "AUD", invoice.Currency)
         Assert.Equal(None, invoice.IssueDate)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #14 review: an extraction that produced an empty string was reported as Found, so an empty
+// Reference survived into ExtractedInvoice - and Reference is the natural key change #4 builds
+// its ledger rows and calendar events on. Two ways in, both closed here: a label sitting at the
+// very end of its line, and a regex whose capture group never participated.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``AfterLabel on a line that ends with the label reports nothing matched rather than an empty value`` () =
+    let template =
+        validTemplate [ { Field = Reference; Rule = AfterLabel "Invoice:"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+    // "Invoice:" ends with the label, so the remainder after it is "". It also ends in a
+    // sentence terminator, so TextNormalization never joins the next line onto it.
+    let scanned = bodyMessage "" [ line 0 "Invoice:"; stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing(_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing(_, Reference)), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a regex whose capture group did not participate reports nothing matched rather than an empty value`` () =
+    // (\d+)? is optional: "INV-" matches the pattern as a whole, but group 1 never participates,
+    // so Groups.[1].Value is "" while Groups.[1].Success is false.
+    let template =
+        validTemplate [ { Field = Reference; Rule = RegexCapture @"INV-(\d+)?"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "INV-"; stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Error (TemplateMatchedNothing(_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(TemplateMatchedNothing(_, Reference)), but got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an optional field whose rule extracts an empty value is reported as absent rather than as an empty string`` () =
+    // Currency is optional, so the empty extraction has to arrive as None - not Some "".
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = AfterLabel "Invoice:"; Hint = AsText }
+              stableAmountRule
+              { Field = Currency; Rule = AfterLabel "Currency:"; Hint = AsText } ]
+    let scanned = bodyMessage "" [ line 0 "Invoice: INV-77"; stableAmountLine; line 0 "Currency:" ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Ok invoice ->
+        Assert.Equal("INV-77", invoice.Reference)
+        Assert.Equal<string option>(None, invoice.Currency)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a regex capture that did participate is still returned unchanged`` () =
+    // The guard must reject only empty captures - a real capture goes through untouched.
+    let template =
+        validTemplate [ { Field = Reference; Rule = RegexCapture @"INV-(\d+)?"; Hint = AsText }; stableAmountRule; stableCurrencyRule ]
+    let scanned = bodyMessage "" [ line 0 "INV-4242"; stableAmountLine ]
+
+    let actual = apply template scanned
+
+    match actual with
+    | Ok invoice -> Assert.Equal("4242", invoice.Reference)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

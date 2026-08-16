@@ -32,6 +32,20 @@ let private documentFormats = [ "Pdf"; "Word"; "PlainText"; "EmailBody" ]
 let private formatMatchers (rules: TemplateFieldRuleUiType list) =
     rules |> List.map (fun r -> $"{r.Field}: {r.RuleKind}") |> String.concat ", "
 
+/// The filename MudFileUpload's FilesChanged just handed over, or "" when the selection was
+/// cleared. MudBlazor invokes FilesChanged with default(T) - null for IBrowserFile - on
+/// ClearAsync / ResetValueAsync and on the picker's cancel path, so reading .Name straight off it
+/// raises inside a Blazor event handler, which unwinds to Shell.fs's ErrorBoundary' and blanks
+/// the dialog rather than surfacing an alert.
+let attachmentFilenameOf (file: IBrowserFile) : string =
+    if isNull (box file) then "" else file.Name
+
+/// The rule kinds whose RuleText is literal text the engine matches against, rather than a
+/// pattern or a derivation. Blank text on one of these is what ValidateTemplateWorkflow refuses
+/// with RuleTextEmpty; mirrored here so the Add button refuses it before a round trip, the same
+/// way missingRequiredFieldsForTest mirrors the domain's own requiredFields.
+let private ruleKindsNeedingText = [ "LinesAfterLabel"; "AfterLabel"; "FixedValue"; "AttachmentName"; "SubjectCapture"; "RegexCapture" ]
+
 let templatesBrowser
   (supplierName: string)
   (templatesBrowserModule: TemplatesBrowserModule)
@@ -381,6 +395,7 @@ type TemplatesEditorDialog() =
                                 let! hintText = newHintTextCval
                                 MudIconButton'' {
                                     Icon Icons.Material.Filled.Add
+                                    Disabled (List.contains ruleKind ruleKindsNeedingText && String.IsNullOrWhiteSpace ruleText)
                                     OnClick (fun _ ->
                                         let newRule: TemplateFieldRuleUiType =
                                             {
@@ -445,7 +460,7 @@ type TemplatesEditorDialog() =
                                 // with no extra JS interop needed.
                                 MudFileUpload'' {
                                     FilesChanged (fun (file: IBrowserFile) ->
-                                        transact (fun _ -> sampleAttachmentFilenameCval.Value <- file.Name))
+                                        transact (fun _ -> sampleAttachmentFilenameCval.Value <- attachmentFilenameOf file))
                                     ActivatorContent (fragment {
                                         MudButton'' {
                                             Variant Variant.Filled

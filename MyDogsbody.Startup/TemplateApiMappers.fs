@@ -15,6 +15,7 @@ open MyDogsbody.Domain
 open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
+open MyDogsbody.Domain.Invoices
 open MyDogsbody.UI.Types
 
 // Every string->union conversion below returns Result rather than raising - the same reasoning
@@ -201,6 +202,7 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
     | TemplateRuleShapeInvalid reason -> expected reason
     | PatternInvalid(field, reason) -> expected $"The pattern for {toTargetFieldUiString field} is invalid: {reason}"
     | PatternHasNoCaptureGroup field -> expected $"The pattern for {toTargetFieldUiString field} needs a capture group."
+    | RuleTextEmpty field -> expected $"The rule for {toTargetFieldUiString field} needs a label or value."
     | DateFormatInvalid(field, reason) -> expected $"The date format for {toTargetFieldUiString field} is invalid: {reason}"
     | OffsetOutOfRange(field, offset) -> expected $"The offset {offset} for {toTargetFieldUiString field} must be between 0 and 20."
     | RequiredFieldHasNoRule field -> expected $"{toTargetFieldUiString field} needs a rule."
@@ -218,3 +220,33 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
 /// Inbound: an adapter's exception becomes the one domain case that stands for infrastructure
 /// failure. The adapter's handleError has already logged it, so nothing logs again here.
 let toTemplateError (ex: MyDogsbodyException) : TemplateError = TemplateStoreFailed ex.Message
+
+/// Which field an InvoiceError names, when it names one. applyTemplate evaluates fields in a
+/// fixed order and stops at the first failure, so the error names the single field at fault -
+/// which is what lets the test panel blame that one field instead of all five.
+let invoiceErrorField (error: InvoiceError) : TargetField option =
+    match error with
+    | TemplateMatchedNothing(_, field)
+    | RuleTimedOut(_, field) -> Some field
+    | AmountUnparseable(field, _)
+    | DateUnparseable(field, _, _) -> Some field
+    | SupplierNotRecognised _
+    | MultipleSuppliersMatched _
+    | NoTemplateForSupplier _ -> None
+
+/// An InvoiceError as a sentence for the test panel. The engine's errors never reach the UI
+/// through toMyDogsbodyException - TestTemplate renders them per field rather than failing the
+/// whole call - so they need their own wording, and printing the union case with `string` leaks
+/// F# constructor syntax and the placeholder TemplateId into the panel.
+let toInvoiceErrorMessage (error: InvoiceError) : string =
+    match error with
+    | TemplateMatchedNothing(_, field) -> $"No text matched the rule for {toTargetFieldUiString field}."
+    | RuleTimedOut(_, field) -> $"The rule for {toTargetFieldUiString field} took too long to run."
+    | AmountUnparseable(field, raw) -> $"'{raw}' could not be read as an amount for {toTargetFieldUiString field}."
+    | DateUnparseable(field, raw, format) ->
+        $"'{raw}' could not be read as a date for {toTargetFieldUiString field} using the format '{format}'."
+    | SupplierNotRecognised sender -> $"No supplier matched the sender '{sender}'."
+    | MultipleSuppliersMatched(sender, suppliers) ->
+        let ids = suppliers |> List.map SupplierId.value |> String.concat ", "
+        $"More than one supplier matched the sender '{sender}': {ids}."
+    | NoTemplateForSupplier supplierId -> $"Supplier '{SupplierId.value supplierId}' has no templates."

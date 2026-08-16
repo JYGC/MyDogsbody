@@ -136,6 +136,12 @@ type TemplateError =
     | TemplateRuleShapeInvalid of reason: string
     | PatternInvalid of field: TargetField * reason: string
     | PatternHasNoCaptureGroup of field: TargetField
+    /// A label or value that is blank, on one of the three rule kinds that carry literal text
+    /// rather than a pattern. Its own case rather than a reuse of PatternInvalid: nothing about
+    /// it is a pattern, and the sentence the UI writes from it is different. The pattern-carrying
+    /// kinds need no equivalent - a blank pattern compiles but has no capture group, so
+    /// PatternHasNoCaptureGroup already refuses it.
+    | RuleTextEmpty of field: TargetField
     | DateFormatInvalid of field: TargetField * reason: string
     | OffsetOutOfRange of field: TargetField * offset: int
     | RequiredFieldHasNoRule of TargetField

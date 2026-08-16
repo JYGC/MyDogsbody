@@ -168,6 +168,7 @@ let ``every TemplateError case produces a non-empty message and the expected/une
             TemplateRuleShapeInvalid "d"
             PatternInvalid(Reference, "e")
             PatternHasNoCaptureGroup Reference
+            RuleTextEmpty Currency
             DateFormatInvalid(IssueDate, "f")
             OffsetOutOfRange(Reference, 99)
             RequiredFieldHasNoRule Amount
@@ -207,3 +208,64 @@ let ``an adapter exception becomes TemplateStoreFailed carrying its message`` ()
     let actual = TemplateApiMappers.toTemplateError adapterFailure
 
     Assert.Equal(TemplateStoreFailed "Failed to retrieve templates for supplier.", actual)
+
+// ---------- InvoiceError -> the test panel's wording ----------
+//
+// The engine's errors never reach the UI through toMyDogsbodyException - TestTemplate renders
+// them per field rather than failing the whole call - so they get their own mapper, and their own
+// exhaustive suite. Added with PR #14's review fix, which replaced `string error` (an F# union
+// dump carrying the placeholder TemplateId) with these sentences.
+
+[<Fact; Trait("Level", "Contract")>]
+let ``every InvoiceError case produces a sentence that never leaks union or template-id syntax`` () =
+    let templateId = TemplateId.create "7" |> valueOrFail
+    let supplierId = SupplierId.create "1" |> valueOrFail
+
+    let allCases: MyDogsbody.Domain.Invoices.InvoiceError list =
+        [
+            MyDogsbody.Domain.Invoices.SupplierNotRecognised "billing@acme.example"
+            MyDogsbody.Domain.Invoices.MultipleSuppliersMatched("billing@acme.example", [ supplierId ])
+            MyDogsbody.Domain.Invoices.NoTemplateForSupplier supplierId
+            MyDogsbody.Domain.Invoices.TemplateMatchedNothing(templateId, Amount)
+            MyDogsbody.Domain.Invoices.AmountUnparseable(Amount, "not-a-number")
+            MyDogsbody.Domain.Invoices.DateUnparseable(IssueDate, "32 Foo 2026", "d MMM yyyy")
+            MyDogsbody.Domain.Invoices.RuleTimedOut(templateId, Reference)
+        ]
+
+    let declaredCases =
+        Reflection.FSharpType.GetUnionCases(typeof<MyDogsbody.Domain.Invoices.InvoiceError>) |> Array.length
+
+    Assert.Equal(declaredCases, List.length allCases)
+
+    for case in allCases do
+        let actual = TemplateApiMappers.toInvoiceErrorMessage case
+        Assert.False(String.IsNullOrWhiteSpace actual, $"{case} produced an empty message")
+        Assert.DoesNotContain("TemplateId", actual)
+        Assert.DoesNotContain("SupplierId", actual)
+        Assert.EndsWith(".", actual)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``every InvoiceError that names a field reports it, and the ones that name none report none`` () =
+    let templateId = TemplateId.create "7" |> valueOrFail
+    let supplierId = SupplierId.create "1" |> valueOrFail
+
+    // The field-naming cases: what lets the test panel blame one row instead of all five.
+    Assert.Equal(
+        Some Amount,
+        TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.TemplateMatchedNothing(templateId, Amount)))
+    Assert.Equal(
+        Some Reference,
+        TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.RuleTimedOut(templateId, Reference)))
+    Assert.Equal(
+        Some Amount,
+        TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.AmountUnparseable(Amount, "x")))
+    Assert.Equal(
+        Some IssueDate,
+        TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.DateUnparseable(IssueDate, "x", "y")))
+
+    // The message-level cases: no single field is at fault, so no row is singled out.
+    Assert.Equal(None, TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.SupplierNotRecognised "s"))
+    Assert.Equal(
+        None,
+        TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.MultipleSuppliersMatched("s", [ supplierId ])))
+    Assert.Equal(None, TemplateApiMappers.invoiceErrorField (MyDogsbody.Domain.Invoices.NoTemplateForSupplier supplierId))

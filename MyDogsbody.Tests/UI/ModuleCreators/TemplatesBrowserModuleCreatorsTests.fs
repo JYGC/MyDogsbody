@@ -209,3 +209,44 @@ let ``no Async.Start appears anywhere in the module creator file`` () =
     Assert.True(IO.File.Exists sourceFilePath, $"Expected to find {sourceFilePath}")
     let source = IO.File.ReadAllText sourceFilePath
     Assert.DoesNotContain("Async.Start(", source)
+
+// PR #14 review: the route handed getViewForSupplier the supplier id where it expects the
+// supplier name (getViewForSupplier supplierId supplierId), so /settings/suppliers/7/templates
+// rendered the header "Templates for 7". The route only carries the id, so the name has to be
+// resolved from SupplierApi - through the same startWork seam every other load uses, never a
+// synchronous call on the render thread.
+
+let private supplierApi getAll : SupplierApi =
+    {
+        GetAllSuppliers = getAll
+        AddSupplier = fun _ -> failwith "not used"
+        EditSupplier = fun _ -> failwith "not used"
+        DeleteSupplier = fun _ -> failwith "not used"
+    }
+
+let private aSupplier id name : SupplierUiType =
+    { Id = id; Name = name; PaymentTermDays = 30; Matchers = [] }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the supplier name aval resolves the route's id to that supplier's name`` () =
+    let api = supplierApi (fun () -> Ok [ aSupplier "6" "Globex"; aSupplier "7" "Acme" ])
+
+    let actual = TemplatesBrowserModuleCreators.getSupplierNameAval runSynchronously api "7"
+
+    Assert.Equal("Acme", AVal.force actual)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the supplier name aval falls back to the id when no supplier carries it`` () =
+    let api = supplierApi (fun () -> Ok [ aSupplier "6" "Globex" ])
+
+    let actual = TemplatesBrowserModuleCreators.getSupplierNameAval runSynchronously api "7"
+
+    Assert.Equal("7", AVal.force actual)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the supplier name aval falls back to the id when the lookup fails, rather than blanking the header`` () =
+    let api = supplierApi (fun () -> Error(failure "suppliers are unreachable"))
+
+    let actual = TemplatesBrowserModuleCreators.getSupplierNameAval runSynchronously api "7"
+
+    Assert.Equal("7", AVal.force actual)

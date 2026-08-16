@@ -48,13 +48,17 @@ let private moveTemplate
 
         templatesBrowserModule.ReorderTemplates swapped
 
-let private getViewForSupplier (supplierId: string) (supplierName: string) =
-    html.inject (fun (templateApi: TemplateApi, dialogService: IDialogService) ->
+let private getViewForSupplier (supplierId: string) =
+    html.inject (fun (templateApi: TemplateApi, supplierApi: SupplierApi, dialogService: IDialogService) ->
         let templatesBrowserModule =
             TemplatesBrowserModuleCreators.getTemplatesBrowserModule startWork templateApi supplierId
 
+        let supplierNameAval =
+            TemplatesBrowserModuleCreators.getSupplierNameAval startWork supplierApi supplierId
+
         adapt {
             let! allTemplates = templatesBrowserModule.TemplatesListAval
+            let! supplierName = supplierNameAval
 
             TemplatesComponents.templatesBrowser
                 supplierName
@@ -102,4 +106,4 @@ let private getViewForSupplier (supplierId: string) (supplierName: string) =
     |> SettingsComponents.settingsNavMenu
 
 let getRoute () =
-    routeCif "/settings/suppliers/%s/templates" (fun (supplierId: string) -> getViewForSupplier supplierId supplierId)
+    routeCif "/settings/suppliers/%s/templates" (fun (supplierId: string) -> getViewForSupplier supplierId)

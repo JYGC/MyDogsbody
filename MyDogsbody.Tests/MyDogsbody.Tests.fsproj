@@ -68,6 +68,7 @@
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\TemplatesBrowserModuleCreatorsTests.fs" />
+    <Compile Include="UI\Components\TemplatesComponentsTests.fs" />
     <Compile Include="E2E\BlazorTestHarness.fs" />
     <Compile Include="E2E\CredentialsFlowTests.fs" />
     <Compile Include="E2E\SuppliersTestHarness.fs" />

@@ -265,3 +265,121 @@ let ``TestTemplate reports a failed field rather than a default when the sample 
         Assert.False referenceResult.Succeeded
         Assert.False(String.IsNullOrWhiteSpace referenceResult.FailureReason)
     )
+
+// PR #14 review: applyTemplate returns a single Result, and TestTemplate mapped that same value
+// over all five fields - so one field's failure was rendered as all five failing, each carrying
+// an F# union dump ("TemplateMatchedNothing (TemplateId \"test\", Amount)") rather than a
+// sentence. The per-field diagnosis the panel exists for (Q7.6.6) was unavailable.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate blames only the field whose rule failed, and does not report a field that matched as failed`` () =
+    withApi (fun api supplierId ->
+        // Reference matches; Amount has no "Total:" line to find.
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001\nnothing else of interest"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.False amountResult.Succeeded
+        Assert.Equal("No text matched the rule for Amount.", amountResult.FailureReason)
+
+        // Reference matched, so it must not carry Amount's failure.
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.NotEqual<string>(amountResult.FailureReason, referenceResult.FailureReason)
+        Assert.Equal("Not evaluated: the run stopped at Amount.", referenceResult.FailureReason)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports a failure as a sentence, never as a raw union case or the placeholder template id`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "nothing relevant here"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        for fieldResult in actual.FieldResults do
+            Assert.DoesNotContain("TemplateMatchedNothing", fieldResult.FailureReason)
+            Assert.DoesNotContain("TemplateId", fieldResult.FailureReason)
+            Assert.DoesNotContain("\"test\"", fieldResult.FailureReason)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate names the unparseable value in the failing field's message`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001\nTotal: not-a-number"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.False amountResult.Succeeded
+        Assert.Contains("not-a-number", amountResult.FailureReason)
+    )
+
+// PR #14 review: toTestMessage always put the pasted text under BodyPart, but an Attachment
+// template's selector filters BodyPart out - so content.Lines was empty and every text rule
+// reported "matched nothing", while the panel simultaneously rendered the normalized text and
+// claimed nothing was found in it.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate runs an Attachment template against the pasted text rather than against nothing`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with DocumentPart = "Attachment"; AttachmentFormat = "Pdf" }
+              SampleText = "Invoice: INV-7\nTotal: 12.50"
+              SampleSubject = ""
+              SampleAttachmentFilename = "statement.pdf" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.True(referenceResult.Succeeded, $"Reference should have matched, but failed with: {referenceResult.FailureReason}")
+        Assert.Equal("INV-7", referenceResult.ParsedValue)
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.True(amountResult.Succeeded, $"Amount should have matched, but failed with: {amountResult.FailureReason}")
+        Assert.Equal("12.50", amountResult.ParsedValue)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate runs an Attachment template against the pasted text even when no filename was chosen`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with DocumentPart = "Attachment"; AttachmentFormat = "Pdf" }
+              SampleText = "Invoice: INV-8\nTotal: 9.99"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.True(referenceResult.Succeeded, $"Reference should have matched, but failed with: {referenceResult.FailureReason}")
+        Assert.Equal("INV-8", referenceResult.ParsedValue)
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toTestMessage gives an AnyPart template's attachment no lines, so the pasted text is never counted twice`` () =
+    // AnyPart selects the body AND the attachment. If both carried the pasted lines, every rule
+    // would see each line twice - so only the part the template actually selects gets them.
+    let input: TemplateTestInputUiType =
+        { Template = aTemplate "1"; SampleText = "Invoice: INV-1"; SampleSubject = ""; SampleAttachmentFilename = "statement.pdf" }
+
+    let actual = TemplateApiFactory.toTestMessage MyDogsbody.Domain.InvoiceTemplates.AnyPart input
+
+    let attachmentLines =
+        actual.Parts
+        |> List.pick (fun (part, lines) ->
+            match part with
+            | MyDogsbody.Domain.Invoices.AttachmentPart _ -> Some lines
+            | _ -> None)
+
+    Assert.Empty attachmentLines

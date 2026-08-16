@@ -48,11 +48,25 @@ type private RuleOutcome =
     | NotFound
     | TimedOut
 
+/// An extraction that produced nothing but whitespace is not a value - it is the rule failing to
+/// find one, and saying so is what keeps an empty Reference (the natural key change #4 builds its
+/// ledger rows and calendar events on) out of ExtractedInvoice. Applied once, over every rule
+/// kind's outcome, rather than per kind.
+let private emptyIsNotFound (outcome: RuleOutcome) : RuleOutcome =
+    match outcome with
+    | Found value when String.IsNullOrWhiteSpace value -> NotFound
+    | Found _
+    | NotFound
+    | TimedOut -> outcome
+
 let private runRegexOnce (regex: Regex) (input: string) : RuleOutcome =
     try
         let regexMatch = regex.Match input
 
-        if regexMatch.Success && regexMatch.Groups.Count > 1 then
+        // Groups.[1].Success as well as the match's own: an optional group that never
+        // participated (INV-(\d+)? against "INV-") reports Value = "" off a successful match,
+        // which is "the pattern matched but captured nothing", not a captured empty string.
+        if regexMatch.Success && regexMatch.Groups.Count > 1 && regexMatch.Groups.[1].Success then
             Found regexMatch.Groups.[1].Value
         else
             NotFound
@@ -84,6 +98,7 @@ let private runRule
     (rule: FieldRule)
     (content: SelectedContent)
     : RuleOutcome =
+    emptyIsNotFound (
     match rule with
     | AfterLabel label ->
         match tryFindLabelledLine label content.Lines with
@@ -106,6 +121,7 @@ let private runRule
     | SubjectCapture _ -> runRegexOnce (Map.find field compiledPatterns) content.Subject
     | AttachmentName _ -> runRegexAcross (Map.find field compiledPatterns) content.AttachmentNames
     | DateFromField _ -> NotFound // handled separately in applyTemplate - this rule never reads text
+    )
 
 /// task 4.6: the same reference printed "1234 5678 90" in a PDF and "1234567890" in an
 /// attachment filename must produce one value, or the natural key later turns one invoice into

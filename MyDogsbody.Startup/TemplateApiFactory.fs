@@ -42,29 +42,65 @@ let splitPastedTextIntoLines (text: string) : TextLine list =
 /// pasted subject, and - only when a filename was given - a single attachment part carrying that
 /// name and no text of its own (AttachmentName matches a filename, not content).
 let toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) : ScannedMessage =
+    let pastedLines = splitPastedTextIntoLines input.SampleText
+
+    // The pasted text has to hang off whichever part the template actually selects. An
+    // Attachment template's selector filters BodyPart out (ApplyTemplateWorkflow.selectContent),
+    // so leaving the text only on the body meant the engine ran against no lines at all while
+    // the panel still rendered the normalized text - the exact "silent guess" Q7.6.6's raw vs
+    // normalized display exists to prevent. Exactly one part ever carries the lines, so AnyPart -
+    // which selects both body and attachment - never sees them twice.
     let attachmentParts =
-        if String.IsNullOrWhiteSpace input.SampleAttachmentFilename then
-            []
-        else
-            let format = match part with | Attachment f -> f | Body | AnyPart -> Pdf
-            [ AttachmentPart(input.SampleAttachmentFilename, format), [] ]
+        match part with
+        | Attachment format -> [ AttachmentPart(input.SampleAttachmentFilename, format), pastedLines ]
+        | Body
+        | AnyPart ->
+            if String.IsNullOrWhiteSpace input.SampleAttachmentFilename then
+                []
+            else
+                [ AttachmentPart(input.SampleAttachmentFilename, Pdf), [] ]
+
+    let bodyLines =
+        match part with
+        | Attachment _ -> []
+        | Body
+        | AnyPart -> pastedLines
 
     {
         SourceMessageId = SourceMessageId.create "test-panel" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
         Sender = ""
         Subject = input.SampleSubject
         ReceivedAt = DateTime.Now
-        Parts = (BodyPart, splitPastedTextIntoLines input.SampleText) :: attachmentParts
+        Parts = (BodyPart, bodyLines) :: attachmentParts
     }
 
+/// One row of the test panel.
+///
+/// applyTemplate returns a single Result and stops at the first field that fails, so an error
+/// names exactly one field at fault. Reporting that error against all five rows would blame
+/// fields that actually matched - so only the named field carries the failure, and the rest say
+/// they were not reached. Nothing is rendered from `string error`: that prints the union case
+/// with its constructor syntax and the placeholder TemplateId, which is developer output rather
+/// than a sentence.
+///
+/// Known gap, deliberately left: RawValue repeats ParsedValue on the Ok path, so the raw-vs-parsed
+/// distinction FieldTestResultUiType names is not actually populated. Populating it truthfully
+/// needs ExtractedInvoice to carry each field's pre-parse text, which is a MyDogsbody.Domain
+/// change belonging with change #4 rather than to this UI slice. Nothing renders RawValue today.
 let toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
     match extracted with
     | Error error ->
+        let failureReason =
+            match TemplateApiMappers.invoiceErrorField error with
+            | Some blamed when blamed = field -> TemplateApiMappers.toInvoiceErrorMessage error
+            | Some blamed -> $"Not evaluated: the run stopped at {TemplateApiMappers.toTargetFieldUiString blamed}."
+            | None -> TemplateApiMappers.toInvoiceErrorMessage error
+
         { Field = TemplateApiMappers.toTargetFieldUiString field
           RawValue = ""
           ParsedValue = ""
           Succeeded = false
-          FailureReason = string error }
+          FailureReason = failureReason }
     | Ok invoice ->
         let parsedText, succeeded, failure =
             match field with

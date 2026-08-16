@@ -11,16 +11,22 @@ Change **#2 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody\MyDogsbody.csproj` — **0 errors, 0 warnings**. Checked separately per
   CLAUDE-project.md's own warning that `NU1605` is a hard error here and only a warning on the
   solution build; it did not recur.
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **709 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **739 tests, 0 failures, 0 skips**, all
   four levels present:
 
   | Level | Before | After | Added |
   | --- | --- | --- | --- |
-  | Unit | 162 | 339 | +177 |
-  | Integration | 75 | 109 | +34 |
-  | Contract | 146 | 234 | +88 |
-  | E2E | 17 | 27 | +10 |
-  | **Total** | **400** | **709** | **+309** |
+  | Unit | 162 | 357 | +195 |
+  | Integration | 75 | 114 | +39 |
+  | Contract | 146 | 238 | +92 |
+  | E2E | 17 | 30 | +13 |
+  | **Total** | **400** | **739** | **+339** |
+
+  The "After" column was itself re-measured during PR #14's review-fix round, which is when the
+  discrepancy showed up: the figure first recorded here (`709 — 339/109/234/27`) did not match what
+  the branch actually produced (`714 — 339/109/236/30`), understating Contract by 2 and E2E by 3.
+  Re-measuring the branch, not only `main`, is what this section's own Task 12.0 reasoning asks
+  for; the review round then added 25 further tests, giving the 739 above.
 
   **"Before" is a verified number, not the figure CLAUDE-project.md previously carried.** Task 12.0
   asked for the baseline to be measured directly rather than trusted, because the `399` figure

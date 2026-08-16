@@ -103,6 +103,22 @@ let private validateRule
     (rule: TemplateFieldRule)
     : Result<Map<TargetField, Regex>, TemplateError> =
     result {
+        // A blank label or value is not a weak rule, it is a rule that matches everything:
+        // String.IndexOf("") returns 0, so AfterLabel "" resolves against line 0 of every
+        // document and hands back that whole line. The three pattern-carrying kinds need no
+        // equivalent check - a blank pattern compiles but has no capture group, so
+        // PatternHasNoCaptureGroup below already refuses it.
+        do!
+            match rule.Rule with
+            | AfterLabel text
+            | LinesAfterLabel(text, _)
+            | FixedValue text ->
+                if String.IsNullOrWhiteSpace text then Error (RuleTextEmpty rule.Field) else Ok ()
+            | RegexCapture _
+            | SubjectCapture _
+            | AttachmentName _
+            | DateFromField _ -> Ok ()
+
         do!
             match rule.Hint with
             | AsDate format ->
