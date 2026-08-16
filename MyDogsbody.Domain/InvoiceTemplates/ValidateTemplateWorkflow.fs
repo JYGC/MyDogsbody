@@ -119,8 +119,15 @@ let private validateRule
             | AttachmentName _
             | DateFromField _ -> Ok ()
 
+        // The blank check has to come before the ToString probe rather than rely on it: .NET
+        // treats an empty format string as the general "G" pattern instead of throwing, so
+        // AsDate "" passed this check, saved, and then failed on every scan with
+        // DateUnparseable(..., format = "") - TryParseExact refuses an empty format. Blank is
+        // exactly what the editor produces from an AsDate hint whose format box was left empty.
         do!
             match rule.Hint with
+            | AsDate format when String.IsNullOrWhiteSpace format ->
+                Error (DateFormatInvalid(rule.Field, "a date format must be given, for example yyyy-MM-dd"))
             | AsDate format ->
                 try
                     DateTime.Now.ToString(format: string) |> ignore

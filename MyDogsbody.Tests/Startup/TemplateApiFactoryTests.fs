@@ -290,7 +290,100 @@ let ``TestTemplate blames only the field whose rule failed, and does not report 
         // Reference matched, so it must not carry Amount's failure.
         let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
         Assert.NotEqual<string>(amountResult.FailureReason, referenceResult.FailureReason)
-        Assert.Equal("Not evaluated: the run stopped at Amount.", referenceResult.FailureReason)
+        Assert.Equal(
+            "Ran without error, but the run stopped at Amount before this value could be reported.",
+            referenceResult.FailureReason
+        )
+    )
+
+// PR #14 review round 3: applyTemplate evaluates in a fixed order (Reference, Amount, Currency,
+// IssueDate, DueDate) and stops at the first failure, so every field BEFORE the blamed one has
+// already run and succeeded. The panel told the user those fields were "Not evaluated" - which
+// sends them to fix a rule that demonstrably works. Only the fields after the blamed one were
+// genuinely never reached.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate does not tell the user a field the engine already evaluated was never evaluated`` () =
+    withApi (fun api supplierId ->
+        // Reference is evaluated first and matches; Amount is evaluated next and stops the run.
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001\nnothing else of interest"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.DoesNotContain("Not evaluated", referenceResult.FailureReason)
+        Assert.Contains("Ran without error", referenceResult.FailureReason)
+        Assert.Contains("stopped at Amount", referenceResult.FailureReason)
+
+        // Currency comes AFTER Amount in the evaluation order, so for it "not evaluated" is the
+        // true answer and must stay.
+        let currencyResult = actual.FieldResults |> List.find (fun r -> r.Field = "Currency")
+        Assert.Equal("Not evaluated: the run stopped at Amount.", currencyResult.FailureReason)
+    )
+
+// PR #14 review round 3: TestTemplate hard-coded PaymentTermDays 0, so a DateFromField rule's
+// derived due date always came back equal to the issue date - a plausible-looking wrong value
+// with nothing in the panel saying which term produced it. requirements.md asks the panel to
+// show "the derived due date, with the payment term it applied"; the supplier's real term is
+// reachable through loadSuppliersForTemplates, already bound in this same factory.
+
+let private dueDateFromIssueDateRules =
+    [ uiRule "Reference" "AfterLabel" "Invoice:" 0 "" "AsText" ""
+      uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+      uiRule "IssueDate" "AfterLabel" "Date:" 0 "" "AsDate" "yyyy-MM-dd"
+      uiRule "DueDate" "DateFromField" "" 0 "IssueDate" "AsDate" "yyyy-MM-dd" ]
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate derives the due date with the supplier's own payment term and reports which term it applied`` () =
+    withApi (fun api supplierId ->
+        // withApi's supplier carries PaymentTermDays = 30.
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with Rules = dueDateFromIssueDateRules }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00\nDate: 2026-08-16"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Equal(30, actual.PaymentTermDaysApplied)
+
+        let issueDateResult = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+        Assert.True issueDateResult.Succeeded
+        Assert.Equal("2026-08-16", issueDateResult.ParsedValue)
+
+        let dueDateResult = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+        Assert.True dueDateResult.Succeeded
+        Assert.Equal("2026-09-15", dueDateResult.ParsedValue)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate falls back to a zero payment term, and says so, when the template names no known supplier`` () =
+    withApi (fun api _ ->
+        // A supplier id that parses but names no row: the panel still has to answer for every
+        // other field, so the term falls back rather than failing the run - and the reported
+        // term is what makes that fallback visible instead of silent.
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate "999999" with Rules = dueDateFromIssueDateRules }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00\nDate: 2026-08-16"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Equal(0, actual.PaymentTermDaysApplied)
+
+        let dueDateResult = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+        Assert.True dueDateResult.Succeeded
+        Assert.Equal("2026-08-16", dueDateResult.ParsedValue)
+
+        // The rest of the panel stays usable.
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.True referenceResult.Succeeded
+        Assert.Equal("INV-9001", referenceResult.ParsedValue)
     )
 
 [<Fact; Trait("Level", "Integration")>]

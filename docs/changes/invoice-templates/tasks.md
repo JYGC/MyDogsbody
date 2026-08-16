@@ -401,7 +401,7 @@ until normalization is correct, so it goes first.
       Both clean, `--no-incremental` on the solution build. 0 errors, 2 pre-existing warnings neither
       touched by this change.
 - [x] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-      **744 tests — 359 Unit, 117 Integration, 238 Contract, 30 E2E**, zero failures, zero skips.
+      **752 tests — 361 Unit, 120 Integration, 240 Contract, 31 E2E**, zero failures, zero skips.
       +344 over the verified 400-test baseline. Full breakdown in `outcome.md`. (First recorded as
       `709 — 339/109/234/27`; re-measuring the branch during PR #14's review round showed it
       actually stood at `714 — 339/109/236/30`, and that round added 25 more tests.)
@@ -424,7 +424,7 @@ until normalization is correct, so it goes first.
       Project-structure table (`InvoiceTemplates/`, `Invoices/`, `TemplateApiMappers.fs`/
       `TemplateApiFactory.fs`, `TemplateUiType*`/`TemplateApi`, `InvoiceTemplateRecord`/
       `TemplateFieldRuleRecord`), the Status table, the two migrations under *Storage → Main
-      database*, and *Build state* (744 tests, plus the corrected/verified 400-test `main` baseline)
+      database*, and *Build state* (752 tests, plus the corrected/verified 400-test `main` baseline)
       all updated.
 - [x] **13.2** `outcome.md`: totals per level, which of the four measured fixtures passed first time,
       and **the measured due-date coverage the fixtures actually achieve** — the number friction #19

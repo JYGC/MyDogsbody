@@ -550,6 +550,16 @@ type TemplatesEditorDialog() =
                                         MudPaper'' { class' "pa-2"; rawSampleText }
                                         MudText'' { Typo Typo.caption; "Normalized text:" }
                                         MudPaper'' { class' "pa-2"; result.NormalizedText }
+                                        // A derived due date only means something next to the
+                                        // term that produced it - requirements.md asks for the
+                                        // term alongside the date, and it is also what makes a
+                                        // fallback 0 (no such supplier, store unreachable)
+                                        // visible instead of silently standing in for the real
+                                        // one.
+                                        MudText'' {
+                                            Typo Typo.caption
+                                            $"Payment term applied to derived dates: {result.PaymentTermDaysApplied} day(s)"
+                                        }
                                         MudSimpleTable'' {
                                             fragment {
                                                 thead {

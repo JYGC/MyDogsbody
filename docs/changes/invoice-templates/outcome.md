@@ -11,22 +11,22 @@ Change **#2 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody\MyDogsbody.csproj` — **0 errors, 0 warnings**. Checked separately per
   CLAUDE-project.md's own warning that `NU1605` is a hard error here and only a warning on the
   solution build; it did not recur.
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **744 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **752 tests, 0 failures, 0 skips**, all
   four levels present:
 
   | Level | Before | After | Added |
   | --- | --- | --- | --- |
-  | Unit | 162 | 359 | +197 |
-  | Integration | 75 | 117 | +42 |
-  | Contract | 146 | 238 | +92 |
-  | E2E | 17 | 30 | +13 |
-  | **Total** | **400** | **744** | **+344** |
+  | Unit | 162 | 361 | +199 |
+  | Integration | 75 | 120 | +45 |
+  | Contract | 146 | 240 | +94 |
+  | E2E | 17 | 31 | +14 |
+  | **Total** | **400** | **752** | **+352** |
 
   The "After" column was itself re-measured during PR #14's review-fix round, which is when the
   discrepancy showed up: the figure first recorded here (`709 — 339/109/234/27`) did not match what
   the branch actually produced (`714 — 339/109/236/30`), understating Contract by 2 and E2E by 3.
   Re-measuring the branch, not only `main`, is what this section's own Task 12.0 reasoning asks
-  for; the review round then added 25 further tests, giving 739; PR #14's second review round added 5 more, giving the 744 above.
+  for; the review round then added 25 further tests, giving 739; PR #14's second review round added 5 more, giving 744, and its third added 8 more, giving the 752 above.
 
   **"Before" is a verified number, not the figure CLAUDE-project.md previously carried.** Task 12.0
   asked for the baseline to be measured directly rather than trusted, because the `399` figure
@@ -196,6 +196,38 @@ above, so it was not done.
 The half that needed no domain change **was** closed in round 2: a field with no rule at all now
 says so, instead of being reported as a failed extraction. That case became reachable for
 `Currency` precisely because this change made `Currency` optional.
+
+Round 3 closed a third neighbouring case, also without a domain change. `applyTemplate` evaluates
+fields in a fixed order and stops at the first failure, so every field *before* the blamed one has
+already run and succeeded — but the panel labelled all four unblamed rows "Not evaluated: the run
+stopped at X", sending the user to fix a rule that demonstrably works. Only the rows *after* the
+blamed field keep that wording; the earlier ones now say they ran without error and that the run
+stopped before their value could be reported. Reporting the value itself is still the same
+per-field-outcome domain change `RawValue` and the timeout case wait on.
+
+### Closed in round 3: the panel's derived due date used an assumed payment term
+
+`requirements.md` asks:
+
+> WHEN the test panel runs a template with a `DateFromField` rule THE SYSTEM SHALL show both the
+> source date it used and the derived due date, with the payment term it applied.
+
+`TestTemplate` hard-coded `PaymentTermDays.create 0`, so every derived due date came back equal to
+the issue date, with nothing on screen saying which term produced it — a plausible-looking wrong
+value in the one panel a user authors templates against. Measured on a 30-day supplier: the panel
+showed `2026-08-16` where a real scan produces `2026-09-15`.
+
+The term is now read from the template's own supplier through `loadSuppliersForTemplates`, the
+dependency already bound in `TemplateApiFactory` for `AddTemplateWorkflow`, and reported on
+`TemplateTestResultUiType.PaymentTermDaysApplied` so the panel can show it. An id that does not
+parse, names no supplier, or a store that cannot be reached still falls back to 0 — only `DueDate`
+needs a term at all, so an unresolvable one must not take the whole run down — but the fallback is
+now visible rather than silent.
+
+This gives `TestTemplate` its first storage read, so it *does* have a real-vs-fake split after all:
+`TemplateApiContractTests`'s fake now binds `TemplateApiFactory.runTemplateTest` over its in-memory
+supplier list instead of keeping a hand-maintained copy of the panel body, and the shared suite
+exercises both supplier sources.
 
 `tasks.md`'s *Known risks carried into this change* section names two that this change accepts
 rather than closes: multi-column layouts stay unrepresentable (a `SameRowAsLabel` rule kind is the

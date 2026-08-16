@@ -314,6 +314,44 @@ let ``the test panel extracts a value whose label is split by a real non-breakin
         )
     )
 
+// PR #14 review round 3: the panel derived every due date with a hard-coded payment term of 0,
+// so a DateFromField rule always rendered a due date equal to the issue date - a plausible
+// wrong value, with nothing on screen saying which term produced it. The harness's supplier
+// carries 30 days, so the two are distinguishable here end to end.
+[<Fact; Trait("Level", "E2E")>]
+let ``the test panel derives the due date with the supplier's payment term and shows the term it applied`` () =
+    withTemplatesHarness (fun harness supplierIdString ->
+        let rules: TemplateFieldRuleUiType list =
+            [
+                { Field = "Reference"; RuleKind = "AfterLabel"; RuleText = "Invoice:"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsText"; HintText = "" }
+                { Field = "Amount"; RuleKind = "AfterLabel"; RuleText = "Total:"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsMoney"; HintText = "." }
+                { Field = "IssueDate"; RuleKind = "AfterLabel"; RuleText = "Date:"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsDate"; HintText = "yyyy-MM-dd" }
+                { Field = "DueDate"; RuleKind = "DateFromField"; RuleText = ""; RuleOffset = 0; RuleSourceField = "IssueDate"; HintKind = "AsDate"; HintText = "yyyy-MM-dd" }
+            ]
+
+        let rendered = renderEditor harness supplierIdString rules
+
+        rendered.Find("textarea").Input "Invoice: INV-42\nTotal: 99.00\nDate: 2026-08-16"
+
+        (findRunTestButton rendered).Click()
+
+        rendered.WaitForAssertion(fun () ->
+            let fieldResults = fieldResultsOf rendered
+
+            Assert.Equal<(string * string) list>(
+                [ "Reference", "INV-42"
+                  "Amount", "99.00"
+                  "Currency", "Failed: No rule for this field."
+                  "IssueDate", "2026-08-16"
+                  // 2026-08-16 + the supplier's own 30 days, not + 0.
+                  "DueDate", "2026-09-15" ],
+                fieldResults
+            )
+
+            Assert.Contains("Payment term applied to derived dates: 30 day(s)", rendered.Markup)
+        )
+    )
+
 [<Fact; Trait("Level", "E2E")>]
 let ``the run test button is disabled and shows a hint when a required field has no rule`` () =
     withTemplatesHarness (fun harness supplierIdString ->

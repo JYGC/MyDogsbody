@@ -94,7 +94,7 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **744 tests — 359 Unit, 117 Integration, 238 Contract, 30 E2E**, zero skips. If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **752 tests — 361 Unit, 120 Integration, 240 Contract, 31 E2E**, zero skips. If the build breaks now, assume you broke it.
 
 Measured directly against a real `main` checkout while closing `invoice-templates` (change #2): `main` as cut stood at **400 tests — 162 Unit, 75 Integration, 146 Contract, 17 E2E** (one more Integration test than this file had previously claimed — the old "399" figure predated a merge and was never reverified, exactly the gap `invoice-templates`'s own Phase 12 gate flagged before trusting it). `invoice-templates` added **344 tests** on top of that verified baseline. Re-measure the branch figure as well as `main`'s before quoting either: the first number recorded for this change (`709`) was 5 short of what the branch actually produced, the review round that caught it added 25 more, and PR #14's second review round added 5 more again.
 

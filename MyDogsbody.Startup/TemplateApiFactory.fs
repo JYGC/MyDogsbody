@@ -24,8 +24,8 @@ open MyDogsbody.UI.Types
 /// lines themselves are still emitted; TextNormalization.normalize drops them later, the same way
 /// it would for any other reader's output. Pure, no mutable state.
 ///
-/// Not private: TestTemplate never touches storage, so TemplateApiContractTests.fs's fake reuses
-/// this rather than duplicating it - there is no real-vs-fake split to test for a pure function.
+/// Not private: it is pure, so TemplateApiContractTests.fs's fake reuses it rather than keeping a
+/// second copy in step by hand.
 let splitPastedTextIntoLines (text: string) : TextLine list =
     let rawLines = text.Replace("\r\n", "\n").Split '\n' |> Array.toList
 
@@ -74,14 +74,30 @@ let toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) : Scanne
         Parts = (BodyPart, bodyLines) :: attachmentParts
     }
 
+/// The order applyTemplate evaluates fields in, which is what separates "already ran" from
+/// "never reached" when the run stopped early. Bound once rather than inlined, so the rows
+/// TestTemplate builds and the ranking below cannot drift apart.
+let fieldEvaluationOrder = [ Reference; Amount; Currency; IssueDate; DueDate ]
+
+/// Whether `field` is evaluated before `blamed`. A field the engine already got past has run and
+/// not failed - reporting it as "not evaluated" sends the user to fix a rule that demonstrably
+/// works, which is the opposite of what a diagnostic panel is for. Only the fields after the
+/// blamed one were genuinely never reached.
+let private runsBefore (field: TargetField) (blamed: TargetField) : bool =
+    match List.tryFindIndex ((=) field) fieldEvaluationOrder, List.tryFindIndex ((=) blamed) fieldEvaluationOrder with
+    | Some fieldRank, Some blamedRank -> fieldRank < blamedRank
+    | _ -> false
+
 /// One row of the test panel.
 ///
 /// applyTemplate returns a single Result and stops at the first field that fails, so an error
 /// names exactly one field at fault. Reporting that error against all five rows would blame
-/// fields that actually matched - so only the named field carries the failure, and the rest say
-/// they were not reached. Nothing is rendered from `string error`: that prints the union case
-/// with its constructor syntax and the placeholder TemplateId, which is developer output rather
-/// than a sentence.
+/// fields that actually matched - so only the named field carries the failure. The other four
+/// split by where they sit in the evaluation order: the ones the engine already got past ran
+/// without error, the ones after the blamed field were never reached, and saying "not evaluated"
+/// for both sent the user off to fix a rule that demonstrably works. Nothing is rendered from
+/// `string error`: that prints the union case with its constructor syntax and the placeholder
+/// TemplateId, which is developer output rather than a sentence.
 ///
 /// Known gap, deliberately left: RawValue repeats ParsedValue on the Ok path, so the raw-vs-parsed
 /// distinction FieldTestResultUiType names is not actually populated. Populating it truthfully
@@ -114,6 +130,12 @@ let toFieldTestResult
             else
                 match TemplateApiMappers.invoiceErrorField error with
                 | Some blamed when blamed = field -> TemplateApiMappers.toInvoiceErrorMessage error
+                | Some blamed when runsBefore field blamed ->
+                    // It ran and did not fail; its value is unavailable only because
+                    // applyTemplate returns one Result for the whole extraction and that Result
+                    // is an Error. Reporting the value too is the same per-field-outcome domain
+                    // change RawValue and the timeout case wait on.
+                    $"Ran without error, but the run stopped at {TemplateApiMappers.toTargetFieldUiString blamed} before this value could be reported."
                 | Some blamed -> $"Not evaluated: the run stopped at {TemplateApiMappers.toTargetFieldUiString blamed}."
                 | None -> TemplateApiMappers.toInvoiceErrorMessage error
 
@@ -146,6 +168,69 @@ let toFieldTestResult
           ParsedValue = parsedText
           Succeeded = succeeded
           FailureReason = failure }
+
+/// The payment term a DateFromField rule's arithmetic uses: the term of the supplier the
+/// template being tested belongs to, read through the same dependency AddTemplateWorkflow uses to
+/// confirm that supplier exists.
+///
+/// Falls back to 0 when the id does not parse, names no supplier, or the store cannot be reached.
+/// The panel's job is to report what every rule extracted and only DueDate needs a term at all,
+/// so an unresolvable term must not take the whole run down with it - but the term actually used
+/// is reported on the result, so a fallback 0 is visible rather than silently standing in for the
+/// real one. Hard-coding 0 here is what made the panel show a derived due date equal to the issue
+/// date, with nothing saying why.
+let resolvePaymentTerm (loadSuppliersForTemplates: LoadSuppliersForTemplates) (supplierIdString: string) : PaymentTermDays =
+    let zero = PaymentTermDays.create 0 |> Result.defaultWith (fun _ -> failwith "unreachable: 0 is always in range")
+
+    SupplierId.create supplierIdString
+    |> Result.toOption
+    |> Option.bind (fun supplierId ->
+        match loadSuppliersForTemplates () with
+        | Ok suppliers -> suppliers |> List.tryFind (fun supplier -> supplier.Id = supplierId)
+        | Error _ -> None)
+    |> Option.map (fun supplier -> supplier.PaymentTermDays)
+    |> Option.defaultValue zero
+
+/// One test-panel run: validate the template as held in the editor, apply it to the pasted
+/// sample, and report the normalized text, the term used and one row per field. Writes nothing.
+///
+/// Dependencies first, input last, so the contract suite's fake binds this same body over
+/// in-memory suppliers instead of keeping a second copy of it in step by hand - and the suite
+/// then genuinely exercises both supplier sources, which it could not while this was pure.
+let runTemplateTest
+    (loadSuppliersForTemplates: LoadSuppliersForTemplates)
+    (input: TemplateTestInputUiType)
+    : Result<TemplateTestResultUiType, MyDogsbodyException> =
+    result {
+        let! validated =
+            input.Template
+            |> TemplateApiMappers.toUnvalidatedTemplate
+            |> Result.bind ValidateTemplateWorkflow.validateTemplate
+            |> Result.mapError (
+                TemplateApiMappers.toMyDogsbodyException ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate)
+
+        let message = toTestMessage (ValidTemplate.part validated) input
+        let paymentTerm = resolvePaymentTerm loadSuppliersForTemplates input.Template.SupplierId
+        let placeholderId = TemplateId.create "test" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
+
+        let extracted = ApplyTemplateWorkflow.applyTemplate paymentTerm placeholderId validated message
+        let normalizedText =
+            TextNormalization.normalize (splitPastedTextIntoLines input.SampleText)
+            |> List.map (fun line -> line.Text)
+            |> String.concat "\n"
+
+        // Read off the validated template rather than the UI record, so the panel and the engine
+        // are answering from the same rule set.
+        let fieldsWithRules =
+            ValidTemplate.rules validated |> List.map (fun rule -> rule.Field) |> Set.ofList
+
+        return
+            {
+                NormalizedText = normalizedText
+                PaymentTermDaysApplied = PaymentTermDays.value paymentTerm
+                FieldResults = fieldEvaluationOrder |> List.map (toFieldTestResult fieldsWithRules extracted)
+            }
+    }
 
 let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: DatabaseContext) : TemplateApi =
 
@@ -249,40 +334,8 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.TemplateApi.reorderTemplates)
 
         // Runs the same engine a scan calls - ValidateTemplateWorkflow then ApplyTemplateWorkflow
-        // - over pasted text, never writing anything. A payment term of 0 is a placeholder: the
-        // test panel has no supplier context of its own to read one from (Q7.6.6 asks only that
-        // normalized text and per-field results are shown, not that DateFromField's arithmetic
-        // uses a real term here).
-        TestTemplate =
-            fun input ->
-                result {
-                    let! validated =
-                        input.Template
-                        |> TemplateApiMappers.toUnvalidatedTemplate
-                        |> Result.bind ValidateTemplateWorkflow.validateTemplate
-                        |> Result.mapError (toException ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate)
-
-                    let message = toTestMessage (ValidTemplate.part validated) input
-                    let noTerm = PaymentTermDays.create 0 |> Result.defaultWith (fun _ -> failwith "unreachable: 0 is always in range")
-                    let placeholderId = TemplateId.create "test" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
-
-                    let extracted = ApplyTemplateWorkflow.applyTemplate noTerm placeholderId validated message
-                    let normalizedText =
-                        TextNormalization.normalize (splitPastedTextIntoLines input.SampleText)
-                        |> List.map (fun line -> line.Text)
-                        |> String.concat "\n"
-
-                    // Read off the validated template rather than the UI record, so the panel
-                    // and the engine are answering from the same rule set.
-                    let fieldsWithRules =
-                        ValidTemplate.rules validated |> List.map (fun rule -> rule.Field) |> Set.ofList
-
-                    return
-                        {
-                            NormalizedText = normalizedText
-                            FieldResults =
-                                [ Reference; Amount; Currency; IssueDate; DueDate ]
-                                |> List.map (toFieldTestResult fieldsWithRules extracted)
-                        }
-                }
+        // - over pasted text, never writing anything. The one read it does perform is the
+        // supplier's payment term, so a DateFromField rule derives the due date a scan would
+        // rather than one an assumed term produced.
+        TestTemplate = runTemplateTest loadSuppliersForTemplates
     }

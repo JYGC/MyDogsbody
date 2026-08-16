@@ -179,6 +179,32 @@ let ``validateTemplate refuses a date format that is not a real format string wi
         Assert.False(System.String.IsNullOrWhiteSpace reason)
     | other -> Assert.Fail($"Expected Error(DateFormatInvalid _), but got {other}")
 
+// PR #14 review round 3: the format check was `DateTime.Now.ToString format` catching
+// FormatException, and .NET treats an empty format string as the general "G" pattern rather
+// than throwing - so `AsDate ""` validated, saved, and then failed on every single scan with
+// DateUnparseable(..., format = ""), since TryParseExact rejects an empty format. It is
+// reachable from the editor by choosing "AsDate" and leaving the date-format box blank, and the
+// AsMoney arm of the same hint already refuses its missing separator.
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("")>]
+[<InlineData("   ")>]
+let ``validateTemplate refuses a blank date format with DateFormatInvalid naming the field`` (format: string) =
+    let input =
+        { minimalValidTemplate with
+            Rules =
+                [ validReferenceRule
+                  validAmountRule
+                  validCurrencyRule
+                  { Field = IssueDate; Rule = AfterLabel "Date:"; Hint = AsDate format } ] }
+
+    let actual = ValidateTemplateWorkflow.validateTemplate input
+
+    match actual with
+    | Error (DateFormatInvalid (field, reason)) ->
+        Assert.Equal<TargetField>(IssueDate, field)
+        Assert.Contains("date format", reason)
+    | other -> Assert.Fail($"Expected Error(DateFormatInvalid _), but got {other}")
+
 [<Theory; Trait("Level", "Unit")>]
 [<InlineData(-1)>]
 [<InlineData(21)>]

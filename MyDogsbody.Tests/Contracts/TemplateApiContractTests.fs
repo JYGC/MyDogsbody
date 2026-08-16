@@ -173,38 +173,11 @@ let private withFakeApi (test: TemplateApi -> string -> unit) =
                         templateIdStrings
                     |> Result.mapError (toException ActionNames.MyDogsbody.Startup.TemplateApi.reorderTemplates)
 
-            // Never touches storage - reuses TemplateApiFactory's own glue rather than duplicating
-            // it, per this file's header comment.
-            TestTemplate =
-                fun input ->
-                    result {
-                        let! validated =
-                            input.Template
-                            |> TemplateApiMappers.toUnvalidatedTemplate
-                            |> Result.bind ValidateTemplateWorkflow.validateTemplate
-                            |> Result.mapError (toException ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate)
-
-                        let message = TemplateApiFactory.toTestMessage (ValidTemplate.part validated) input
-                        let noTerm = PaymentTermDays.create 0 |> Result.defaultWith (fun _ -> failwith "unreachable: 0 is always in range")
-                        let placeholderId = TemplateId.create "test" |> Result.defaultWith (fun _ -> failwith "unreachable: constant id")
-
-                        let extracted = ApplyTemplateWorkflow.applyTemplate noTerm placeholderId validated message
-                        let normalizedText =
-                            TextNormalization.normalize (TemplateApiFactory.splitPastedTextIntoLines input.SampleText)
-                            |> List.map (fun line -> line.Text)
-                            |> String.concat "\n"
-
-                        let fieldsWithRules =
-                            ValidTemplate.rules validated |> List.map (fun rule -> rule.Field) |> Set.ofList
-
-                        return
-                            {
-                                NormalizedText = normalizedText
-                                FieldResults =
-                                    [ Reference; Amount; Currency; IssueDate; DueDate ]
-                                    |> List.map (TemplateApiFactory.toFieldTestResult fieldsWithRules extracted)
-                            }
-                    }
+            // The one storage read TestTemplate performs is the supplier's payment term, so the
+            // fake binds TemplateApiFactory's own body over its in-memory supplier list rather
+            // than keeping a hand-maintained copy of it - the split this suite exercises is the
+            // supplier source, not a reimplementation of the panel.
+            TestTemplate = TemplateApiFactory.runTemplateTest loadSuppliersForTemplates
         }
         supplierIdString
 
@@ -435,4 +408,37 @@ let ``TestTemplate reports extraction results without writing anything`` (implem
         Assert.True reference.Succeeded
         Assert.Equal("INV-1", reference.ParsedValue)
         Assert.Empty(api.GetTemplatesForSupplier supplierIdString |> okOrFail "GetTemplatesForSupplier")
+    )
+
+// PR #14 review round 3: TestTemplate now resolves the template's supplier to get the payment
+// term a DateFromField rule derives with, so it does have a real-vs-fake split after all - the
+// real API reads the supplier out of SQLite, the fake out of its in-memory list. Both fixtures
+// carry the same 30-day supplier, so the same expected due date holds for both.
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``TestTemplate derives the due date with the supplier's own payment term`` (implementation: string) =
+    withImplementation implementation (fun api supplierIdString ->
+        let rules: TemplateFieldRuleUiType list =
+            [
+                { Field = "Reference"; RuleKind = "AfterLabel"; RuleText = "Invoice:"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsText"; HintText = "" }
+                { Field = "Amount"; RuleKind = "AfterLabel"; RuleText = "Total:"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsMoney"; HintText = "." }
+                { Field = "IssueDate"; RuleKind = "AfterLabel"; RuleText = "Date:"; RuleOffset = 0; RuleSourceField = ""; HintKind = "AsDate"; HintText = "yyyy-MM-dd" }
+                { Field = "DueDate"; RuleKind = "DateFromField"; RuleText = ""; RuleOffset = 0; RuleSourceField = "IssueDate"; HintKind = "AsDate"; HintText = "yyyy-MM-dd" }
+            ]
+
+        let input: TemplateTestInputUiType =
+            {
+                Template = { aTemplate supplierIdString with Rules = rules }
+                SampleText = "Invoice: INV-1\nTotal: 42.50\nDate: 2026-08-16"
+                SampleSubject = ""
+                SampleAttachmentFilename = ""
+            }
+
+        let result = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Equal(30, result.PaymentTermDaysApplied)
+
+        let dueDate = result.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+        Assert.True dueDate.Succeeded
+        Assert.Equal("2026-09-15", dueDate.ParsedValue)
     )
