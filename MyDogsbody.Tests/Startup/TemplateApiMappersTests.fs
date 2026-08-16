@@ -5,6 +5,7 @@ open Xunit
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
+open MyDogsbody.Domain.Invoices
 open MyDogsbody.Startup
 open MyDogsbody.UI.Types
 
@@ -225,6 +226,57 @@ let ``the five save-time and reorder refusals become sentences rather than raisi
         Assert.Equal(anAction, actual.ActionName)
         Assert.Equal(expectedMessage, actual.Message)
         Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
+
+/// The panel's per-field reason is the other outbound translation, and it obeys the same rule as
+/// toMyDogsbodyException: a sentence, never `string error`. It also drops the TemplateId every
+/// template-carrying case holds - the composition root invents that id for a run that stores
+/// nothing, so quoting it would put a template the user never made in front of them.
+[<Fact; Trait("Level", "Contract")>]
+let ``every InvoiceError case produces a sentence that never quotes the placeholder template id`` () =
+    let templateId = TemplateId.create "test" |> valueOrFail
+    let supplierId = SupplierId.create "1" |> valueOrFail
+
+    let allCases: InvoiceError list =
+        [
+            SupplierNotRecognised "billing@acme.test"
+            MultipleSuppliersMatched("billing@acme.test", [ supplierId ])
+            NoTemplateForSupplier supplierId
+            TemplateMatchedNothing(templateId, Amount)
+            AmountUnparseable(Amount, "two hundred")
+            DateUnparseable(IssueDate, "31/02/2026", "d MMM yyyy")
+            DueDateOutOfRange(templateId, DateTime(9999, 12, 31), 30)
+            RuleTimedOut(templateId, Reference)
+        ]
+
+    let declaredCases =
+        Reflection.FSharpType.GetUnionCases(typeof<InvoiceError>) |> Array.length
+
+    Assert.Equal(declaredCases, List.length allCases)
+
+    for case in allCases do
+        let actual = TemplateApiMappers.toFieldFailureReason case
+        Assert.False(String.IsNullOrWhiteSpace actual, $"{case} produced an empty reason")
+        Assert.DoesNotContain("TemplateId", actual)
+        Assert.EndsWith(".", actual)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``each InvoiceError the test panel can produce names its field and what the rule found`` () =
+    let templateId = TemplateId.create "test" |> valueOrFail
+
+    let expectations: (InvoiceError * string) list =
+        [
+            TemplateMatchedNothing(templateId, Amount), "The rule for Amount found nothing in the sample text."
+            AmountUnparseable(Amount, "two hundred"),
+            "The rule for Amount found 'two hundred', which is not a number it can read."
+            DateUnparseable(IssueDate, "31/02/2026", "d MMM yyyy"),
+            "The rule for IssueDate found '31/02/2026', which does not match the date format 'd MMM yyyy'."
+            DueDateOutOfRange(templateId, DateTime(9999, 12, 31), 30),
+            "Adding 30 days to the issue date 9999-12-31 runs past the last date a calendar can hold."
+            RuleTimedOut(templateId, Reference), "The rule for Reference took too long and was stopped."
+        ]
+
+    for error, expectedReason in expectations do
+        Assert.Equal(expectedReason, TemplateApiMappers.toFieldFailureReason error)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``an adapter exception becomes TemplateStoreFailed carrying its message`` () =

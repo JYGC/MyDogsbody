@@ -351,3 +351,84 @@ let ``TestTemplate reports a failed field rather than a default when the sample 
         Assert.False referenceResult.Succeeded
         Assert.False(String.IsNullOrWhiteSpace referenceResult.FailureReason)
     )
+
+/// IssueDate and DueDate are OPTIONAL - ValidateTemplateWorkflow requires a rule only for
+/// Reference, Amount and Currency. A template that declares no date rule has not failed to extract
+/// a date; it was never asked to. Reporting one anyway tells the author two fields of a sound
+/// template are broken, which is the same false negative the attachment-part fix closed.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports only the fields the template carries a rule for`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], actual.FieldResults |> List.map (fun r -> r.Field))
+    )
+
+/// The other half of the rule above: a field the template DOES carry a rule for, whose rule found
+/// nothing, is still reported as a failure. Dropping the fields with no rule must not turn into
+/// dropping the fields that failed.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate still reports an optional date rule that found nothing`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template =
+                { aTemplate supplierId with
+                    Rules = validRulesUi @ [ uiRule "IssueDate" "AfterLabel" "Dated:" 0 "" "AsDate" "d MMM yyyy" ] }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Equal<string list>(
+            [ "Reference"; "Amount"; "Currency"; "IssueDate" ],
+            actual.FieldResults |> List.map (fun r -> r.Field)
+        )
+
+        let issueDateResult = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+        Assert.False issueDateResult.Succeeded
+        Assert.Equal("No value extracted.", issueDateResult.FailureReason)
+    )
+
+/// The reason is what the panel puts in front of the author, so it is a sentence - not
+/// `string error`, which renders the union as `TemplateMatchedNothing (TemplateId "test", Amount)`
+/// and quotes a template id the composition root invented for the run.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports a rule that found nothing as a sentence, not a union dump`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.False amountResult.Succeeded
+        Assert.Equal("The rule for Amount found nothing in the sample text.", amountResult.FailureReason)
+    )
+
+/// An amount the rule DID find but could not read is a different sentence from one it never found,
+/// and it quotes the text it choked on - that text is the whole diagnostic.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports an unreadable amount as a sentence quoting the text it found`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001\nTotal: two hundred"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        Assert.False amountResult.Succeeded
+        Assert.Equal("The rule for Amount found 'two hundred', which is not a number it can read.", amountResult.FailureReason)
+    )

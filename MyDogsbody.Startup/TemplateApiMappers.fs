@@ -15,6 +15,7 @@ open MyDogsbody.Domain
 open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
+open MyDogsbody.Domain.Invoices
 open MyDogsbody.UI.Types
 
 // Every string->union conversion below returns Result rather than raising - the same reasoning
@@ -229,3 +230,37 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
 /// Inbound: an adapter's exception becomes the one domain case that stands for infrastructure
 /// failure. The adapter's handleError has already logged it, so nothing logs again here.
 let toTemplateError (ex: MyDogsbodyException) : TemplateError = TemplateStoreFailed ex.Message
+
+/// The other outbound translation: an InvoiceError becomes the sentence the test panel prints
+/// against a field. InvoiceError carries no ActionName and never reaches handleError in this
+/// change (design.md -> Errors), so it does not go through toMyDogsbodyException - but it is
+/// still a domain error the user reads, and the same rule applies: a sentence, not a union.
+///
+/// `string error` was what this replaced, and it printed
+/// `TemplateMatchedNothing (TemplateId "test", Amount)` - a union dump quoting the placeholder
+/// TemplateId the composition root invents for a run that never touches the store. requirements.md
+/// asks the panel to say, where a field failed, WHY; the id of a template that does not exist is
+/// not part of that answer, so every case below drops it and names the field instead.
+///
+/// A match rather than a catch-all: an InvoiceError case added later breaks the build here, the
+/// same way toMyDogsbodyException's exhaustiveness is what caught five missing TemplateError
+/// branches in the first review round.
+let toFieldFailureReason (error: InvoiceError) : string =
+    match error with
+    // The three MatchSupplierWorkflow / SelectTemplateWorkflow cases cannot arise from a test-panel
+    // run - it applies one named template to pasted text and matches no supplier - but they are
+    // InvoiceError cases, so they carry a sentence rather than a hole for a later caller to find.
+    | SupplierNotRecognised sender -> $"No supplier matched the sender '{sender}'."
+    | MultipleSuppliersMatched(sender, suppliers) ->
+        let ids = suppliers |> List.map SupplierId.value |> String.concat ", "
+        $"More than one supplier matched the sender '{sender}': {ids}."
+    | NoTemplateForSupplier supplierId -> $"No template is set up for supplier '{SupplierId.value supplierId}'."
+    | TemplateMatchedNothing(_, field) -> $"The rule for {toTargetFieldUiString field} found nothing in the sample text."
+    | AmountUnparseable(field, raw) ->
+        $"The rule for {toTargetFieldUiString field} found '{raw}', which is not a number it can read."
+    | DateUnparseable(field, raw, format) ->
+        $"The rule for {toTargetFieldUiString field} found '{raw}', which does not match the date format '{format}'."
+    | DueDateOutOfRange(_, issueDate, paymentTermDays) ->
+        let issued = issueDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+        $"Adding {paymentTermDays} days to the issue date {issued} runs past the last date a calendar can hold."
+    | RuleTimedOut(_, field) -> $"The rule for {toTargetFieldUiString field} took too long and was stopped."

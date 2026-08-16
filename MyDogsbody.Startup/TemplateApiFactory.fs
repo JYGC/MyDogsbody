@@ -82,7 +82,7 @@ let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>
           RawValue = ""
           ParsedValue = ""
           Succeeded = false
-          FailureReason = string error }
+          FailureReason = TemplateApiMappers.toFieldFailureReason error }
     | Ok invoice ->
         let parsedText, succeeded, failure =
             match field with
@@ -233,10 +233,26 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                         |> List.map (fun line -> line.Text)
                         |> String.concat "\n"
 
+                    // Only the fields the template actually carries a rule for. IssueDate and
+                    // DueDate are optional - ValidateTemplateWorkflow requires a rule only for
+                    // Reference, Amount and Currency - so a template that declares no date rule
+                    // has not failed to extract a date, it was never asked for one. Reporting the
+                    // absent fields anyway told the author that two fields of a sound template
+                    // were broken, which is the same false negative the attachment-part fix
+                    // closed, arriving from the other direction.
+                    //
+                    // The ORDER stays the engine's fixed evaluation order rather than the rule
+                    // list's, so the panel reads the same way whatever order the rules were
+                    // entered in; only the fields with no rule drop out.
+                    let ruledFields = ValidTemplate.rules validated |> List.map (fun rule -> rule.Field)
+
                     return
                         {
                             NormalizedText = normalizedText
-                            FieldResults = [ Reference; Amount; Currency; IssueDate; DueDate ] |> List.map (toFieldTestResult extracted)
+                            FieldResults =
+                                [ Reference; Amount; Currency; IssueDate; DueDate ]
+                                |> List.filter (fun field -> List.contains field ruledFields)
+                                |> List.map (toFieldTestResult extracted)
                         }
                 }
     }
