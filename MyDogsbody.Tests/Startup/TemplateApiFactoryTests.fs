@@ -270,12 +270,101 @@ let ``TestTemplate runs the same engine a scan calls, over pasted text, and retu
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
         Assert.Contains("INV-9001", actual.NormalizedText)
-        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
-        Assert.True referenceResult.Succeeded
-        Assert.Equal("INV-9001", referenceResult.ParsedValue)
-        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
-        Assert.True amountResult.Succeeded
-        Assert.Equal("245.00", amountResult.ParsedValue)
+
+        // Every field of every row, not only the two the engine reads out of the text. Currency's
+        // rendering was asserted nowhere: replacing it with invoice.Reference, and separately
+        // reporting it as "No value extracted." on a run that succeeded, each passed the whole
+        // suite 776 of 776. It is one of the three fields ValidateTemplateWorkflow requires, and
+        // ApplyTemplateWorkflow notes it is the one with no later parse step to correct it.
+        let expected: (string * string) list =
+            [ "Reference", "INV-9001"; "Amount", "245.00"; "Currency", "AUD" ]
+
+        Assert.Equal<string list>(expected |> List.map fst, actual.FieldResults |> List.map (fun r -> r.Field))
+
+        for field, value in expected do
+            let row = actual.FieldResults |> List.find (fun r -> r.Field = field)
+            Assert.True(row.Succeeded, $"{field} failed: {row.FailureReason}")
+            Assert.Equal(value, row.ParsedValue)
+            Assert.Equal(value, row.RawValue)
+            Assert.Equal("", row.FailureReason)
+    )
+
+/// requirements.md: "WHEN LinesAfterLabel is given an offset that runs past the end of the BLOCK
+/// THE SYSTEM SHALL report that the rule found nothing" - and for pasted text the panel's own
+/// splitter is the only thing that says where a block ends ("Plain text splits on blank lines",
+/// DocumentsTypes.TextLine). Nothing asserted that it does: dropping the BlockIndex increment
+/// altogether passed the whole suite 776 of 776, and measured under that change the panel reported
+/// Reference as Succeeded = true carrying "WU-88213" for a template the engine refuses at scan
+/// time. That is the panel agreeing with a template that cannot work - which requirements.md names
+/// as the thing the panel exists to prevent - for LinesAfterLabel, the rule kind tasks.md 9.3 puts
+/// first as the most used.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate honours the blank line a LinesAfterLabel offset must not step across`` () =
+    withApi (fun api supplierId ->
+        let template: TemplateUiTypeWithoutId =
+            { aTemplate supplierId with
+                Rules =
+                    [ uiRule "Reference" "LinesAfterLabel" "Reference" 1 "" "AsText" ""
+                      uiRule "Amount" "FixedValue" "1.00" 0 "" "AsMoney" "."
+                      uiRule "Currency" "FixedValue" "AUD" 0 "" "AsText" "" ] }
+
+        let run sampleText =
+            let actual =
+                api.TestTemplate
+                    { Template = template; SampleText = sampleText; SampleSubject = ""; SampleAttachmentFilename = "" }
+                |> okOrFail "TestTemplate"
+
+            actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+
+        // Label and value in one block: the offset lands inside it, so the rule reads the value.
+        let withinOneBlock = run "Reference\nWU-88213"
+        Assert.True(withinOneBlock.Succeeded, $"Reference failed: {withinOneBlock.FailureReason}")
+        Assert.Equal("WU-88213", withinOneBlock.ParsedValue)
+
+        // A blank line between them is a block boundary, so the same offset steps out of the block
+        // and must find nothing rather than reaching into the next one. Asserted for CRLF too:
+        // pasting from a Windows document is how the sample text ordinarily arrives, and a splitter
+        // that only recognised "\n" would see one line here and never reach the boundary at all.
+        for sampleText in [ "Reference\n\nWU-88213"; "Reference\r\n\r\nWU-88213" ] do
+            let acrossABlankLine = run sampleText
+            Assert.False(acrossABlankLine.Succeeded, $"Reference should not have matched across a block boundary in {sampleText |> box}")
+            Assert.Equal("", acrossABlankLine.ParsedValue)
+            Assert.Equal("The rule for Reference found nothing in the sample text.", acrossABlankLine.FailureReason)
+    )
+
+/// The attachment fix of the first review round was asserted for Pdf alone, and the panel builds
+/// its attachment part from the format the template selected - so forcing that format to Pdf passed
+/// the whole suite 776 of 776, and measured under that change an Attachment(Word),
+/// Attachment(PlainText) or Attachment(EmailBody) template reported every field of a sound template
+/// as unmatched: partMatchesSelector gives it no candidate part at all. Same false negative the
+/// first round closed, still open for three of the four formats.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate runs an attachment-scoped template whichever format it selects`` () =
+    withApi (fun api supplierId ->
+        let formats = [ "Pdf"; "Word"; "PlainText"; "EmailBody" ]
+
+        let declaredFormats =
+            Reflection.FSharpType.GetUnionCases(typeof<MyDogsbody.Domain.Documents.DocumentFormat>)
+            |> Array.length
+
+        Assert.Equal(declaredFormats, List.length formats)
+
+        for format in formats do
+            let actual =
+                api.TestTemplate
+                    { Template = { aTemplate supplierId with DocumentPart = "Attachment"; AttachmentFormat = format }
+                      SampleText = "Invoice: INV-9001\nTotal: 245.00"
+                      SampleSubject = ""
+                      SampleAttachmentFilename = "invoice.doc" }
+                |> okOrFail $"TestTemplate ({format})"
+
+            let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+            Assert.True(referenceResult.Succeeded, $"{format}: Reference failed: {referenceResult.FailureReason}")
+            Assert.Equal("INV-9001", referenceResult.ParsedValue)
+
+            let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+            Assert.True(amountResult.Succeeded, $"{format}: Amount failed: {amountResult.FailureReason}")
+            Assert.Equal("245.00", amountResult.ParsedValue)
     )
 
 /// The pasted text has to reach the part the template actually reads. An attachment-scoped
