@@ -252,6 +252,33 @@ let toTemplateError (ex: MyDogsbodyException) : TemplateError = TemplateStoreFai
 /// A match rather than a catch-all: an InvoiceError case added later breaks the build here, the
 /// same way toMyDogsbodyException's exhaustiveness is what caught five missing TemplateError
 /// branches in the first review round.
+/// Which field an apply-time error is ABOUT.
+///
+/// ApplyTemplateWorkflow evaluates the fields in one fixed order and stops at the first that
+/// fails, so a whole test-panel run hands back a single InvoiceError - and a panel that gave that
+/// one error to every row told the author "Reference failed" about a rule that had just matched,
+/// with a reason naming Amount. requirements.md asks the panel to show, per field, "where it
+/// failed - why", and the panel's entire job is to send the author to the rule that is broken; the
+/// reason has to land on the field it names.
+///
+/// DueDateOutOfRange carries a TemplateId rather than a field, but it is raised in exactly one
+/// place - the DueDate DateFromField branch - so the field is DueDate by construction. The three
+/// supplier/template-selection cases name no field and cannot arise from a panel run at all, so
+/// they answer None and their sentence goes on every row, as before.
+///
+/// A match rather than a catch-all, for the same reason toFieldFailureReason below is one: an
+/// InvoiceError case added later breaks the build here rather than quietly answering None.
+let toFailingField (error: InvoiceError) : TargetField option =
+    match error with
+    | SupplierNotRecognised _
+    | MultipleSuppliersMatched _
+    | NoTemplateForSupplier _ -> None
+    | TemplateMatchedNothing(_, field) -> Some field
+    | AmountUnparseable(field, _) -> Some field
+    | DateUnparseable(field, _, _) -> Some field
+    | DueDateOutOfRange _ -> Some DueDate
+    | RuleTimedOut(_, field) -> Some field
+
 let toFieldFailureReason (error: InvoiceError) : string =
     match error with
     // The three MatchSupplierWorkflow / SelectTemplateWorkflow cases cannot arise from a test-panel

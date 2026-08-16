@@ -415,6 +415,31 @@ let ``TestTemplate reports a rule that found nothing as a sentence, not a union 
         Assert.Equal("The rule for Amount found nothing in the sample text.", amountResult.FailureReason)
     )
 
+/// The engine short-circuits at the FIRST field that fails, so one InvoiceError comes back for the
+/// whole run - and handing that one error to every row said "Reference failed" about a rule that
+/// matched, with a reason naming Amount. requirements.md asks the panel to show, per field, "where
+/// it failed - why"; a reason belongs to the field it names, and the panel exists to send the
+/// author to the rule that is actually broken.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate blames only the field the run stopped at, never the fields it did not fault`` () =
+    withApi (fun api supplierId ->
+        // "Invoice:" matches, so Reference extracts INV-9001; "Total:" is absent, so the run stops
+        // at Amount. Currency is a FixedValue and cannot fail at all.
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = "Invoice: INV-9001"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let reasonFor field = (actual.FieldResults |> List.find (fun r -> r.Field = field)).FailureReason
+
+        Assert.Equal("The rule for Amount found nothing in the sample text.", reasonFor "Amount")
+        Assert.Equal("Not reported: the run stopped at Amount.", reasonFor "Reference")
+        Assert.Equal("Not reported: the run stopped at Amount.", reasonFor "Currency")
+    )
+
 /// Running the panel before anything has been pasted is the first thing a user does, and a cleared
 /// MudTextField hands a bound `string` back as null - so the splitter has to take one. It reached
 /// String.Replace directly, so TestTemplate raised NullReferenceException out of an API whose type

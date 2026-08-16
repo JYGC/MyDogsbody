@@ -95,6 +95,25 @@ let private toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) 
 let private toIsoDate (date: DateTime) : string =
     date.ToString("yyyy-MM-dd", Globalization.CultureInfo.InvariantCulture)
 
+/// The reason THIS field's row carries, out of the single error a whole run hands back.
+///
+/// ApplyTemplateWorkflow stops at the first field that fails, so one InvoiceError stands for the
+/// run rather than for every field in it. Giving it to every row reported a template's sound rules
+/// as broken and quoted another field's diagnosis at them - measured, an "Invoice:" rule that had
+/// just extracted INV-9001 was shown as failed with "The rule for Amount found nothing in the
+/// sample text.", and a FixedValue Currency rule, which cannot fail at all, got the same. That is
+/// the wrong rule to send the author to, on the one screen the change exists to let them check
+/// extraction against. The fields the run never faulted say only that: the run stopped elsewhere.
+///
+/// They still report Succeeded = false, because no value came back for them either - claiming
+/// success with nothing to show would be the same lie from the other side.
+let private toFailureReasonFor (field: TargetField) (error: InvoiceError) : string =
+    match TemplateApiMappers.toFailingField error with
+    | Some failing when failing <> field ->
+        $"Not reported: the run stopped at {TemplateApiMappers.toTargetFieldUiString failing}."
+    | Some _
+    | None -> TemplateApiMappers.toFieldFailureReason error
+
 let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
     match extracted with
     | Error error ->
@@ -102,7 +121,7 @@ let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>
           RawValue = ""
           ParsedValue = ""
           Succeeded = false
-          FailureReason = TemplateApiMappers.toFieldFailureReason error }
+          FailureReason = toFailureReasonFor field error }
     | Ok invoice ->
         let parsedText, succeeded, failure =
             match field with

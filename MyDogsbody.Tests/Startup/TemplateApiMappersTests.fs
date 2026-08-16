@@ -302,6 +302,33 @@ let ``each InvoiceError the test panel can produce names its field and what the 
     for error, expectedReason in expectations do
         Assert.Equal(expectedReason, TemplateApiMappers.toFieldFailureReason error)
 
+/// The panel gets ONE error for a whole run - the engine stops at the first field that fails - so
+/// the row that gets the sentence has to be chosen, not assumed. Every apply-time case a test-panel
+/// run can produce names its field; the three supplier/template-selection cases name none, which is
+/// why this returns an option rather than a field.
+[<Fact; Trait("Level", "Contract")>]
+let ``toFailingField names the field every apply-time error is about`` () =
+    let templateId = TemplateId.create "test" |> valueOrFail
+    let supplierId = SupplierId.create "1" |> valueOrFail
+
+    let expectations: (InvoiceError * TargetField option) list =
+        [
+            SupplierNotRecognised "billing@acme.test", None
+            MultipleSuppliersMatched("billing@acme.test", [ supplierId ]), None
+            NoTemplateForSupplier supplierId, None
+            TemplateMatchedNothing(templateId, Amount), Some Amount
+            AmountUnparseable(Amount, "two hundred"), Some Amount
+            DateUnparseable(IssueDate, "31/02/2026", "d MMM yyyy"), Some IssueDate
+            DueDateOutOfRange(templateId, DateTime(9999, 12, 31), 30), Some DueDate
+            RuleTimedOut(templateId, Reference), Some Reference
+        ]
+
+    let declaredCases = Reflection.FSharpType.GetUnionCases(typeof<InvoiceError>) |> Array.length
+    Assert.Equal(declaredCases, List.length expectations)
+
+    for error, expectedField in expectations do
+        Assert.Equal<TargetField option>(expectedField, TemplateApiMappers.toFailingField error)
+
 [<Fact; Trait("Level", "Contract")>]
 let ``an adapter exception becomes TemplateStoreFailed carrying its message`` () =
     let adapterFailure =
