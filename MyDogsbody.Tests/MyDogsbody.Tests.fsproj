@@ -53,6 +53,8 @@
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />
     <Compile Include="Startup\SupplierApiFactoryTests.fs" />
+    <Compile Include="Startup\TemplateApiMappersTests.fs" />
+    <Compile Include="Startup\TemplateApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
     <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
