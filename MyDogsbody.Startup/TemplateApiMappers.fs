@@ -279,7 +279,35 @@ let toFailingField (error: InvoiceError) : TargetField option =
     | DueDateOutOfRange _ -> Some DueDate
     | RuleTimedOut(_, field) -> Some field
 
-let toFieldFailureReason (error: InvoiceError) : string =
+/// The sentence for "the rule yielded nothing", naming the input that rule actually reads.
+///
+/// Three of the seven kinds do not read the pasted sample text, and requirements.md is explicit
+/// about each: SubjectCapture runs its pattern "against the message subject, not the document
+/// body", AttachmentName "against the attachment's filename, not its content", and FixedValue
+/// returns its value "without consulting the text at all". One sentence naming the sample text for
+/// every kind therefore sent the author to a box that is not the problem - measured with an empty
+/// subject box and a sample text full of matching content, an unmatched SubjectCapture rule read
+/// "The rule for Reference found nothing in the sample text." That is the wrong box to send them
+/// to, on the one screen the change exists to let them diagnose a template, and it contradicts the
+/// rule kind's own documented behaviour.
+///
+/// A FixedValue rule has no input at all, so it gets a sentence of its own rather than a locative:
+/// the only way it yields nothing is an empty fixed value, which is the thing to go and fix.
+///
+/// None is a caller with no rule to hand - an error naming no field - and keeps the original
+/// wording. Exhaustive over FieldRule, so an eighth rule kind breaks the build here rather than
+/// quietly claiming to read the sample text.
+let private toMatchedNothingReason (rule: FieldRule option) (field: TargetField) : string =
+    let name = toTargetFieldUiString field
+
+    match rule with
+    | Some (SubjectCapture _) -> $"The rule for {name} found nothing in the sample subject."
+    | Some (AttachmentName _) -> $"The rule for {name} found nothing in the sample attachment filename."
+    | Some (FixedValue _) -> $"The fixed value for {name} is empty."
+    | Some (AfterLabel _ | LinesAfterLabel _ | RegexCapture _ | DateFromField _)
+    | None -> $"The rule for {name} found nothing in the sample text."
+
+let toFieldFailureReason (rule: FieldRule option) (error: InvoiceError) : string =
     match error with
     // The three MatchSupplierWorkflow / SelectTemplateWorkflow cases cannot arise from a test-panel
     // run - it applies one named template to pasted text and matches no supplier - but they are
@@ -289,7 +317,7 @@ let toFieldFailureReason (error: InvoiceError) : string =
         let ids = suppliers |> List.map SupplierId.value |> String.concat ", "
         $"More than one supplier matched the sender '{sender}': {ids}."
     | NoTemplateForSupplier supplierId -> $"No template is set up for supplier '{SupplierId.value supplierId}'."
-    | TemplateMatchedNothing(_, field) -> $"The rule for {toTargetFieldUiString field} found nothing in the sample text."
+    | TemplateMatchedNothing(_, field) -> toMatchedNothingReason rule field
     | AmountUnparseable(field, raw) ->
         $"The rule for {toTargetFieldUiString field} found '{raw}', which is not a number it can read."
     | DateUnparseable(field, raw, format) ->

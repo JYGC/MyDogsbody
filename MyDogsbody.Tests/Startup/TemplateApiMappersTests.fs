@@ -278,7 +278,7 @@ let ``every InvoiceError case produces a sentence that never quotes the placehol
     Assert.Equal(declaredCases, List.length allCases)
 
     for case in allCases do
-        let actual = TemplateApiMappers.toFieldFailureReason case
+        let actual = TemplateApiMappers.toFieldFailureReason None case
         Assert.False(String.IsNullOrWhiteSpace actual, $"{case} produced an empty reason")
         Assert.DoesNotContain("TemplateId", actual)
         Assert.EndsWith(".", actual)
@@ -300,7 +300,67 @@ let ``each InvoiceError the test panel can produce names its field and what the 
         ]
 
     for error, expectedReason in expectations do
-        Assert.Equal(expectedReason, TemplateApiMappers.toFieldFailureReason error)
+        Assert.Equal(expectedReason, TemplateApiMappers.toFieldFailureReason None error)
+
+/// The "found nothing" sentence is the only one that names WHERE the rule looked, and three of the
+/// seven rule kinds do not look at the pasted sample text at all - requirements.md says so of each:
+/// SubjectCapture runs "against the message subject, not the document body", AttachmentName
+/// "against the attachment's filename, not its content", and FixedValue returns its value "without
+/// consulting the text at all". Naming the sample text for those three sent the author to a box
+/// that cannot be the cause, on the panel whose whole job is to point at the broken rule.
+///
+/// One row per FieldRule case plus the no-rule caller, counted against the union by reflection so
+/// an eighth kind fails here as well as breaking the mapper's own match.
+[<Fact; Trait("Level", "Contract")>]
+let ``toFieldFailureReason names the input the rule that found nothing actually reads`` () =
+    let templateId = TemplateId.create "test" |> valueOrFail
+
+    let expectations: (FieldRule option * string) list =
+        [
+            Some (AfterLabel "Total:"), "The rule for Reference found nothing in the sample text."
+            Some (LinesAfterLabel("Total:", 1)), "The rule for Reference found nothing in the sample text."
+            Some (RegexCapture @"(INV-\d+)"), "The rule for Reference found nothing in the sample text."
+            Some (SubjectCapture @"(INV-\d+)"), "The rule for Reference found nothing in the sample subject."
+            Some (AttachmentName @"(INV-\d+)"),
+            "The rule for Reference found nothing in the sample attachment filename."
+            Some (FixedValue ""), "The fixed value for Reference is empty."
+            Some (DateFromField IssueDate), "The rule for Reference found nothing in the sample text."
+            None, "The rule for Reference found nothing in the sample text."
+        ]
+
+    let declaredCases = Reflection.FSharpType.GetUnionCases(typeof<FieldRule>) |> Array.length
+    Assert.Equal(declaredCases + 1, List.length expectations)
+
+    for rule, expectedReason in expectations do
+        Assert.Equal(
+            expectedReason,
+            TemplateApiMappers.toFieldFailureReason rule (TemplateMatchedNothing(templateId, Reference))
+        )
+
+/// Only the "found nothing" sentence changes with the rule. Every other case already quotes what
+/// the rule found, or names no rule at all, so handing one in must not move them - otherwise the
+/// rule-aware branch above would have quietly become a second translation of the same error.
+[<Fact; Trait("Level", "Contract")>]
+let ``a rule changes only the found-nothing sentence, not the other InvoiceError translations`` () =
+    let templateId = TemplateId.create "test" |> valueOrFail
+    let supplierId = SupplierId.create "1" |> valueOrFail
+
+    let unaffected: InvoiceError list =
+        [
+            SupplierNotRecognised "billing@acme.test"
+            MultipleSuppliersMatched("billing@acme.test", [ supplierId ])
+            NoTemplateForSupplier supplierId
+            AmountUnparseable(Amount, "two hundred")
+            DateUnparseable(IssueDate, "31/02/2026", "d MMM yyyy")
+            DueDateOutOfRange(templateId, DateTime(9999, 12, 31), 30)
+            RuleTimedOut(templateId, Reference)
+        ]
+
+    for error in unaffected do
+        Assert.Equal(
+            TemplateApiMappers.toFieldFailureReason None error,
+            TemplateApiMappers.toFieldFailureReason (Some (SubjectCapture "(x)")) error
+        )
 
 /// The panel gets ONE error for a whole run - the engine stops at the first field that fails - so
 /// the row that gets the sentence has to be chosen, not assumed. Every apply-time case a test-panel

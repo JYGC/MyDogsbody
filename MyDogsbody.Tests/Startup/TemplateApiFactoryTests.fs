@@ -415,6 +415,84 @@ let ``TestTemplate reports a rule that found nothing as a sentence, not a union 
         Assert.Equal("The rule for Amount found nothing in the sample text.", amountResult.FailureReason)
     )
 
+/// Three of the seven rule kinds do not read the pasted sample text at all, and requirements.md
+/// says so of each: SubjectCapture runs "against the message subject, not the document body",
+/// AttachmentName "against the attachment's filename, not its content", and FixedValue returns its
+/// value "without consulting the text at all". One sentence naming the sample text for every kind
+/// therefore sends the author of such a rule to a box that is not the problem - here with the
+/// subject box empty and the sample text full of matching content.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate names the sample subject when a SubjectCapture rule found nothing`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template =
+                { aTemplate supplierId with
+                    Rules =
+                        [ uiRule "Reference" "SubjectCapture" @"(INV-\d+)" 0 "" "AsText" ""
+                          uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+                          uiRule "Currency" "FixedValue" "AUD" 0 "" "AsText" "" ] }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.False referenceResult.Succeeded
+        Assert.Equal("The rule for Reference found nothing in the sample subject.", referenceResult.FailureReason)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate names the sample attachment filename when an AttachmentName rule found nothing`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template =
+                { aTemplate supplierId with
+                    DocumentPart = "Attachment"
+                    AttachmentFormat = "Pdf"
+                    Rules =
+                        [ uiRule "Reference" "AttachmentName" @"(INV-\d+)" 0 "" "AsText" ""
+                          uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+                          uiRule "Currency" "FixedValue" "AUD" 0 "" "AsText" "" ] }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        Assert.False referenceResult.Succeeded
+
+        Assert.Equal(
+            "The rule for Reference found nothing in the sample attachment filename.",
+            referenceResult.FailureReason
+        )
+    )
+
+/// A FixedValue rule consults no input whatever, so "found nothing in the sample text" names a box
+/// that cannot be the cause. The only way it yields nothing is an empty fixed value, which is what
+/// the sentence has to say.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports an empty FixedValue as an empty fixed value, not as text that did not match`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template =
+                { aTemplate supplierId with
+                    Rules =
+                        [ uiRule "Reference" "AfterLabel" "Invoice:" 0 "" "AsText" ""
+                          uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+                          uiRule "Currency" "FixedValue" "" 0 "" "AsText" "" ] }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let currencyResult = actual.FieldResults |> List.find (fun r -> r.Field = "Currency")
+        Assert.False currencyResult.Succeeded
+        Assert.Equal("The fixed value for Currency is empty.", currencyResult.FailureReason)
+    )
+
 /// The engine short-circuits at the FIRST field that fails, so one InvoiceError comes back for the
 /// whole run - and handing that one error to every row said "Reference failed" about a rule that
 /// matched, with a reason naming Amount. requirements.md asks the panel to show, per field, "where

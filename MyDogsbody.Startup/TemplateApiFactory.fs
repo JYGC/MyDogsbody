@@ -107,21 +107,32 @@ let private toIsoDate (date: DateTime) : string =
 ///
 /// They still report Succeeded = false, because no value came back for them either - claiming
 /// success with nothing to show would be the same lie from the other side.
-let private toFailureReasonFor (field: TargetField) (error: InvoiceError) : string =
+/// The rule the run faulted on, handed to the mapper so the sentence can name the input that rule
+/// reads rather than assuming the pasted sample text - SubjectCapture reads the subject,
+/// AttachmentName the filename, and FixedValue nothing at all. The rules are the validated
+/// template's own, so this is a lookup rather than a search for something that might be absent.
+let private ruleFor (rules: TemplateFieldRule list) (field: TargetField) : FieldRule option =
+    rules |> List.tryFind (fun rule -> rule.Field = field) |> Option.map (fun rule -> rule.Rule)
+
+let private toFailureReasonFor (rules: TemplateFieldRule list) (field: TargetField) (error: InvoiceError) : string =
     match TemplateApiMappers.toFailingField error with
     | Some failing when failing <> field ->
         $"Not reported: the run stopped at {TemplateApiMappers.toTargetFieldUiString failing}."
-    | Some _
-    | None -> TemplateApiMappers.toFieldFailureReason error
+    | Some failing -> TemplateApiMappers.toFieldFailureReason (ruleFor rules failing) error
+    | None -> TemplateApiMappers.toFieldFailureReason None error
 
-let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
+let private toFieldTestResult
+    (rules: TemplateFieldRule list)
+    (extracted: Result<ExtractedInvoice, InvoiceError>)
+    (field: TargetField)
+    : FieldTestResultUiType =
     match extracted with
     | Error error ->
         { Field = TemplateApiMappers.toTargetFieldUiString field
           RawValue = ""
           ParsedValue = ""
           Succeeded = false
-          FailureReason = toFailureReasonFor field error }
+          FailureReason = toFailureReasonFor rules field error }
     | Ok invoice ->
         let parsedText, succeeded, failure =
             match field with
@@ -306,7 +317,8 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                     // The ORDER stays the engine's fixed evaluation order rather than the rule
                     // list's, so the panel reads the same way whatever order the rules were
                     // entered in; only the fields with no rule drop out.
-                    let ruledFields = ValidTemplate.rules validated |> List.map (fun rule -> rule.Field)
+                    let rules = ValidTemplate.rules validated
+                    let ruledFields = rules |> List.map (fun rule -> rule.Field)
 
                     return
                         {
@@ -314,7 +326,7 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                             FieldResults =
                                 [ Reference; Amount; Currency; IssueDate; DueDate ]
                                 |> List.filter (fun field -> List.contains field ruledFields)
-                                |> List.map (toFieldTestResult extracted)
+                                |> List.map (toFieldTestResult rules extracted)
                         }
                 }
     }
