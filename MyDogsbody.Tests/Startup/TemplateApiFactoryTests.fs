@@ -227,6 +227,61 @@ let ``a validation failure is never written to the log`` () =
         SqliteConnection.ClearAllPools()
         File.Delete databaseFilePath
 
+/// The one rule shape that used to break the rule above. `FixedValue null` - a cleared
+/// MudTextField, the same input TemplateApiMappers already guards for an AsMoney separator - is
+/// the only text-carrying rule kind validateTemplate lets through, so it reached
+/// TemplateFieldRules' CHECK (RuleText IS NOT NULL) and came back as an infrastructure failure.
+/// Measured against HEAD before the fix: Error "Failed to insert new template." with exactly one
+/// entry in `logged`, for what is a validation-shaped input.
+///
+/// The template is stored rather than refused, because that is exactly what an empty box already
+/// does: `FixedValue ""` saves today and ApplyTemplateWorkflow reports it as the rule finding
+/// nothing, with its own sentence in toMatchedNothingReason.
+[<Fact; Trait("Level", "Integration")>]
+let ``a cleared FixedValue box is stored as an empty fixed value and never written to the log`` () =
+    let logged = ResizeArray<MyDogsbodyException>()
+    let recordingHandleError = HandleErrorBuilder logged.Add
+    let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let connectionString = $"Data Source={databaseFilePath}"
+    MigrationSetup.setupMigrations connectionString
+    let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
+    let api = TemplateApiFactory.createTemplateApi recordingHandleError context
+
+    let supplierId =
+        let connection = context.GetDatabaseConnection()
+        connection.Open()
+        try
+            use command = connection.CreateCommand()
+            command.CommandText <- "INSERT INTO Suppliers (Name, PaymentTermDays) VALUES ('Acme', 30); SELECT last_insert_rowid();"
+            string (Convert.ToInt64(command.ExecuteScalar()))
+        finally
+            connection.Close()
+
+    try
+        let clearedBox =
+            { aTemplate supplierId with
+                Rules =
+                    [ uiRule "Reference" "AfterLabel" "Invoice:" 0 "" "AsText" ""
+                      uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" "."
+                      uiRule "Currency" "FixedValue" null 0 "" "AsText" "" ] }
+
+        api.AddTemplate clearedBox |> okOrFail "AddTemplate"
+
+        Assert.Empty logged
+
+        let stored =
+            api.GetTemplatesForSupplier supplierId
+            |> okOrFail "GetTemplatesForSupplier"
+            |> List.exactlyOne
+
+        let currencyRule = stored.Rules |> List.find (fun rule -> rule.Field = "Currency")
+        Assert.Equal("FixedValue", currencyRule.RuleKind)
+        Assert.Equal("", currencyRule.RuleText)
+    finally
+        context.Dispose()
+        SqliteConnection.ClearAllPools()
+        File.Delete databaseFilePath
+
 [<Fact; Trait("Level", "Integration")>]
 let ``a store failure reaches the UI as an Error and is written to the log exactly once`` () =
     let logged = ResizeArray<MyDogsbodyException>()

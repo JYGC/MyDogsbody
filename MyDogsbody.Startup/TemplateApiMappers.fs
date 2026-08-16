@@ -68,6 +68,23 @@ let toTargetFieldUiString (field: TargetField) : string =
     | IssueDate -> "IssueDate"
     | DueDate -> "DueDate"
 
+/// The FixedValue branch is the second place a cleared MudTextField had to be named, for the same
+/// reason as the AsMoney separator below - and it is the only rule kind where a null gets past
+/// every later check. `AfterLabel`/`LinesAfterLabel` reach ValidateTemplateWorkflow's
+/// IsNullOrWhiteSpace label guard (LabelIsEmpty) and the three pattern kinds reach compilePattern's
+/// own isNull guard (PatternInvalid); a `FixedValue null` passes validateTemplate untouched, is
+/// written by TemplateRecordMappers.toFieldRuleColumns as `Some null`, and lands on
+/// TemplateFieldRules' CHECK (RuleText IS NOT NULL). Measured: AddTemplate answered "Failed to
+/// insert new template." and wrote one entry to the exception log, for a user who emptied a box -
+/// an infrastructure failure reported for a validation-shaped input, on the one path
+/// CLAUDE-project.md requires to stay unlogged.
+///
+/// Normalised to "" rather than refused, because an empty box already means something settled here:
+/// `FixedValue ""` saves, ApplyTemplateWorkflow.foundUnlessEmpty reports it as the rule finding
+/// nothing, and toMatchedNothingReason gives it its own sentence. A cleared box and an untouched
+/// one are the same user action, so they become the same rule. Only this branch is normalised -
+/// blanket-normalising ruleText would turn a null pattern's "Pattern must not be empty." into the
+/// vaguer "needs a capture group.", since Regex("") compiles.
 let private toFieldRule
     (ruleKind: string)
     (ruleText: string)
@@ -78,7 +95,7 @@ let private toFieldRule
     | "AfterLabel" -> Ok (AfterLabel ruleText)
     | "LinesAfterLabel" -> Ok (LinesAfterLabel(ruleText, ruleOffset))
     | "RegexCapture" -> Ok (RegexCapture ruleText)
-    | "FixedValue" -> Ok (FixedValue ruleText)
+    | "FixedValue" -> Ok (FixedValue (if isNull ruleText then "" else ruleText))
     | "SubjectCapture" -> Ok (SubjectCapture ruleText)
     | "AttachmentName" -> Ok (AttachmentName ruleText)
     | "DateFromField" -> toTargetField ruleSourceField |> Result.map DateFromField

@@ -129,6 +129,33 @@ let ``toUnvalidatedTemplate reports a missing AsMoney separator rather than rais
             Assert.Equal("AsMoney hint is missing its decimal separator.", reason)
         | other -> Assert.Fail($"Expected Error(TemplateRuleShapeInvalid _) for {separator |> box}, but got {other}")
 
+/// The same cleared-MudTextField class as the AsMoney guard above, arriving on the OTHER string a
+/// rule carries. FixedValue is the one text-carrying rule kind nothing downstream refuses a null
+/// for: AfterLabel and LinesAfterLabel are caught by validateRule's LabelIsEmpty check, and
+/// RegexCapture / SubjectCapture / AttachmentName by compilePattern's own isNull guard - but
+/// `FixedValue null` passes validateTemplate, reaches TemplateRecordMappers.toFieldRuleColumns as
+/// `Some null`, and is written as RuleText = NULL, which TemplateFieldRules' CHECK constraint
+/// refuses. Measured against HEAD before this test: AddTemplate came back "Failed to insert new
+/// template." AND wrote one entry to the exception log, for a user who merely emptied a text box.
+///
+/// A cleared box and an untouched empty box are the same user action, so they become the same
+/// rule. `FixedValue ""` is deliberately savable - ApplyTemplateWorkflow.foundUnlessEmpty reports
+/// it as the rule finding nothing and toMatchedNothingReason gives it its own sentence - so this
+/// normalises to that established behaviour rather than inventing a second one for null.
+[<Fact; Trait("Level", "Unit")>]
+let ``toUnvalidatedTemplate reads a cleared FixedValue box as an empty fixed value rather than a null one`` () =
+    let entered: TemplateUiTypeWithoutId =
+        { SupplierId = "1"
+          Name = "T"
+          DocumentPart = "AnyPart"
+          AttachmentFormat = ""
+          Position = 0
+          Rules = [ uiRule "Currency" "FixedValue" null 0 "" "AsText" "" ] }
+
+    let actual = TemplateApiMappers.toUnvalidatedTemplate entered |> mappedOrFail
+
+    Assert.Equal(FixedValue "", (actual.Rules |> List.find (fun r -> r.Field = Currency)).Rule)
+
 [<Fact; Trait("Level", "Unit")>]
 let ``toUiType and toUnvalidatedTemplate round trip a stored template unchanged`` () =
     let unvalidated: UnvalidatedTemplate =
