@@ -104,6 +104,30 @@ let ``toUnvalidatedTemplate rejects an unrecognised document part as TemplateRul
     | Error (TemplateRuleShapeInvalid reason) -> Assert.Contains("Bogus", reason)
     | other -> Assert.Fail($"Expected Error(TemplateRuleShapeInvalid _), but got {other}")
 
+/// The file's own header rule: "Every string->union conversion below returns Result rather than
+/// raising ... these mappers are called from Async.Start, where an uncaught exception reaches
+/// neither an alert nor a log." A cleared MudTextField hands a bound `string` back as null, so an
+/// AsMoney rule whose separator box was emptied is the ordinary way this arrives - and it is the
+/// one field of the seven the mapper DEREFERENCES rather than matches, so it raised
+/// NullReferenceException through AddTemplate, EditTemplate and TestTemplate alike.
+[<Fact; Trait("Level", "Unit")>]
+let ``toUnvalidatedTemplate reports a missing AsMoney separator rather than raising`` () =
+    let separatorsWithNoCharacter: string list = [ null; "" ]
+
+    for separator in separatorsWithNoCharacter do
+        let entered: TemplateUiTypeWithoutId =
+            { SupplierId = "1"
+              Name = "T"
+              DocumentPart = "AnyPart"
+              AttachmentFormat = ""
+              Position = 0
+              Rules = [ uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" separator ] }
+
+        match TemplateApiMappers.toUnvalidatedTemplate entered with
+        | Error (TemplateRuleShapeInvalid reason) ->
+            Assert.Equal("AsMoney hint is missing its decimal separator.", reason)
+        | other -> Assert.Fail($"Expected Error(TemplateRuleShapeInvalid _) for {separator |> box}, but got {other}")
+
 [<Fact; Trait("Level", "Unit")>]
 let ``toUiType and toUnvalidatedTemplate round trip a stored template unchanged`` () =
     let unvalidated: UnvalidatedTemplate =

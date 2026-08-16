@@ -415,6 +415,71 @@ let ``TestTemplate reports a rule that found nothing as a sentence, not a union 
         Assert.Equal("The rule for Amount found nothing in the sample text.", amountResult.FailureReason)
     )
 
+/// Running the panel before anything has been pasted is the first thing a user does, and a cleared
+/// MudTextField hands a bound `string` back as null - so the splitter has to take one. It reached
+/// String.Replace directly, so TestTemplate raised NullReferenceException out of an API whose type
+/// promises a Result, on a path the UI calls from Async.Start where neither an alert nor the log
+/// would ever see it.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate reports empty sample text rather than raising`` () =
+    withApi (fun api supplierId ->
+        let input: TemplateTestInputUiType =
+            { Template = aTemplate supplierId
+              SampleText = null
+              SampleSubject = null
+              SampleAttachmentFilename = null }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        Assert.Equal("", actual.NormalizedText)
+        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], actual.FieldResults |> List.map (fun r -> r.Field))
+
+        for field in actual.FieldResults do
+            Assert.False(field.Succeeded, $"{field.Field} should not have succeeded against empty sample text")
+            Assert.False(String.IsNullOrWhiteSpace field.FailureReason, $"{field.Field} carried no reason")
+    )
+
+/// ParseHint.AsDate carries the rule in its own declaration - "explicit. NEVER DateTime.Parse with
+/// ambient culture" - and validateDateFormat and TemplateApiMappers.toFieldFailureReason both pin
+/// InvariantCulture and say why. This was the one date rendering left ambient: DateTime.ToString
+/// resolves "yyyy" against CurrentCulture's CALENDAR, so 4 March 2026 prints 2569-03-04 under
+/// th-TH and 1447-09-15 under ar-SA - the panel showing the author a date their template never
+/// extracted, in the one screen the change exists to let them check it against.
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate renders extracted dates as ISO whatever the machine's culture`` () =
+    let originalCulture = Globalization.CultureInfo.CurrentCulture
+
+    try
+        Globalization.CultureInfo.CurrentCulture <- Globalization.CultureInfo "th-TH"
+
+        withApi (fun api supplierId ->
+            let input: TemplateTestInputUiType =
+                { Template =
+                    { aTemplate supplierId with
+                        Rules =
+                            validRulesUi
+                            @ [ uiRule "IssueDate" "AfterLabel" "Dated:" 0 "" "AsDate" "d MMM yyyy"
+                                uiRule "DueDate" "DateFromField" "" 0 "IssueDate" "AsDate" "d MMM yyyy" ] }
+                  SampleText = "Invoice: INV-9001\nTotal: 245.00\nDated: 4 Mar 2026"
+                  SampleSubject = ""
+                  SampleAttachmentFilename = "" }
+
+            let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+            let issueDate = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+            Assert.True(issueDate.Succeeded, $"IssueDate failed: {issueDate.FailureReason}")
+            Assert.Equal("2026-03-04", issueDate.ParsedValue)
+            Assert.Equal("2026-03-04", issueDate.RawValue)
+
+            // The payment term the panel applies is the documented placeholder 0, so a derived due
+            // date equals its source - which is what makes this assert the RENDERING and nothing else.
+            let dueDate = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+            Assert.True(dueDate.Succeeded, $"DueDate failed: {dueDate.FailureReason}")
+            Assert.Equal("2026-03-04", dueDate.ParsedValue)
+        )
+    finally
+        Globalization.CultureInfo.CurrentCulture <- originalCulture
+
 /// An amount the rule DID find but could not read is a different sentence from one it never found,
 /// and it quotes the text it choked on - that text is the whole diagnostic.
 [<Fact; Trait("Level", "Integration")>]

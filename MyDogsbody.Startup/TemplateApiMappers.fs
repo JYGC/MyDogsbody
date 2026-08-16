@@ -94,10 +94,17 @@ let private toFieldRuleUiColumns (rule: FieldRule) : string * string * int * str
     | AttachmentName pattern -> "AttachmentName", pattern, 0, ""
     | DateFromField source -> "DateFromField", "", 0, toTargetFieldUiString source
 
+/// The AsMoney branch is the one place this file READS a UI-supplied string rather than matching
+/// on it, so it is the one place null had to be named. `match` against a null string is an
+/// equality test and falls through to `unknown` harmlessly; `hintText.Length` is a dereference,
+/// and it raised NullReferenceException out of AddTemplate, EditTemplate and TestTemplate alike -
+/// past the very Async.Start boundary the header comment above says this returns Result for. A
+/// cleared MudTextField hands a bound `string` back as null, so an emptied separator box is the
+/// ordinary way it arrives, not a contrived one.
 let private toParseHint (hintKind: string) (hintText: string) : Result<ParseHint, string> =
     match hintKind with
     | "AsText" -> Ok AsText
-    | "AsMoney" when hintText.Length = 1 -> Ok (AsMoney hintText.[0])
+    | "AsMoney" when not (isNull hintText) && hintText.Length = 1 -> Ok (AsMoney hintText.[0])
     | "AsMoney" -> Error "AsMoney hint is missing its decimal separator."
     | "AsDate" -> Ok (AsDate hintText)
     | unknown -> Error $"Hint kind '{unknown}' has no domain equivalent."

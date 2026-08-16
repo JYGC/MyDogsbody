@@ -23,8 +23,17 @@ open MyDogsbody.UI.Types
 /// splits on blank lines" (Documents/DocumentsTypes.fs's own TextLine doc comment). The blank
 /// lines themselves are still emitted; TextNormalization.normalize drops them later, the same way
 /// it would for any other reader's output. Pure, no mutable state.
+///
+/// Null degrades to empty, the same way TextNormalization.normalizeText's own first line does and
+/// for the same reason: a cleared MudTextField hands a bound `string` back as null, running the
+/// panel before pasting anything is the first thing a user does, and String.Replace on null raised
+/// NullReferenceException out of an API whose type promises a Result - on a path the UI calls from
+/// Async.Start, where neither an alert nor the log would ever see it. Empty text yields one blank
+/// line, which normalization drops, so every rule reports finding nothing rather than the panel
+/// disappearing.
 let private splitPastedTextIntoLines (text: string) : TextLine list =
-    let rawLines = text.Replace("\r\n", "\n").Split '\n' |> Array.toList
+    let safeText = if isNull text then "" else text
+    let rawLines = safeText.Replace("\r\n", "\n").Split '\n' |> Array.toList
 
     rawLines
     |> List.fold
@@ -75,6 +84,17 @@ let private toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) 
         Parts = (BodyPart, bodyLines) :: attachmentParts
     }
 
+/// ISO, InvariantCulture, never the ambient one - ParseHint.AsDate carries the rule in its own
+/// declaration ("explicit. NEVER DateTime.Parse with ambient culture"), and
+/// ValidateTemplateWorkflow.validateDateFormat and TemplateApiMappers.toFieldFailureReason both
+/// already pin it. This was the one date rendering left ambient. DateTime.ToString resolves
+/// "yyyy" against CultureInfo.CurrentCulture's CALENDAR, so a measured issue date of 4 March 2026
+/// printed 2569-03-04 under th-TH and 1447-09-15 under ar-SA: the panel showing the author a date
+/// their template never extracted, on the one screen the whole change exists to let them check it
+/// against, with nothing to notice it by.
+let private toIsoDate (date: DateTime) : string =
+    date.ToString("yyyy-MM-dd", Globalization.CultureInfo.InvariantCulture)
+
 let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
     match extracted with
     | Error error ->
@@ -91,11 +111,11 @@ let private toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>
             | Currency -> invoice.Currency, true, ""
             | IssueDate ->
                 match invoice.IssueDate with
-                | Some date -> date.ToString "yyyy-MM-dd", true, ""
+                | Some date -> toIsoDate date, true, ""
                 | None -> "", false, "No value extracted."
             | DueDate ->
                 match invoice.DueDate with
-                | Some date -> date.ToString "yyyy-MM-dd", true, ""
+                | Some date -> toIsoDate date, true, ""
                 | None -> "", false, "No value extracted."
 
         { Field = TemplateApiMappers.toTargetFieldUiString field
