@@ -194,10 +194,15 @@ let private withFakeApi (test: TemplateApi -> string -> unit) =
                             |> List.map (fun line -> line.Text)
                             |> String.concat "\n"
 
+                        let fieldsWithRules =
+                            ValidTemplate.rules validated |> List.map (fun rule -> rule.Field) |> Set.ofList
+
                         return
                             {
                                 NormalizedText = normalizedText
-                                FieldResults = [ Reference; Amount; Currency; IssueDate; DueDate ] |> List.map (TemplateApiFactory.toFieldTestResult extracted)
+                                FieldResults =
+                                    [ Reference; Amount; Currency; IssueDate; DueDate ]
+                                    |> List.map (TemplateApiFactory.toFieldTestResult fieldsWithRules extracted)
                             }
                     }
         }

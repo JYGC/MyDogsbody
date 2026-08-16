@@ -11,22 +11,22 @@ Change **#2 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody\MyDogsbody.csproj` — **0 errors, 0 warnings**. Checked separately per
   CLAUDE-project.md's own warning that `NU1605` is a hard error here and only a warning on the
   solution build; it did not recur.
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **739 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **744 tests, 0 failures, 0 skips**, all
   four levels present:
 
   | Level | Before | After | Added |
   | --- | --- | --- | --- |
-  | Unit | 162 | 357 | +195 |
-  | Integration | 75 | 114 | +39 |
+  | Unit | 162 | 359 | +197 |
+  | Integration | 75 | 117 | +42 |
   | Contract | 146 | 238 | +92 |
   | E2E | 17 | 30 | +13 |
-  | **Total** | **400** | **739** | **+339** |
+  | **Total** | **400** | **744** | **+344** |
 
   The "After" column was itself re-measured during PR #14's review-fix round, which is when the
   discrepancy showed up: the figure first recorded here (`709 — 339/109/234/27`) did not match what
   the branch actually produced (`714 — 339/109/236/30`), understating Contract by 2 and E2E by 3.
   Re-measuring the branch, not only `main`, is what this section's own Task 12.0 reasoning asks
-  for; the review round then added 25 further tests, giving the 739 above.
+  for; the review round then added 25 further tests, giving 739; PR #14's second review round added 5 more, giving the 744 above.
 
   **"Before" is a verified number, not the figure CLAUDE-project.md previously carried.** Task 12.0
   asked for the baseline to be measured directly rather than trusted, because the `399` figure
@@ -161,6 +161,41 @@ None of `tasks.md`'s five optional items were pulled into this change's required
 - **O.3** Live per-rule-editor preview against the test-panel text.
 - **O.4** Template export/import as JSON.
 - **O.5** Revisit `SupplierMatcher.SubjectPattern` as a regex rather than a substring.
+
+### Carried to change #4: the test panel cannot report a rule timeout
+
+`requirements.md` asks, of the test panel:
+
+> WHEN a rule in the test panel times out THE SYSTEM SHALL report the timeout against that rule and
+> leave the rest of the panel usable.
+
+The panel does this for **required** fields — a timed-out `Reference` or `Amount` rule renders
+"The rule for Reference took too long to run." For the three **optional** fields it cannot, and
+PR #14's second review round measured it directly. With a pathological `Currency` rule (a
+lookahead forces the backtracking engine, so the 250 ms budget is spent in full):
+
+| Template | What the Currency row says |
+| --- | --- |
+| `Currency` rule times out | `No value extracted.` |
+| `Currency` has no rule at all | `No rule for this field.` *(fixed in round 2)* |
+| `Currency` rule ran and matched nothing | `No value extracted.` |
+
+The first and third are still indistinguishable, and the same holds for `IssueDate`/`DueDate`.
+The cause is deliberate and pinned by a test: `ApplyTemplateWorkflow` maps a timed-out *optional*
+rule to `None` rather than an error, so one pathological optional rule cannot sink a whole scan
+(`a pathological pattern on an optional field times out to absent, and the rest of the extraction
+is unaffected`). `applyTemplate` returns a single `Result<ExtractedInvoice, InvoiceError>`, so by
+the time the panel sees it, "timed out" and "found nothing" have already been merged.
+
+Closing it needs `ExtractedInvoice` to carry a per-field outcome rather than a bare value — the
+same `MyDogsbody.Domain` change `FieldTestResultUiType.RawValue` is already waiting on, and the
+same reason: both want the per-field detail the current return type discards. Both land in
+change #4. Making the timeout an error here instead would contradict the pinned scan behaviour
+above, so it was not done.
+
+The half that needed no domain change **was** closed in round 2: a field with no rule at all now
+says so, instead of being reported as a failed extraction. That case became reachable for
+`Currency` precisely because this change made `Currency` optional.
 
 `tasks.md`'s *Known risks carried into this change* section names two that this change accepts
 rather than closes: multi-column layouts stay unrepresentable (a `SameRowAsLabel` rule kind is the

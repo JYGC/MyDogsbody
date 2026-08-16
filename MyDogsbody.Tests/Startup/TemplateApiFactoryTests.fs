@@ -383,3 +383,74 @@ let ``toTestMessage gives an AnyPart template's attachment no lines, so the past
             | _ -> None)
 
     Assert.Empty attachmentLines
+
+// PR #14 review round 2: this change made Currency optional, so a template carrying no Currency
+// rule now validates - and the panel rendered that row as "Failed: No value extracted.", the
+// same sentence it uses for a rule that ran and matched nothing. Measured before the fix, a
+// template whose Currency rule TIMED OUT and one with no Currency rule at all produced byte
+// identical rows. The half that needs no domain change is separated here; see outcome.md for
+// the half (timeout vs. not-found) that waits on change #4.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate says a field has no rule rather than reporting it as an empty extraction`` () =
+    withApi (fun api supplierId ->
+        let noCurrency = validRulesUi |> List.filter (fun r -> r.Field <> "Currency")
+
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with Rules = noCurrency }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        // Currency is newly ruleless-legal here; IssueDate and DueDate never had rules.
+        for field in [ "Currency"; "IssueDate"; "DueDate" ] do
+            let fieldResult = actual.FieldResults |> List.find (fun r -> r.Field = field)
+            Assert.False(fieldResult.Succeeded, $"{field} should not report success")
+            Assert.Equal("No rule for this field.", fieldResult.FailureReason)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate still reports a rule that ran and matched nothing as an empty extraction`` () =
+    withApi (fun api supplierId ->
+        // The guard against over-correcting: a field that DOES carry a rule keeps the old
+        // sentence, because a rule really did run and really did find nothing.
+        let currencyByLabel =
+            validRulesUi
+            |> List.map (fun r -> if r.Field = "Currency" then uiRule "Currency" "AfterLabel" "Currency:" 0 "" "AsText" "" else r)
+
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with Rules = currencyByLabel }
+              SampleText = "Invoice: INV-9001\nTotal: 245.00"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let currencyResult = actual.FieldResults |> List.find (fun r -> r.Field = "Currency")
+        Assert.False currencyResult.Succeeded
+        Assert.Equal("No value extracted.", currencyResult.FailureReason)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``TestTemplate does not claim a ruleless field was skipped when another field's rule failed`` () =
+    withApi (fun api supplierId ->
+        // On the Error path a ruleless field was blamed on whichever field stopped the run
+        // ("Not evaluated: the run stopped at Amount."), which reads as though it would have
+        // been evaluated. It never had a rule to evaluate.
+        let input: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with Rules = validRulesUi }
+              SampleText = "Invoice: INV-9001\nnothing else of interest"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        let actual = api.TestTemplate input |> okOrFail "TestTemplate"
+
+        let issueDateResult = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+        Assert.Equal("No rule for this field.", issueDateResult.FailureReason)
+
+        // Currency DOES carry a rule in validRulesUi, so it keeps the stopped-run wording.
+        let currencyResult = actual.FieldResults |> List.find (fun r -> r.Field = "Currency")
+        Assert.Equal("Not evaluated: the run stopped at Amount.", currencyResult.FailureReason)
+    )

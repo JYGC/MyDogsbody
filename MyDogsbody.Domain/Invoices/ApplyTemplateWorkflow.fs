@@ -77,10 +77,15 @@ let private runRegexOnce (regex: Regex) (input: string) : RuleOutcome =
 /// first TimedOut, which is treated as a stop rather than retried against later candidates:
 /// timing out once on a pathological pattern is already the signal that pattern is dangerous, not
 /// a reason to spend the timeout budget again on the next line or filename.
+///
+/// Seq, not List: List.map is eager, so the version this replaced ran the pattern against every
+/// candidate before picking the first outcome - making the stop above a comment rather than a
+/// behaviour, and spending compilePattern's 250ms budget once per line instead of once. The
+/// outcome chosen is unchanged; only the candidates never reached are.
 let private runRegexAcross (regex: Regex) (candidates: string list) : RuleOutcome =
     candidates
-    |> List.map (runRegexOnce regex)
-    |> List.tryFind (function
+    |> Seq.map (runRegexOnce regex)
+    |> Seq.tryFind (function
         | Found _
         | TimedOut -> true
         | NotFound -> false)

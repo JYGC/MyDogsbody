@@ -87,14 +87,35 @@ let toTestMessage (part: DocumentPart) (input: TemplateTestInputUiType) : Scanne
 /// distinction FieldTestResultUiType names is not actually populated. Populating it truthfully
 /// needs ExtractedInvoice to carry each field's pre-parse text, which is a MyDogsbody.Domain
 /// change belonging with change #4 rather than to this UI slice. Nothing renders RawValue today.
-let toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field: TargetField) : FieldTestResultUiType =
+///
+/// `fieldsWithRules` is what separates "a rule ran and found nothing" from "this field has no
+/// rule at all". The two are different answers to "why is this row empty", and conflating them
+/// became reachable for Currency when this change made it optional: the panel reported a
+/// deliberately absent field as a failed extraction. The template's own rules are enough to tell
+/// them apart, so no domain change is involved.
+///
+/// Still conflated, and deferred with RawValue above: a rule that TIMED OUT is indistinguishable
+/// here from one that matched nothing, because applyTemplate maps both to None for an optional
+/// field (deliberately - one pathological optional rule must not sink a scan, which
+/// ApplyTemplateWorkflowTests pins). requirements.md's "report the timeout against that rule"
+/// needs ExtractedInvoice to carry per-field outcomes, which is the same change #4 change.
+let toFieldTestResult
+    (fieldsWithRules: Set<TargetField>)
+    (extracted: Result<ExtractedInvoice, InvoiceError>)
+    (field: TargetField)
+    : FieldTestResultUiType =
+    let noRule = not (fieldsWithRules.Contains field)
+
     match extracted with
     | Error error ->
         let failureReason =
-            match TemplateApiMappers.invoiceErrorField error with
-            | Some blamed when blamed = field -> TemplateApiMappers.toInvoiceErrorMessage error
-            | Some blamed -> $"Not evaluated: the run stopped at {TemplateApiMappers.toTargetFieldUiString blamed}."
-            | None -> TemplateApiMappers.toInvoiceErrorMessage error
+            if noRule then
+                "No rule for this field."
+            else
+                match TemplateApiMappers.invoiceErrorField error with
+                | Some blamed when blamed = field -> TemplateApiMappers.toInvoiceErrorMessage error
+                | Some blamed -> $"Not evaluated: the run stopped at {TemplateApiMappers.toTargetFieldUiString blamed}."
+                | None -> TemplateApiMappers.toInvoiceErrorMessage error
 
         { Field = TemplateApiMappers.toTargetFieldUiString field
           RawValue = ""
@@ -102,6 +123,7 @@ let toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field
           Succeeded = false
           FailureReason = failureReason }
     | Ok invoice ->
+        let absent = if noRule then "No rule for this field." else "No value extracted."
         let parsedText, succeeded, failure =
             match field with
             | Reference -> invoice.Reference, true, ""
@@ -109,15 +131,15 @@ let toFieldTestResult (extracted: Result<ExtractedInvoice, InvoiceError>) (field
             | Currency ->
                 match invoice.Currency with
                 | Some currency -> currency, true, ""
-                | None -> "", false, "No value extracted."
+                | None -> "", false, absent
             | IssueDate ->
                 match invoice.IssueDate with
                 | Some date -> date.ToString "yyyy-MM-dd", true, ""
-                | None -> "", false, "No value extracted."
+                | None -> "", false, absent
             | DueDate ->
                 match invoice.DueDate with
                 | Some date -> date.ToString "yyyy-MM-dd", true, ""
-                | None -> "", false, "No value extracted."
+                | None -> "", false, absent
 
         { Field = TemplateApiMappers.toTargetFieldUiString field
           RawValue = parsedText
@@ -250,10 +272,17 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                         |> List.map (fun line -> line.Text)
                         |> String.concat "\n"
 
+                    // Read off the validated template rather than the UI record, so the panel
+                    // and the engine are answering from the same rule set.
+                    let fieldsWithRules =
+                        ValidTemplate.rules validated |> List.map (fun rule -> rule.Field) |> Set.ofList
+
                     return
                         {
                             NormalizedText = normalizedText
-                            FieldResults = [ Reference; Amount; Currency; IssueDate; DueDate ] |> List.map (toFieldTestResult extracted)
+                            FieldResults =
+                                [ Reference; Amount; Currency; IssueDate; DueDate ]
+                                |> List.map (toFieldTestResult fieldsWithRules extracted)
                         }
                 }
     }

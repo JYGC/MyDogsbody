@@ -516,3 +516,50 @@ let ``a regex capture that did participate is still returned unchanged`` () =
     match actual with
     | Ok invoice -> Assert.Equal("4242", invoice.Reference)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+// PR #14 review round 2: runRegexAcross's own doc comment states that a TimedOut stops the run
+// rather than "spend the timeout budget again on the next line or filename" - but it built the
+// outcome list with List.map, which is eager, so every candidate was evaluated regardless.
+// Measured before the fix, against the 250ms budget compilePattern sets:
+// 1 line -> 246ms, 5 -> 1248ms, 10 -> 2498ms, 20 -> 4999ms. Exactly N x 250ms.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a pathological pattern spends the timeout budget once, not once per candidate line`` () =
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = RegexCapture pathologicalPattern; Hint = AsText }
+              stableAmountRule ]
+    // longNonMatchingText ends in "!", so TextNormalization never joins these into one line -
+    // all ten reach the rule as ten separate candidates.
+    let poisonLines = [ for _ in 1..10 -> line 0 longNonMatchingText ]
+    let scanned = bodyMessage "" (poisonLines @ [ stableAmountLine ])
+    let stopwatch = Diagnostics.Stopwatch.StartNew()
+
+    let actual = apply template scanned
+
+    stopwatch.Stop()
+
+    match actual with
+    | Error (RuleTimedOut (_, field)) -> Assert.Equal<TargetField>(Reference, field)
+    | other -> Assert.Fail($"Expected Error(RuleTimedOut _), but got {other}")
+
+    // Stopping at the first timeout keeps this near one 250ms budget; evaluating all ten
+    // approaches 2500ms. 1000ms sits clear of both, so this discriminates without being tight.
+    Assert.True(
+        stopwatch.ElapsedMilliseconds < 1000L,
+        $"Ten candidate lines took {stopwatch.ElapsedMilliseconds}ms; one timed-out candidate should stop the run.")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a rule that matches a later candidate line still finds it once the run short-circuits`` () =
+    // The guard against over-correcting: short-circuiting must stop at the first Found as well,
+    // and must still reach a match that only appears on a later line.
+    let template =
+        validTemplate
+            [ { Field = Reference; Rule = RegexCapture @"INV-(\d+)"; Hint = AsText }
+              stableAmountRule ]
+    let scanned =
+        bodyMessage "" [ line 0 "nothing here."; line 0 "still nothing."; line 0 "INV-4242."; stableAmountLine ]
+
+    match apply template scanned with
+    | Ok invoice -> Assert.Equal("4242", invoice.Reference)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")

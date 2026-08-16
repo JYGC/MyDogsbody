@@ -264,24 +264,53 @@ let ``deleting one of two identical rules removes only the one clicked`` () =
 
 // ---------- 11.2: the test panel, including a non-breaking space ----------
 
+/// The per-field result table, as (field, result) pairs. The raw-text and normalized-text panels
+/// above it echo the sample back verbatim, so any assertion against rendered.Markup as a whole is
+/// satisfied by the echo alone and says nothing about what the engine extracted - which is how
+/// the previous version of the test below passed with FieldResults hard-coded to [].
+let private fieldResultsOf (rendered: Bunit.IRenderedFragment) =
+    rendered.FindAll("td")
+    |> Seq.map (fun cell -> cell.TextContent.Trim())
+    |> List.ofSeq
+    |> List.chunkBySize 2
+    |> List.choose (function
+        | [ field; result ] -> Some(field, result)
+        | _ -> None)
+
 [<Fact; Trait("Level", "E2E")>]
-let ``the test panel shows normalized text and extracts a value across a non-breaking space`` () =
+let ``the test panel extracts a value whose label is split by a real non-breaking space`` () =
     withTemplatesHarness (fun harness supplierIdString ->
-        let rendered = renderEditor harness supplierIdString validRules
+        // The rule's label carries an ordinary space; the pasted document splits that same label
+        // with a real U+00A0. Only TextNormalization folding it makes the two meet, so the
+        // extraction below cannot succeed unless normalization ran - measured failure mode 1,
+        // driven through the panel rather than against normalize directly.
+        let nonBreakingSpace = " "
 
-        // U+00A0 between the label and the value - TextNormalization folds it to an ordinary
-        // space before AfterLabel ever sees the line.
-        let sampleText = "Invoice: INV-42\nTotal: 99.00"
+        let rules =
+            validRules
+            |> List.map (fun rule -> if rule.Field = "Reference" then { rule with RuleText = "Invoice No:" } else rule)
 
-        rendered.Find("textarea").Input sampleText
+        let rendered = renderEditor harness supplierIdString rules
 
-        let runTestButton = findRunTestButton rendered
+        rendered.Find("textarea").Input $"Invoice{nonBreakingSpace}No: INV-42\nTotal: 99.00"
 
-        runTestButton.Click()
+        (findRunTestButton rendered).Click()
 
         rendered.WaitForAssertion(fun () ->
-            Assert.Contains("Invoice: INV-42", rendered.Markup)
-            Assert.Contains("INV-42", rendered.Markup)
+            let fieldResults = fieldResultsOf rendered
+
+            Assert.Equal<(string * string) list>(
+                // The panel prefixes a failed row with "Failed: "; a succeeded row is the value.
+                [ "Reference", "INV-42"
+                  "Amount", "99.00"
+                  "Currency", "AUD"
+                  "IssueDate", "Failed: No rule for this field."
+                  "DueDate", "Failed: No rule for this field." ],
+                fieldResults
+            )
+
+            // Q7.6.6: the normalized panel shows the folded text, so the NBSP is visibly gone.
+            Assert.Contains("Invoice No: INV-42", rendered.Markup)
         )
     )
 
