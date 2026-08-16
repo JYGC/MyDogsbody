@@ -338,43 +338,66 @@ let ``TemplateStoreFailed carries the store's message and is left unmarked, havi
     Assert.Equal("database is locked", actual.Message)
     Assert.Null actual.InnerException
 
+/// The message, not merely that there is one. tasks.md 8.1 asks for "each `TemplateError` case ->
+/// its intended action and MESSAGE", and this test asserted only that the message was non-empty:
+/// swapping RequiredFieldHasNoRule's sentence with DuplicateRuleForField's passed the whole suite,
+/// 778 of 778. That pair is not cosmetic - the two sentences give opposite instructions ("add a
+/// rule" / "remove one"), and this string IS the MudAlert a template author reads when a save is
+/// refused, so a wrong one sends them to fix something that is not broken.
+///
+/// Every case carries its exact sentence here rather than only the seven that had one, so a
+/// mis-edited or copy-pasted branch fails on the sentence a user would have read.
 [<Fact; Trait("Level", "Contract")>]
-let ``every TemplateError case produces a non-empty message and the expected/unexpected split is correct`` () =
+let ``every TemplateError case produces its own message and the expected/unexpected split is correct`` () =
     let templateId = TemplateId.create "7" |> valueOrFail
     let supplierId = SupplierId.create "1" |> valueOrFail
 
-    let allCases: TemplateError list =
+    // The four reason-carrying cases pass their reason through verbatim - the constrained type's
+    // own create, or a union converter in this file, already wrote the sentence.
+    let allCases: (TemplateError * string) list =
         [
-            TemplateNameInvalid "a"
-            TemplateIdInvalid "b"
-            TemplateSupplierIdInvalid "c"
-            TemplateRuleShapeInvalid "d"
-            PatternInvalid(Reference, "e")
-            PatternHasNoCaptureGroup Reference
-            DateFormatInvalid(IssueDate, "f")
-            OffsetOutOfRange(Reference, 99)
-            LabelIsEmpty Reference
-            RuleUnreachableForPart(Reference, Body)
-            RequiredFieldHasNoRule Amount
-            DuplicateRuleForField Amount
-            DerivationSourceMissing IssueDate
-            DerivationSourceNotADate IssueDate
-            DerivationSourceIsSelf DueDate
-            DerivationUnsupported(Reference, Amount)
-            FieldHintMismatch(Amount, AsText)
-            ReorderIncomplete [ templateId ]
-            ReorderDuplicate templateId
-            TemplateNotFound templateId
-            TemplateSupplierNotFound supplierId
-            TemplateStoreFailed "g"
+            TemplateNameInvalid "a", "a"
+            TemplateIdInvalid "b", "b"
+            TemplateSupplierIdInvalid "c", "c"
+            TemplateRuleShapeInvalid "d", "d"
+            PatternInvalid(Reference, "e"), "The pattern for Reference is invalid: e"
+            PatternHasNoCaptureGroup Reference, "The pattern for Reference needs a capture group."
+            DateFormatInvalid(IssueDate, "f"), "The date format for IssueDate is invalid: f"
+            OffsetOutOfRange(Reference, 99), "The offset 99 for Reference must be between 0 and 20."
+            LabelIsEmpty Reference, "The label for Reference must not be empty."
+            RuleUnreachableForPart(Reference, Body), "The rule for Reference reads a part a Body template never sees."
+            RequiredFieldHasNoRule Amount, "Amount needs a rule."
+            DuplicateRuleForField Amount, "Amount has more than one rule."
+            DerivationSourceMissing IssueDate, "The derived date needs IssueDate to have a rule of its own."
+            DerivationSourceNotADate IssueDate,
+            "IssueDate is not read as a date, so a date cannot be derived from it."
+            DerivationSourceIsSelf DueDate, "DueDate cannot derive its date from itself."
+            DerivationUnsupported(Reference, Amount),
+            "Reference cannot have its date derived from Amount - only DueDate from IssueDate is supported."
+            FieldHintMismatch(Amount, AsText), "Amount cannot be read with the AsText hint."
+            ReorderIncomplete [ templateId ], "The new order is missing template(s): 7."
+            ReorderDuplicate templateId, "The new order names template '7' more than once."
+            TemplateNotFound templateId, "No template was found with id '7'."
+            TemplateSupplierNotFound supplierId, "No supplier was found with id '1'."
+            TemplateStoreFailed "g", "g"
         ]
 
     let declaredCases = Reflection.FSharpType.GetUnionCases(typeof<TemplateError>) |> Array.length
     Assert.Equal(declaredCases, List.length allCases)
 
-    for case in allCases do
+    // No two cases may share a sentence: an alert that cannot tell two refusals apart is the same
+    // failure as an alert naming the wrong one, and a copy-pasted branch shows up here first.
+    let distinctSentences =
+        allCases |> List.map snd |> List.filter (fun sentence -> sentence.Length > 1) |> List.distinct
+
+    Assert.Equal(
+        (allCases |> List.map snd |> List.filter (fun sentence -> sentence.Length > 1) |> List.length),
+        List.length distinctSentences
+    )
+
+    for case, expectedMessage in allCases do
         let actual = TemplateApiMappers.toMyDogsbodyException anAction case
-        Assert.False(String.IsNullOrWhiteSpace actual.Message, $"{case} produced an empty message")
+        Assert.Equal(expectedMessage, actual.Message)
         Assert.Equal(anAction, actual.ActionName)
 
         // Every case except TemplateStoreFailed is expected/user-caused - wraps an

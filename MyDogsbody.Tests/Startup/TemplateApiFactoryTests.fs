@@ -728,6 +728,73 @@ let ``TestTemplate reports an unknown supplier rather than testing against an in
         Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
     )
 
+/// Every member's ActionName, in one place, driven through the real API.
+///
+/// The action is the only thing an exception-log row carries that says WHICH call failed, and
+/// ActionNames entries are `$"..."`-composed and compiler-unchecked, so nothing but a test stops
+/// one member reporting another's - CLAUDE-project.md -> Testing -> Contract states the rule
+/// ("assert each outer-ring function's error reports its declared action. A typo is otherwise
+/// invisible until someone reads the exception log").
+///
+/// Five of the six members happened to be pinned by an ad-hoc assertion in the tests above;
+/// EditTemplate was not, and repointing its mapError to ActionNames...addTemplate passed the whole
+/// suite, 778 of 778. The structural suite in Contracts/ActionNamesTests.fs cannot catch that: it
+/// checks that each string ends with the name of the binding that declares it and that no two
+/// bindings share one - both of which stay true when the wrong binding is USED.
+///
+/// Counted against the record's own field count by reflection, so a seventh member added later
+/// fails here until it names its action.
+[<Fact; Trait("Level", "Integration")>]
+let ``every TemplateApi member reports its own declared ActionName`` () =
+    withApi (fun api supplierId ->
+        let ghost: TemplateUiType =
+            { Id = "9999"; SupplierId = supplierId; Name = "Ghost"; DocumentPart = "AnyPart"; AttachmentFormat = ""; Position = 0; Rules = validRulesUi }
+
+        let unnamed: TemplateTestInputUiType =
+            { Template = { aTemplate supplierId with Name = "" }
+              SampleText = "Invoice: INV-9001"
+              SampleSubject = ""
+              SampleAttachmentFilename = "" }
+
+        // One refusal per member, each reached without a store failure, so what is asserted is the
+        // action the member declares rather than the action the adapter underneath it declares.
+        let expectations: (string * (unit -> Result<obj, MyDogsbodyException>) * string) list =
+            [
+                "GetTemplatesForSupplier",
+                (fun () -> api.GetTemplatesForSupplier "" |> Result.map box),
+                ActionNames.MyDogsbody.Startup.TemplateApi.getTemplatesForSupplier
+
+                "AddTemplate",
+                (fun () -> api.AddTemplate { aTemplate supplierId with Name = "" } |> Result.map box),
+                ActionNames.MyDogsbody.Startup.TemplateApi.addTemplate
+
+                "EditTemplate",
+                (fun () -> api.EditTemplate ghost |> Result.map box),
+                ActionNames.MyDogsbody.Startup.TemplateApi.editTemplate
+
+                "DeleteTemplate",
+                (fun () -> api.DeleteTemplate "9999" |> Result.map box),
+                ActionNames.MyDogsbody.Startup.TemplateApi.deleteTemplate
+
+                "ReorderTemplates",
+                (fun () -> api.ReorderTemplates supplierId [ "9999" ] |> Result.map box),
+                ActionNames.MyDogsbody.Startup.TemplateApi.reorderTemplates
+
+                "TestTemplate",
+                (fun () -> api.TestTemplate unnamed |> Result.map box),
+                ActionNames.MyDogsbody.Startup.TemplateApi.testTemplate
+            ]
+
+        let declaredMembers =
+            Reflection.FSharpType.GetRecordFields(typeof<TemplateApi>) |> Array.length
+
+        Assert.Equal(declaredMembers, List.length expectations)
+
+        for memberName, call, expectedAction in expectations do
+            let actual = call () |> errorOrFail memberName
+            Assert.Equal(expectedAction, actual.ActionName)
+    )
+
 /// An amount the rule DID find but could not read is a different sentence from one it never found,
 /// and it quotes the text it choked on - that text is the whole diagnostic.
 [<Fact; Trait("Level", "Integration")>]
