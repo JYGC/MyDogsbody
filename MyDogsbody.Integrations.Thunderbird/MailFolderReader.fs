@@ -81,6 +81,31 @@ let private headerBlockAndRest (text: string) : (string * string) option =
     separator
     |> Option.map (fun (index, separatorLength) -> text.Substring(0, index), text.Substring(index + separatorLength))
 
+/// The span of a folder file to buffer for one read: where to start, and how many bytes that is.
+/// Pure, and public, so both size guards it encodes are testable directly - a fixture large
+/// enough to reach them cannot be committed, and neither is reachable from one that can.
+///
+/// It encodes the two ways this arithmetic went wrong, at opposite ends of the range:
+///
+///  - Past 2 GiB, `int (totalLength - fromOffset)` wraps silently - the measured profile has a
+///    single 2.5 GB mbox - and `Array.zeroCreate` then throws an `ArgumentException` that neither
+///    handler in this file catches. Reported as a value instead, so the caller decides.
+///  - A stored offset can outlive the bytes it pointed at. `readFolder` measures the size BEFORE
+///    opening the file, so a folder that grew in between records an `OffsetReached` past the
+///    `SizeBytes` beside it, and a later compaction to a size between the two leaves that offset
+///    past the end of the file. Resuming from it asks for a NEGATIVE buffer - the same uncaught
+///    `ArgumentException`, from the other end. The file cannot contain what the watermark claims,
+///    so the span restarts at 0 and the folder is read in full: re-reading a message is
+///    recoverable, crashing out of the whole API call is not.
+let bufferSpan (totalLength: int64) (fromOffset: int64) : Result<int64 * int, string> =
+    let startOffset = if fromOffset < 0L || fromOffset > totalLength then 0L else fromOffset
+    let remaining = totalLength - startOffset
+
+    if remaining > int64 Array.MaxLength then
+        Error $"The folder is {remaining} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes)."
+    else
+        Ok(startOffset, int remaining)
+
 /// Splits raw mbox bytes into per-message byte ranges at "From " envelope lines - the only
 /// place this file looks for a boundary, independent of MIME structure entirely, so one
 /// message's malformed or unterminated multipart body can never swallow the messages that
@@ -204,30 +229,19 @@ let private processSegment (cutoff: ScanCutoff) (segmentBytes: byte[]) : MailMes
 let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64) : Result<MailMessage list * int64, MailAccountError> =
     try
         use stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
-        let totalLength = stream.Length
-        let remainingLength64 = totalLength - fromOffset
 
-        // The span is buffered whole, so it has to fit a single array. Without this guard
-        // `int remainingLength64` wraps silently for anything past 2 GiB - the measured profile
-        // has a single 2.5 GB mbox - and Array.zeroCreate then throws a negative-length
-        // ArgumentException that neither handler below catches, escaping the whole API call.
-        // Reporting the folder as unreadable keeps the other folders returning, per
-        // requirements.md -> "Reading safely while Thunderbird is running". Reading a folder
-        // this large WITHOUT buffering it whole is requirements.md's "read it without loading
-        // the whole folder into memory", and needs the streaming reader this does not have -
-        // see outcome.md -> "Not implemented".
-        if remainingLength64 > int64 Array.MaxLength then
-            Error(
-                MailFolderUnreadable(
-                    path,
-                    $"The folder is {remainingLength64} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes)."
-                )
-            )
-        else
+        // The span is buffered whole, so it has to fit a single array - and the offset it starts
+        // from has to still be inside the file. `bufferSpan` decides both; reporting the folder
+        // as unreadable keeps the other folders returning, per requirements.md -> "Reading safely
+        // while Thunderbird is running". Reading a folder too large for one array WITHOUT
+        // buffering it whole is requirements.md's "read it without loading the whole folder into
+        // memory", and needs the streaming reader this does not have - see outcome.md -> O.5.
+        match bufferSpan stream.Length fromOffset with
+        | Error reason -> Error(MailFolderUnreadable(path, reason))
+        | Ok(startOffset, remainingLength) ->
 
-        stream.Seek(fromOffset, SeekOrigin.Begin) |> ignore
+        stream.Seek(startOffset, SeekOrigin.Begin) |> ignore
 
-        let remainingLength = int remainingLength64
         let buffer = Array.zeroCreate<byte> remainingLength
         let mutable readSoFar = 0
 
@@ -241,11 +255,11 @@ let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64)
         let segments = splitIntoMessages buffer
 
         match segments with
-        | [] -> Ok([], fromOffset)
+        | [] -> Ok([], startOffset)
         | segments ->
             let lastIndex = segments.Length - 1
 
-            let mutable finalOffset = fromOffset
+            let mutable finalOffset = startOffset
             let messages = ResizeArray<MailMessage>()
 
             segments
@@ -258,13 +272,13 @@ let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64)
                 if isTorn then
                     // Discarded, and the offset stops BEFORE it rather than after the previous
                     // segment, so the whole torn message is re-read once Thunderbird finishes it.
-                    finalOffset <- fromOffset + int64 segmentStart
+                    finalOffset <- startOffset + int64 segmentStart
                 else
                     match processSegment cutoff segment with
                     | Some message -> messages.Add message
                     | None -> ()
 
-                    finalOffset <- fromOffset + int64 (segmentStart + segment.Length))
+                    finalOffset <- startOffset + int64 (segmentStart + segment.Length))
 
             Ok(List.ofSeq messages, finalOffset)
     with
@@ -394,7 +408,15 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
             | Some a -> Ok a
             | None -> Error(MailAccountNotFound accountId)
 
-        let countOneFolder (folder: MailFolder) : int =
+        // A folder this cannot read contributes 0 and the rest still count - EXCEPT a folder that
+        // is merely too large to buffer, which is reported. The two are not the same failure and
+        // must not look the same: a locked folder is momentary and a later count gets it, whereas
+        // one over `Array.MaxLength` is unreadable by this reader every single time. `int
+        // stream.Length` wrapped negative for it, `Array.zeroCreate` threw, and `with _ -> 0`
+        // swallowed that into "the folder holds no messages" - so the user was told a confident
+        // total that silently omitted their largest folder. Answering with the reason instead is
+        // the only honest option until O.5's streaming reader lands.
+        let countOneFolder (folder: MailFolder) : Result<int, MailAccountError> =
             let fullPath = MailFolderEnumerator.resolvePath account.StoreDirectory account.StoreFormat folder.RelativePath
 
             match account.StoreFormat with
@@ -403,27 +425,39 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
                 |> List.sumBy (fun sub ->
                     let dir = Path.Combine(fullPath, sub)
                     if Directory.Exists dir then Directory.GetFiles(dir).Length else 0)
+                |> Ok
             | Mbox ->
                 if not (File.Exists fullPath) then
-                    0
+                    Ok 0
                 else
                     try
                         use stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
-                        let buffer = Array.zeroCreate<byte> (int stream.Length)
-                        let mutable readSoFar = 0
 
-                        while readSoFar < buffer.Length do
-                            let read = stream.Read(buffer, readSoFar, buffer.Length - readSoFar)
-                            if read = 0 then readSoFar <- buffer.Length else readSoFar <- readSoFar + read
+                        match bufferSpan stream.Length 0L with
+                        | Error reason -> Error(MailFolderUnreadable(fullPath, reason))
+                        | Ok(_, length) ->
+                            let buffer = Array.zeroCreate<byte> length
+                            let mutable readSoFar = 0
 
-                        let segments = splitIntoMessages buffer
+                            while readSoFar < buffer.Length do
+                                let read = stream.Read(buffer, readSoFar, buffer.Length - readSoFar)
+                                if read = 0 then readSoFar <- buffer.Length else readSoFar <- readSoFar + read
 
-                        segments
-                        |> List.mapi (fun i (_, segment) -> i = segments.Length - 1, latin1.GetString segment)
-                        |> List.filter (fun (isLast, text) -> not (isLast && (headerBlockAndRest text).IsNone))
-                        |> List.length
+                            let segments = splitIntoMessages buffer
+
+                            segments
+                            |> List.mapi (fun i (_, segment) -> i = segments.Length - 1, latin1.GetString segment)
+                            |> List.filter (fun (isLast, text) -> not (isLast && (headerBlockAndRest text).IsNone))
+                            |> List.length
+                            |> Ok
                     with _ ->
-                        0
+                        Ok 0
 
-        return account.Folders |> List.filter (fun f -> f.IsScannable) |> List.sumBy countOneFolder
+        return!
+            account.Folders
+            |> List.filter (fun f -> f.IsScannable)
+            |> List.fold
+                (fun running folder ->
+                    running |> Result.bind (fun total -> countOneFolder folder |> Result.map (fun count -> total + count)))
+                (Ok 0)
     }

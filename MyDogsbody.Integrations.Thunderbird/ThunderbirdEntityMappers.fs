@@ -109,18 +109,22 @@ let toSelectedMailAccountId (entity: SelectedAccountEntity option) : Result<Mail
 
 // ---------- ScanWatermarkEntity ⇄ FolderWatermark ----------
 
+/// `ModifiedAt` is deliberately persisted as UTC ticks rather than as a DateTime column - see
+/// ScanWatermarkEntity for what LiteDB does to a DateTime, and why readFolder's equality check
+/// cannot survive it. This is a rename, not a new field: `ModifiedAt` became
+/// `ModifiedAtTicksUtc`.
 let toNewWatermarkEntity (accountId: string) (relativePath: string) (watermark: FolderWatermark) : ScanWatermarkEntity =
     ScanWatermarkEntity(
         AccountId = accountId,
         RelativePath = relativePath,
         SizeBytes = watermark.SizeBytes,
-        ModifiedAt = watermark.ModifiedAt,
+        ModifiedAtTicksUtc = watermark.ModifiedAt.Ticks,
         OffsetReached = watermark.OffsetReached
     )
 
 let toFolderWatermark (entity: ScanWatermarkEntity) : FolderWatermark =
     {
         SizeBytes = entity.SizeBytes
-        ModifiedAt = entity.ModifiedAt
+        ModifiedAt = DateTime(entity.ModifiedAtTicksUtc, DateTimeKind.Utc)
         OffsetReached = entity.OffsetReached
     }

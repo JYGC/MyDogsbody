@@ -53,9 +53,13 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
             match mailAccountApi.SetProfileRoot path with
             | Ok() ->
                 transact (fun _ ->
-                    profileRootCval.Value <- Some path
                     errorCval.Value <- None
                     isLoadingCval.Value <- false)
+
+                // Re-read rather than echo the string handed in: the workflow validates and
+                // trims, so what was stored is not always what was typed, and the page must show
+                // the stored value. Same shape as scanForAccounts reloading the selection.
+                loadProfileRoot ()
             | Error ex ->
                 transact (fun _ ->
                     errorCval.Value <- Some ex.Message

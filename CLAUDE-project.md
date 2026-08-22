@@ -95,7 +95,7 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1005 tests — 544 Unit, 205 Integration, 233 Contract, 23 E2E**, zero skips (measured against `thunderbird-account-selection`'s actual head commit, via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1021 tests — 554 Unit, 209 Integration, 235 Contract, 23 E2E**, zero skips (measured against `thunderbird-account-selection`'s actual head commit, via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
 
 If you see an intermittent failure, do not re-run until it passes. **There is one known flake**, in any test that constructs a LiteDB context: LiteDB's global `BsonMapper` still has a first-use race that the documented warm-up narrows but does not close — see *Per-integration databases*, which carries the captured stack trace. Anything else intermittent is yours.
 

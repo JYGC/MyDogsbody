@@ -86,10 +86,15 @@ let ``a failed initial load surfaces the message and stops loading`` () =
 [<Fact; Trait("Level", "Unit")>]
 let ``SetProfileRoot passes the path through and updates the displayed root`` () =
     let received = ResizeArray<string>()
+    let stored = ref None
+
     let mailAccountApi =
         api
-            (fun () -> Ok None)
-            (fun path -> received.Add path; Ok())
+            (fun () -> Ok stored.Value)
+            (fun path ->
+                received.Add path
+                stored.Value <- Some path
+                Ok())
             (fun () -> Ok(aDiscoveryResult []))
             (fun () -> Ok([], None))
             (fun _ -> Ok())
@@ -103,6 +108,35 @@ let ``SetProfileRoot passes the path through and updates the displayed root`` ()
     Assert.Single received |> ignore
     Assert.Equal(@"C:\chosen", received.[0])
     Assert.Equal(Some @"C:\chosen", AVal.force browser.ProfileRootAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``SetProfileRoot displays the root the store kept, not the string it was handed`` () =
+    // ProfileRootPath.create trims, so what SetProfileRoot persists is not always the string it
+    // was given. Echoing the input back into the page left it showing a value the store does not
+    // hold - CLAUDE-project.md -> UI: "A write reloads. Every command that changes stored data
+    // calls the load function on success, so the table shows what was stored rather than what
+    // the dialog held."
+    let stored = ref None
+
+    let mailAccountApi =
+        api
+            (fun () -> Ok stored.Value)
+            (fun path ->
+                stored.Value <- Some(path.Trim())
+                Ok())
+            (fun () -> Ok(aDiscoveryResult []))
+            (fun () -> Ok([], None))
+            (fun _ -> Ok())
+            (fun _ -> Ok 0)
+            (fun _ -> Ok())
+
+    let browser = MailAccountsBrowserModuleCreators.getMailAccountsBrowserModule runSynchronously mailAccountApi
+
+    browser.SetProfileRoot "  C:\\chosen  "
+
+    Assert.Equal(Some @"C:\chosen", AVal.force browser.ProfileRootAval)
+    Assert.Equal(None, AVal.force browser.ErrorAval)
+    Assert.False(AVal.force browser.IsLoadingAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``choosing a folder then scanning reloads the accounts table`` () =

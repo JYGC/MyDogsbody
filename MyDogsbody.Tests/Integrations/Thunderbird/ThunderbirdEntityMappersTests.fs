@@ -143,10 +143,15 @@ let ``toSelectedMailAccountId maps an absent row to None`` () =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toNewWatermarkEntity and toFolderWatermark round trip every field`` () =
+    // The value production stores: File.GetLastWriteTimeUtc, so Kind = Utc and the ticks run
+    // below a millisecond. `ModifiedAt` is a deliberate RENAME to `ModifiedAtTicksUtc` on the
+    // entity, and this asserts it as one.
+    let modifiedAt = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L
+
     let watermark: FolderWatermark =
         {
             SizeBytes = 4096L
-            ModifiedAt = DateTime(2026, 8, 20, 9, 30, 0)
+            ModifiedAt = modifiedAt
             OffsetReached = 2048L
         }
 
@@ -154,8 +159,9 @@ let ``toNewWatermarkEntity and toFolderWatermark round trip every field`` () =
     Assert.Equal("account1", entity.AccountId)
     Assert.Equal("INBOX", entity.RelativePath)
     Assert.Equal(4096L, entity.SizeBytes)
-    Assert.Equal(DateTime(2026, 8, 20, 9, 30, 0), entity.ModifiedAt)
+    Assert.Equal(modifiedAt.Ticks, entity.ModifiedAtTicksUtc)
     Assert.Equal(2048L, entity.OffsetReached)
 
     let roundTripped = ThunderbirdEntityMappers.toFolderWatermark entity
     Assert.Equal(watermark, roundTripped)
+    Assert.Equal(DateTimeKind.Utc, roundTripped.ModifiedAt.Kind)

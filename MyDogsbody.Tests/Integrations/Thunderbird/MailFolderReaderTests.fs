@@ -4,8 +4,10 @@ open System
 open System.Collections.Generic
 open System.IO
 open Xunit
+open MyDogsbody.Builders
 open MyDogsbody.Domain.MailAccounts
 open MyDogsbody.Integrations.Thunderbird
+open MyDogsbody.Integrations.Thunderbird.Database
 open MyDogsbody.Integrations.Thunderbird.MailFolderReader
 open MyDogsbody.Tests.Fixtures.ThunderbirdFixturePaths
 
@@ -42,6 +44,57 @@ let private freshTempDirectory () =
     let dir = Path.Combine(Path.GetTempPath(), $"mdb-tbreader-{Guid.NewGuid()}")
     Directory.CreateDirectory dir |> ignore
     dir
+
+// ---------- 4.0 bufferSpan: the two size guards, exercised without a file ----------
+
+/// `bufferSpan` is pure, so every value the guards turn on is reachable here directly - including
+/// the ones no committed fixture could carry. The over-2-GiB decision reached production untested
+/// once already, and the negative-span one crashed out of the whole API call.
+let private oneByteOverTheLimit = int64 Array.MaxLength + 1L
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan buffers the whole file when nothing has been read yet`` () =
+    Assert.Equal(Ok(0L, 1000), bufferSpan 1000L 0L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan buffers only what follows a stored offset inside the file`` () =
+    Assert.Equal(Ok(400L, 600), bufferSpan 1000L 400L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan buffers nothing when the stored offset is exactly the end of the file`` () =
+    Assert.Equal(Ok(1000L, 0), bufferSpan 1000L 1000L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan buffers nothing for an empty file`` () =
+    Assert.Equal(Ok(0L, 0), bufferSpan 0L 0L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan restarts at zero when the stored offset lies past the end of the file`` () =
+    // Not an error: the file cannot contain what the watermark claims, and re-reading a message
+    // is recoverable where a negative-length allocation is not.
+    Assert.Equal(Ok(0L, 1000), bufferSpan 1000L 1500L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan restarts at zero for a negative stored offset`` () =
+    Assert.Equal(Ok(0L, 1000), bufferSpan 1000L -1L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan accepts a span of exactly the largest array`` () =
+    Assert.Equal(Ok(0L, Array.MaxLength), bufferSpan (int64 Array.MaxLength) 0L)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan reports a span one byte past the largest array, naming both sizes`` () =
+    Assert.Equal(
+        Error
+            $"The folder is {oneByteOverTheLimit} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes).",
+        bufferSpan oneByteOverTheLimit 0L
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan measures the span from the stored offset, so an already-mostly-read large folder still reads`` () =
+    // The span, not the file, is what has to fit an array: a 3 GB folder read up to 2 GB has
+    // 1 GB left, and refusing it because the file is large would stop an incremental read dead.
+    Assert.Equal(Ok(2_000_000_000L, 1_000_000_000), bufferSpan 3_000_000_000L 2_000_000_000L)
 
 // ---------- 4.1 opening and message boundaries ----------
 
@@ -583,6 +636,174 @@ let ``the recorded offset stays exact across successive appends rather than drif
             )
     finally
         Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder re-reads the whole folder when the stored offset lies past the end of the file`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "StaleOffset")
+        File.WriteAllText(path, lfMessage "stale-1@example.com" "One")
+        let length = FileInfo(path).Length
+
+        let load, save, store = inMemoryWatermarkStore ()
+
+        // A watermark left behind by a read that raced an append: readFolder measures the size
+        // before opening the file, so a folder that grew in between records an OffsetReached
+        // past the SizeBytes beside it. A later compaction to something between the two then
+        // leaves that offset past the end of the file. The grown-file guard takes the offset
+        // anyway, and readMboxFile is asked to buffer a NEGATIVE number of bytes - the same
+        // uncaught ArgumentException the over-large guard was added for, from the other end of
+        // the range. Neither `with` handler in readMboxFile catches it, so it escapes the whole
+        // API call.
+        store.[(MailAccountId.value testAccountId, "StaleOffset")] <-
+            {
+                SizeBytes = 1L
+                ModifiedAt = File.GetLastWriteTimeUtc path
+                OffsetReached = length + 500L
+            }
+
+        match readFolder load save testAccountId (folder "StaleOffset") tempDir Mbox noCutoff with
+        | Ok messages ->
+            Assert.Equal<string list>([ "<stale-1@example.com>" ], messages |> List.map (fun m -> m.SourceMessageId))
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+        Assert.Equal(length, store.[(MailAccountId.value testAccountId, "StaleOffset")].OffsetReached)
+    finally
+        Directory.Delete(tempDir, true)
+
+// ---------- 4.4d a folder too large to buffer in one pass ----------
+
+/// A file of `sizeBytes` whose bytes are never written: NTFS records the length without zeroing
+/// the clusters, so this costs single-digit milliseconds and no measurable I/O. That is what
+/// makes the over-2-GiB guards testable at all - round 2 added one and shipped it untested,
+/// stating a fixture that large could not be committed, which is true of a *committed* fixture
+/// but not of one the test makes and deletes.
+let private withOversizedFolder (test: string -> string -> unit) =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Oversized")
+
+        (use stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write)
+         // One byte past the largest array this reader could buffer, so the guard is exercised
+         // at its boundary rather than somewhere comfortably beyond it.
+         stream.SetLength(int64 Array.MaxLength + 1L))
+
+        test tempDir path
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder reports a folder too large to buffer in one pass rather than throwing`` () =
+    withOversizedFolder (fun tempDir path ->
+        let load, save, store = inMemoryWatermarkStore ()
+
+        match readFolder load save testAccountId (folder "Oversized") tempDir Mbox noCutoff with
+        | Error(MailFolderUnreadable(reportedPath, reason)) ->
+            Assert.Equal(path, reportedPath)
+
+            Assert.Equal(
+                $"The folder is {int64 Array.MaxLength + 1L} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes).",
+                reason
+            )
+        | Error other -> Assert.Fail($"Expected MailFolderUnreadable, but got Error: {other}")
+        | Ok messages -> Assert.Fail($"Expected Error, but got Ok with {messages.Length} messages")
+
+        // Nothing was read, so nothing may claim to have been: a watermark written here would
+        // make the next scan resume past bytes this reader never saw.
+        Assert.False(store.ContainsKey(MailAccountId.value testAccountId, "Oversized")))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``countMessages reports a folder too large to buffer rather than silently counting it as zero`` () =
+    withOversizedFolder (fun tempDir path ->
+        let account: DiscoveredMailAccount =
+            {
+                Id = testAccountId
+                ProfilePath = tempDir
+                DisplayName = "Test"
+                EmailAddresses = []
+                StoreFormat = Mbox
+                StoreDirectory = tempDir
+                StoreDirectoryExists = true
+                Folders = [ folder "Oversized" ]
+                CachedMessageCount = None
+            }
+
+        let lookupAccount: LookupAccount = fun _ -> Ok(Some account)
+
+        match countMessages lookupAccount testAccountId with
+        | Error(MailFolderUnreadable(reportedPath, reason)) ->
+            Assert.Equal(path, reportedPath)
+
+            Assert.Equal(
+                $"The folder is {int64 Array.MaxLength + 1L} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes).",
+                reason
+            )
+        | Error other -> Assert.Fail($"Expected MailFolderUnreadable, but got Error: {other}")
+        | Ok count ->
+            Assert.Fail(
+                $"Expected Error, but got Ok {count} - a folder that could not be read was counted as if it held that many messages"
+            ))
+
+// ---------- 4.4e the watermark through the REAL store, not only an in-memory one ----------
+
+/// Every other test on this page binds LoadWatermark/SaveWatermark to a Dictionary, which cannot
+/// lose anything on the way to disk. Production binds them to ThunderbirdStore over LiteDB, and
+/// that is where an incremental read either works or silently stops working, so this one test
+/// pays for a real database file.
+let private withRealWatermarkStore (test: LoadWatermark -> SaveWatermark -> unit) =
+    let databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let context = ThunderbirdDatabaseContextModule.getDatabaseContext databasePath "direct"
+    let handleError = HandleErrorBuilder(fun _ -> ())
+
+    let load: LoadWatermark =
+        fun accountId relativePath ->
+            ThunderbirdStore.loadWatermarkEntry handleError context.GetWatermarksCollection accountId relativePath
+            |> Result.mapError (fun ex -> MailStoreFailed ex.Message)
+
+    let save: SaveWatermark =
+        fun accountId relativePath watermark ->
+            ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection accountId relativePath watermark
+            |> Result.mapError (fun ex -> MailStoreFailed ex.Message)
+
+    try
+        test load save
+    finally
+        context.Dispose()
+
+        try
+            File.Delete databasePath
+        with _ ->
+            ()
+
+[<Fact; Trait("Level", "Integration")>]
+let ``a second read of an unchanged file returns nothing new when the watermark went through the real store`` () =
+    withRealWatermarkStore (fun load save ->
+        let tempDir = freshTempDirectory ()
+
+        try
+            let path = Path.Combine(tempDir, "Unchanged")
+
+            File.WriteAllText(
+                path,
+                lfMessage "real-1@example.com" "One" + "\n" + lfMessage "real-2@example.com" "Two"
+            )
+
+            // Pinned rather than left to the clock: NTFS keeps 100-ns ticks, so a real mtime
+            // carries sub-millisecond precision, and this fixes that fact instead of hoping for
+            // it. Kind = Utc is what File.GetLastWriteTimeUtc hands readFolder.
+            File.SetLastWriteTimeUtc(path, DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L)
+
+            match readFolder load save testAccountId (folder "Unchanged") tempDir Mbox noCutoff with
+            | Ok messages -> Assert.Equal(2, messages.Length)
+            | Error error -> Assert.Fail($"Expected Ok on the first read, but got Error: {error}")
+
+            match readFolder load save testAccountId (folder "Unchanged") tempDir Mbox noCutoff with
+            | Ok messages -> Assert.Equal<string list>([], messages |> List.map (fun m -> m.SourceMessageId))
+            | Error error -> Assert.Fail($"Expected Ok on the second read, but got Error: {error}")
+        finally
+            Directory.Delete(tempDir, true))
 
 // ---------- 4.5 countMessages ----------
 

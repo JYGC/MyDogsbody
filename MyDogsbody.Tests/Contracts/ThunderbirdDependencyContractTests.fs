@@ -323,6 +323,34 @@ let ``a saved watermark is visible to a later load, and ClearWatermarks removes 
         deps.Clear id |> okOrFail "Clear"
         Assert.Equal(None, deps.Load id "INBOX" |> okOrFail "Load"))
 
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof watermarkImplementations)>]
+let ``a watermark carrying a filesystem modification time round trips it exactly, kind included`` (implementation: string) =
+    withWatermarkImplementation implementation (fun deps ->
+        let id = MailAccountId.create "a" |> valueOrFail
+
+        // Exactly the value readFolder stores: File.GetLastWriteTimeUtc, so Kind = Utc, and NTFS
+        // keeps 100-ns ticks so it carries sub-millisecond precision. readFolder then compares
+        // the loaded value to the file's own mtime with `=`, so anything a store loses here
+        // turns every incremental read into a silent full re-read. The other watermark tests
+        // above use DateTime(2026, 8, 20) - Kind Unspecified, midnight, whole seconds - which is
+        // the one subset that survives a lossy store unchanged, so the fake and the real adapter
+        // agreed over a difference that only production ever sees.
+        let modifiedAt = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L
+        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L }
+
+        deps.Save id "INBOX" watermark |> okOrFail "Save"
+
+        let loaded =
+            deps.Load id "INBOX"
+            |> okOrFail "Load"
+            |> Option.defaultWith (fun () -> failwith "expected a saved watermark")
+
+        Assert.Equal(modifiedAt.Ticks, loaded.ModifiedAt.Ticks)
+        Assert.Equal(DateTimeKind.Utc, loaded.ModifiedAt.Kind)
+        Assert.Equal(100L, loaded.SizeBytes)
+        Assert.Equal(50L, loaded.OffsetReached))
+
 // ---------- CountMessages ----------
 
 type private CountMessagesDependencies = { Count: MailAccountId -> Result<int, MailAccountError> }

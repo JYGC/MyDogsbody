@@ -137,19 +137,27 @@ let ``the selected account is persisted under the documented field name`` () =
 let ``a watermark is persisted under the documented field names`` () =
     withStoreAndRawAccess (fun context rawDatabase ->
         let id = MailAccountId.create @"C:\p|account1" |> valueOrFail
-        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L }
+        let modifiedAt = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L
+        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L }
 
         ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection id "INBOX" watermark
         |> okOrFail "saveWatermarkEntry"
 
         let document = rawDatabase.GetCollection("Watermarks").FindAll() |> Seq.exactlyOne
 
-        for field in [ "_id"; "AccountId"; "RelativePath"; "SizeBytes"; "ModifiedAt"; "OffsetReached" ] do
+        // `ModifiedAt` is deliberately gone, renamed to `ModifiedAtTicksUtc` and stored as an
+        // int64: LiteDB truncates a DateTime to whole milliseconds and returns it as Local, and
+        // readFolder's watermark check compares the loaded value to the file's own mtime with
+        // `=`. Asserting the field is an Int64 is what keeps that from quietly reverting.
+        for field in [ "_id"; "AccountId"; "RelativePath"; "SizeBytes"; "ModifiedAtTicksUtc"; "OffsetReached" ] do
             Assert.True(document.ContainsKey field, $"expected a {field} field")
+
+        Assert.False(document.ContainsKey "ModifiedAt", "ModifiedAt was renamed to ModifiedAtTicksUtc")
 
         Assert.Equal(@"C:\p|account1", document.["AccountId"].AsString)
         Assert.Equal("INBOX", document.["RelativePath"].AsString)
         Assert.Equal(100L, document.["SizeBytes"].AsInt64)
+        Assert.Equal(modifiedAt.Ticks, document.["ModifiedAtTicksUtc"].AsInt64)
         Assert.Equal(50L, document.["OffsetReached"].AsInt64))
 
 [<Fact; Trait("Level", "Contract")>]
