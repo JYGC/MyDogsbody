@@ -95,6 +95,7 @@ let ``toDiscoveryResultUiType carries every field`` () =
             Accounts = [ account ]
             ProfilesFound = [ @"C:\profile" ]
             Unreadable = [ { Path = @"C:\denied"; Reason = "Access denied" } ]
+            SelectionCleared = true
         }
 
     let actual = MailAccountApiMappers.toDiscoveryResultUiType result
@@ -104,6 +105,26 @@ let ``toDiscoveryResultUiType carries every field`` () =
     let unreadable = Assert.Single actual.Unreadable
     Assert.Equal(@"C:\denied", unreadable.Path)
     Assert.Equal("Access denied", unreadable.Reason)
+    Assert.True actual.SelectionCleared
+
+[<Fact; Trait("Level", "Contract")>]
+let ``toDiscoveryResultUiType carries a false SelectionCleared through unchanged`` () =
+    // The flag has to survive in BOTH directions: a mapper hard-coding `true` would pass the test
+    // above and still tell every user their selection had been cleared on every scan.
+    let result: DiscoveryResult =
+        {
+            Accounts = []
+            ProfilesFound = []
+            Unreadable = []
+            SelectionCleared = false
+        }
+
+    let actual = MailAccountApiMappers.toDiscoveryResultUiType result
+
+    Assert.Empty actual.Accounts
+    Assert.Empty actual.ProfilesFound
+    Assert.Empty actual.Unreadable
+    Assert.False actual.SelectionCleared
 
 // ---------- error translation ----------
 

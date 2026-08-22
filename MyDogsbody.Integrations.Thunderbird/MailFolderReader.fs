@@ -227,6 +227,33 @@ let private parseMessage (rfc822Bytes: byte[]) (headerBlock: string) : MailMessa
             |> Seq.toList
     }
 
+/// `parseMessage`, made total. MimeKit raises `FormatException` for content it cannot parse as
+/// a message at all - "Failed to parse message headers." - and that is neither an `IOException`
+/// nor an `UnauthorizedAccessException`, so it escaped `readMboxFile`'s and `readMaildirFolder`'s
+/// handlers, out of `readFolder`, out of `read`, and out of the whole API call. A `Result`-
+/// returning reader must not throw, and requirements.md -> "Reading safely while Thunderbird is
+/// running" asks for the other folders to keep returning.
+///
+/// This is reachable from ordinary mail, not only from a corrupt file. mbox carries no length
+/// header, so `splitIntoMessages` has to guess a boundary from an unquoted "From " at the start of
+/// a line preceded by a blank one - which a plain-text body signing off "From the accounts team,"
+/// satisfies exactly. The half after that false boundary begins with body text where RFC822
+/// headers should be, and one such line anywhere in one folder took down every folder of the
+/// account. (A properly mbox-quoted ">From " never produces the split - FromQuotedBody.mbox
+/// covers that - but nothing makes a sender quote it.)
+///
+/// Discarded rather than reported as a folder-level failure, and deliberately: the fragment is
+/// the tail of a message that IS returned, so dropping it loses a body's last lines, whereas
+/// failing the folder would lose every message in it - on a real INBOX, all of them, on every
+/// scan. Same treatment a torn final message gets (requirements.md: "discard that partial message
+/// and return everything before it, rather than failing the folder"), except that the offset still
+/// advances past it: unlike a torn message, this will never become parseable.
+let private tryParseMessage (rfc822Bytes: byte[]) (headerBlock: string) : MailMessage option =
+    try
+        Some(parseMessage rfc822Bytes headerBlock)
+    with :? FormatException ->
+        None
+
 /// One segment's cutoff decision plus, only when it is worth keeping, the fully parsed message.
 /// A message whose Date cannot be found or parsed is always kept - excluding it would be silent
 /// data loss with nothing on screen to show for it (Q1.6).
@@ -245,7 +272,7 @@ let private processSegment (cutoff: ScanCutoff) (segmentBytes: byte[]) : MailMes
             None // skipped BEFORE the body is ever touched - see splitIntoMessages's comment
         else
             let rfc822Bytes = stripEnvelopeLine segmentBytes
-            Some(parseMessage rfc822Bytes headerBlock)
+            tryParseMessage rfc822Bytes headerBlock
 
 /// Reads one mbox-format folder file in full, applying the cutoff. The file's own byte content
 /// is never modified - opened for read only, with sharing that permits Thunderbird's own reads
@@ -338,7 +365,9 @@ let private readMaildirFolder (cutoff: ScanCutoff) (folderDirectory: string) : R
                     if shouldSkip then
                         None
                     else
-                        Some(parseMessage (latin1.GetBytes text) headerBlock))
+                        // Same guard as the mbox branch - one file MimeKit cannot parse must not
+                        // take the whole folder (and, through `read`, the whole account) with it.
+                        tryParseMessage (latin1.GetBytes text) headerBlock)
 
         Ok messages
     with

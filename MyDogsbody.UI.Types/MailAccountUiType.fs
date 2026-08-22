@@ -25,4 +25,7 @@ type DiscoveryResultUiType =
         Accounts: MailAccountUiType list
         ProfilesFound: string list
         Unreadable: UnreadableDirectoryUiType list
+        /// This scan found the previously selected account gone and cleared the selection, so the
+        /// page can say so rather than just letting the tick vanish.
+        SelectionCleared: bool
     }

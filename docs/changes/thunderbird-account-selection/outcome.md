@@ -8,19 +8,20 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1023 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1035 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
   contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, round 3 a further
-  16, and round 4 two more — see per-level figures below, reproduced with `--filter "Level=..."`):
+  16, round 4 two more, and round 5 twelve — see per-level figures below, reproduced with
+  `--filter "Level=..."`):
 
-  | Level | Round 1 | Round 2 | Round 3 | Round 4 |
-  | --- | --- | --- | --- | --- |
-  | Unit | 532 | 544 | 554 | 556 |
-  | Integration | 198 | 205 | 209 | 209 |
-  | Contract | 232 | 233 | 235 | 235 |
-  | E2E | 22 | 23 | 23 | 23 |
-  | **Total** | **984** | **1005** | **1021** | **1023** |
+  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 |
+  | --- | --- | --- | --- | --- | --- |
+  | Unit | 532 | 544 | 554 | 556 | 559 |
+  | Integration | 198 | 205 | 209 | 209 | 216 |
+  | Contract | 232 | 233 | 235 | 235 | 236 |
+  | E2E | 22 | 23 | 23 | 23 | 24 |
+  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** |
 
   Round 4 adds two Unit tests and changes four existing ones rather than adding to them — its
   finding was that two integration tests were aimed at the wrong boundary, so retargeting them was
@@ -307,6 +308,79 @@ still never carried an open review comment.
    `git status`. Both corrected. No behavioural change, so neither has a red-first test — stated
    here rather than counted as covered.
 
+## Three defects PR #17's round-5 review found and fixed
+
+Round 5 re-read the diff cold, deliberately spending its attention away from `MailFolderReader`'s
+size guards — which rounds 2, 3 and 4 had all rewritten — and on the parts that had had less: the
+account reader, the store, the ApiFactory, the UI, and this change's own specs. Three findings, all
+raised by the review itself; the PR has still never carried an open review comment.
+
+1. **One message MimeKit could not parse threw an uncaught `FormatException` out of the whole
+   account read — and ordinary mail reaches it.** `parseMessage` calls `MimeMessage.Load`, which
+   raises `FormatException("Failed to parse message headers.")` for content that is not a message.
+   That is neither an `IOException` nor an `UnauthorizedAccessException`, so it walked straight past
+   `readMboxFile`'s and `readMaildirFolder`'s `with` clauses, out of `readFolder`, out of `read`,
+   and out of the call — from functions whose whole signature says `Result<_, MailAccountError>`,
+   and in direct contradiction of design.md's own contract for `read` ("a locked file reports
+   `MailFolderUnreadable` and the other folders still return").
+
+   This is not a corrupt-file case. mbox carries no length header, so `splitIntoMessages` has to
+   guess a boundary from an unquoted `From ` at the start of a line preceded by a blank one — which
+   a plain-text body signing off `From the accounts team,` satisfies exactly. The half after that
+   false boundary begins with body text where RFC822 headers should be. Measured against `f37cc56`
+   on the new `Fixtures/Mbox/UnquotedFromInBody.mbox` (two entirely ordinary messages, one such
+   signature line):
+
+   | | Before | After |
+   | --- | --- | --- |
+   | `readFolder` (mbox) | `System.FormatException: Failed to parse message headers.` at `MimeKit.MimeParser.ParseMessage`, out of `parseMessage` → `processSegment` → `readMboxFile` → `readFolder` | `Ok` with both real messages — `<unquoted-1@example.com>` and `<unquoted-2@example.com>` — every field asserted, offset advanced to EOF (498) |
+   | `read` (whole account, one such folder plus a good one) | the same exception, out of `read` too, so **every** folder of the account was lost | `Ok` with 3 messages |
+   | `readFolder` (maildir) | the same exception | `Ok`, the parseable message returned |
+   | `countMessages` | unaffected (it never parses a body) | unchanged |
+
+   Fixed with `MailFolderReader.tryParseMessage`, used by both the mbox and the maildir branch: a
+   segment MimeKit cannot parse is **discarded and the folder keeps going**, the same treatment a
+   torn final message gets (requirements.md: "discard that partial message and return everything
+   before it, rather than failing the folder"), except that the offset still advances past it —
+   unlike a torn message this will never become parseable, so stopping before it would re-read the
+   same bytes on every later scan. Discarding was chosen over failing the folder deliberately: the
+   fragment is the tail of a message that *is* returned, so dropping it costs a body's last lines,
+   whereas failing the folder would cost every message in it — on a real INBOX, all of them, on
+   every scan.
+2. **requirements.md and design.md both require a cleared selection to be reported; nothing
+   reported it, and nothing recorded that it was unbuilt.** requirements.md → *Selecting an account*:
+   "WHEN the selected account no longer appears in a fresh discovery THE SYSTEM SHALL clear the
+   selection **and say so**, rather than leaving a selection pointing at nothing." design.md's *Unit*
+   section says the same ("...is cleared, **and the workflow says so**"). The workflow cleared it
+   and returned `unit`, so the fact died at `reconcileSelection`: `DiscoveryResult` had no field for
+   it, the UI had nothing to render, and the only thing the user saw was their ticked row silently
+   un-ticking. Unlike **O.9** below, this was not recorded as deferred anywhere — it had simply been
+   dropped, and design.md contradicted itself about it (its prose asks for it; its own
+   `DiscoveryResult` listing has no field for it, exactly as O.9 describes for three other fields).
+
+   Fixed by carrying one `bool` the length of the pipeline: `reconcileSelection` now returns whether
+   it cleared anything, `DiscoveryResult` and `DiscoveryResultUiType` gained `SelectionCleared`, the
+   top mapper carries it, `MailAccountsBrowserModule` gained `SelectionClearedAval`, and the page
+   shows a `Severity.Warning` `MudAlert` — its own aval rather than a message pushed into
+   `ErrorAval`, because nothing failed and the alert channel is reserved for failures. Set from
+   *every* successful scan, not only a clearing one, so a later scan that clears nothing takes the
+   notice back down — the same "cleared by the next success" rule `ErrorAval` follows. The
+   `DiscoverMailAccounts` adapter always reports `false` (it never sees the stored selection) and
+   the workflow overwrites it; the contract suite asserts that of both implementations.
+3. **`ThunderbirdStore.updateCachedMessageCount` had no test at any level.** Every other function in
+   the module has five to seven; this one had none — no Ok path, no not-found path, no `ActionNames`
+   assertion — while being what persists the figure the accounts table's *Message count* column
+   shows. `MailAccountApiFactoryTests` reached it indirectly but asserted only the count, discarding
+   the timestamp as `_takenAt`. No behavioural change, so **no red-first test**: the four added tests
+   were green on first run, and are recorded here as closing a coverage gap rather than as covering a
+   fix. They assert the count and the instant it was taken (LiteDB hands a `DateTime` back as
+   `DateTimeKind.Local`, so the *instant* is what survives — harmless here, and now asserted as such,
+   because this column is only ever displayed and never compared for equality, unlike the watermark
+   that round 2 had to move onto `ModifiedAtTicksUtc`), every other field of the row surviving the
+   in-place update, the neighbouring account staying untouched, a second update replacing rather than
+   duplicating, an unknown id changing nothing, and the error path's exact `ActionName`, message and
+   preserved inner exception.
+
 ## Not implemented (Optional, deferred)
 
 - **O.1** Reading `global-messages-db.sqlite` (gloda) as a fast path — not guaranteed enabled or
@@ -338,7 +412,11 @@ still never carried an open review comment.
   folder (`| Error _ -> []`) so the others still return, which is what requirements.md asks for,
   but the reason never reaches anyone — the requirement also asks for "a reason a user can act
   on". Surfacing it means widening the `ReadMailFolder` dependency type, which change #4 consumes;
-  it belongs to that change rather than to this one.
+  it belongs to that change rather than to this one. **Round 5 adds one more thing to surface
+  there**: `tryParseMessage` discards a segment MimeKit cannot parse (round 5, finding 1) and, like
+  a torn message before it, says nothing about having done so. Both are the same gap — a per-read
+  diagnostic channel this change's `ReadMailFolder` signature has no room for — and both close
+  together when change #4 widens it.
 - **O.8** `MailAccountApiFactory` binds `loadWatermark` and `saveWatermark` but nothing uses them
   yet — `MailFolderReader.read` is not wired into `MailAccountApi`, because reading mail is change
   #4's surface. Harmless today, and the bindings are what change #4 will attach `ReadMailFolder`

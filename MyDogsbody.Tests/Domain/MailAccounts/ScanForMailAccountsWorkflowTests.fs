@@ -29,6 +29,9 @@ let private discoveryResult accounts : DiscoveryResult =
         Accounts = accounts
         ProfilesFound = [ @"C:\Thunderbird\Profiles\default" ]
         Unreadable = [ { Path = @"C:\Thunderbird\Profiles\orphan"; Reason = "Access denied" } ]
+        // What a DiscoverMailAccounts adapter always reports: it never sees the stored selection.
+        // The workflow is what decides the value that comes back out.
+        SelectionCleared = false
     }
 
 let private loadRootSet: LoadProfileRoot = fun () -> Ok (Some (profileRoot @"C:\Thunderbird"))
@@ -78,6 +81,7 @@ let ``scanForMailAccounts discovers, stores every field, and leaves a still-pres
         Assert.Equal<DiscoveredMailAccount list>(accounts, discovery.Accounts)
         Assert.Equal<string list>([ @"C:\Thunderbird\Profiles\default" ], discovery.ProfilesFound)
         Assert.Single discovery.Unreadable |> ignore
+        Assert.False discovery.SelectionCleared
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
     Assert.Equal<ProfileRootPath list>([ profileRoot @"C:\Thunderbird" ], List.ofSeq discoverCalls)
@@ -122,11 +126,41 @@ let ``scanForMailAccounts clears a selection naming an account absent from the f
             ()
 
     match actual with
-    | Ok _ -> ()
+    | Ok discovery ->
+        // requirements.md -> "Selecting an account": clear it AND SAY SO. Clearing it in the store
+        // is only half - without this flag the clearing is invisible past the workflow, and the
+        // page can do nothing but let the tick vanish unexplained.
+        Assert.True discovery.SelectionCleared
+        Assert.Equal<DiscoveredMailAccount list>(accounts, discovery.Accounts)
+        Assert.Equal<string list>([ @"C:\Thunderbird\Profiles\default" ], discovery.ProfilesFound)
+        Assert.Single discovery.Unreadable |> ignore
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
     let cleared = Assert.Single selectionSaves
     Assert.Equal(None, cleared)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``scanForMailAccounts reports no cleared selection when nothing was selected, and never writes one`` () =
+    let discover, _ = recordingDiscover (discoveryResult [ account "1" ])
+    let saveAccounts, _ = recordingSaveAccounts ()
+    let loadSelected: LoadSelectedMailAccount = fun () -> Ok None
+    let saveSelected, selectionSaves = recordingSaveSelection ()
+
+    let actual =
+        ScanForMailAccountsWorkflow.scanForMailAccounts
+            loadRootSet
+            discover
+            saveAccounts
+            loadSelected
+            saveSelected
+            ()
+
+    match actual with
+    | Ok discovery -> Assert.False discovery.SelectionCleared
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+    // Nothing was selected, so there was nothing to clear - the store must not be written to.
+    Assert.Empty selectionSaves
 
 [<Fact; Trait("Level", "Unit")>]
 let ``scanForMailAccounts carries unreadable directories into the result rather than failing`` () =

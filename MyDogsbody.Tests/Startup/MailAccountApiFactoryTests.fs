@@ -206,9 +206,28 @@ let ``a fresh scan clears a selection naming an account absent from it`` () =
             )
 
             api.SetProfileRoot otherProfile |> okOrFail "SetProfileRoot 2"
-            api.ScanForAccounts() |> okOrFail "ScanForAccounts 2" |> ignore
+            let discovery = api.ScanForAccounts() |> okOrFail "ScanForAccounts 2"
+
+            // Cleared, AND said so - the flag has to survive the whole composition root, not just
+            // the workflow, or the page has nothing to render the notice from.
+            Assert.True discovery.SelectionCleared
 
             let _, selected = api.GetAccounts() |> okOrFail "GetAccounts"
             Assert.Equal(None, selected)
         finally
             Directory.Delete(otherProfile, true))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``a fresh scan that leaves the selection intact reports no cleared selection`` () =
+    withApi (fun api ->
+        api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
+        api.ScanForAccounts() |> okOrFail "ScanForAccounts 1" |> ignore
+        api.SelectAccount alphaAccountId |> okOrFail "SelectAccount"
+
+        // Rescanning the same profile finds the same account, so nothing is reconciled away and
+        // the page must not announce a clearing that did not happen.
+        let discovery = api.ScanForAccounts() |> okOrFail "ScanForAccounts 2"
+        Assert.False discovery.SelectionCleared
+
+        let _, selected = api.GetAccounts() |> okOrFail "GetAccounts"
+        Assert.Equal(Some alphaAccountId, selected))

@@ -417,6 +417,7 @@ let private discoverMailAccounts: DiscoverMailAccounts =
                     Accounts = accounts
                     ProfilesFound = scanOutcome.ProfileDirectories
                     Unreadable = scanOutcome.Unreadable
+                    SelectionCleared = false
                 }
 
 let private realDiscoverDependencies (test: DiscoverDependencies -> unit) = test { Discover = discoverMailAccounts }
@@ -433,6 +434,7 @@ let private fakeDiscoverDependencies (test: DiscoverDependencies -> unit) =
                                 Accounts = [ anAccount "fake-account" @"C:\fake" ]
                                 ProfilesFound = [ measuredShapeProfile ]
                                 Unreadable = []
+                                SelectionCleared = false
                             }
                     else
                         Error(NoProfileFound(ProfileRootPath.value profileRoot))
@@ -453,7 +455,10 @@ let ``DiscoverMailAccounts finds at least one account under the measured-shape f
         let path = ProfileRootPath.create measuredShapeProfile |> valueOrFail
         let result = deps.Discover path |> okOrFail "Discover"
         Assert.NotEmpty result.Accounts
-        Assert.Equal<string list>([ measuredShapeProfile ], result.ProfilesFound))
+        Assert.Equal<string list>([ measuredShapeProfile ], result.ProfilesFound)
+        // Discovery never reads the stored selection, so neither implementation may claim to have
+        // reconciled one - only ScanForMailAccountsWorkflow can answer this.
+        Assert.False result.SelectionCleared)
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof discoverImplementations)>]

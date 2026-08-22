@@ -86,6 +86,21 @@ let mailAccountsBrowser (mailAccountsBrowserModule: MailAccountsBrowserModule) (
             }
         }
         adapt {
+            // "Clear the selection AND SAY SO" (requirements.md -> Selecting an account). Warning
+            // rather than Error: the system did this on purpose and nothing failed, so it must not
+            // take the MudAlert channel reserved for failures - which is why it is its own aval
+            // rather than a message pushed into ErrorAval.
+            let! selectionCleared = mailAccountsBrowserModule.SelectionClearedAval
+
+            if selectionCleared then
+                MudAlert''{
+                    Severity Severity.Warning
+                    Variant Variant.Filled
+                    Dense true
+                    "The previously selected mail account was not found in this scan, so the selection has been cleared. Choose an account below."
+                }
+        }
+        adapt {
             let! unreadable = mailAccountsBrowserModule.UnreadableAval
 
             if not unreadable.IsEmpty then

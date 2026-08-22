@@ -89,6 +89,15 @@ type DiscoveryResult =
         Accounts: DiscoveredMailAccount list
         ProfilesFound: string list
         Unreadable: UnreadableDirectory list
+        /// True when this scan found the previously selected account gone and cleared the
+        /// selection. requirements.md -> "Selecting an account" asks the system to clear it **and
+        /// say so**, and design.md's Unit section spells out the same thing ("...is cleared, and
+        /// the workflow says so"). Without a value on the way out there is nothing for the page to
+        /// say it with: the tick simply vanishes and the user is never told why the account they
+        /// chose is no longer chosen. A plain bool rather than the id that went away - the account
+        /// is gone, so its id names nothing the user can act on, and the workflow already reports
+        /// what IS there in `Accounts`.
+        SelectionCleared: bool
     }
 
 type MailAttachment =

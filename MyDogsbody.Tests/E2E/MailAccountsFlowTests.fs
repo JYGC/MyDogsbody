@@ -86,6 +86,59 @@ let ``selecting an account shows it selected and the selection persists across a
         reloadedRendered.WaitForAssertion(fun () -> Assert.Contains("Alpha Mail", reloadedRendered.Markup)))
 
 [<Fact; Trait("Level", "E2E")>]
+let ``a scan that clears a selection naming a vanished account says so on the page`` () =
+    // requirements.md -> "Selecting an account": "WHEN the selected account no longer appears in a
+    // fresh discovery THE SYSTEM SHALL clear the selection AND SAY SO, rather than leaving a
+    // selection pointing at nothing." Clearing it silently and letting the tick disappear is not
+    // saying so - the user is never told why the account they picked is no longer chosen.
+    let otherProfile = Path.Combine(Path.GetTempPath(), $"mdb-e2e-{Guid.NewGuid()}")
+    Directory.CreateDirectory otherProfile |> ignore
+
+    try
+        // A valid profile that declares no accounts at all, so nothing the first scan found survives.
+        File.WriteAllText(
+            Path.Combine(otherProfile, "prefs.js"),
+            "user_pref(\"mail.account.lastKey\", 0);\nuser_pref(\"mail.accountmanager.accounts\", \"account1\");"
+        )
+
+        withMailAccountsHarness (fun () -> None) (fun harness ->
+            let browserModule, rendered = renderBrowser harness (fun () -> None)
+
+            browserModule.SetProfileRoot measuredShapeProfile
+            browserModule.ScanForAccounts()
+            rendered.WaitForAssertion(fun () -> Assert.Contains("Alpha Mail", rendered.Markup))
+
+            browserModule.SelectAccount $"{measuredShapeProfile}|account1"
+
+            rendered.WaitForAssertion(fun () ->
+                let _, selected = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+                Assert.Equal(Some $"{measuredShapeProfile}|account1", selected))
+
+            browserModule.SetProfileRoot otherProfile
+            browserModule.ScanForAccounts()
+
+            rendered.WaitForAssertion(fun () ->
+                // The selection really is gone from the store...
+                let _, selected = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+                Assert.Equal(None, selected)
+                // ...and the page says so, rather than only un-ticking a row.
+                Assert.Contains("selected mail account was not found", rendered.Markup))
+
+            // Saying so is not an error: nothing is logged for a reconciliation the system did on
+            // purpose, and the alert channel stays free for real failures.
+            Assert.Empty harness.Logged
+
+            // A later scan that clears nothing takes the notice back down again.
+            browserModule.SetProfileRoot measuredShapeProfile
+            browserModule.ScanForAccounts()
+
+            rendered.WaitForAssertion(fun () ->
+                Assert.Contains("Alpha Mail", rendered.Markup)
+                Assert.DoesNotContain("selected mail account was not found", rendered.Markup)))
+    finally
+        Directory.Delete(otherProfile, true)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``the accounts table states each account's on-disk size and what a scan of it will cost`` () =
     withMailAccountsHarness (fun () -> None) (fun harness ->
         let browserModule, rendered = renderBrowser harness (fun () -> None)

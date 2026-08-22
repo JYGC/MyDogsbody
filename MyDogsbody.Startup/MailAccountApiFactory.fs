@@ -133,6 +133,9 @@ let createMailAccountApi (handleError: HandleErrorBuilder) (thunderbirdContext: 
                         Accounts = accounts
                         ProfilesFound = scanOutcome.ProfileDirectories
                         Unreadable = scanOutcome.Unreadable @ malformedProfiles
+                        // Discovery never reads the stored selection, so it cannot answer this.
+                        // ScanForMailAccountsWorkflow reconciles and overwrites it.
+                        SelectionCleared = false
                     }
 
     let lookupAccount: MailFolderReader.LookupAccount =

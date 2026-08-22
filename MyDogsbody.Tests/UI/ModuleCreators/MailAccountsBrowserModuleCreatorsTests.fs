@@ -26,7 +26,7 @@ let private anAccount id : MailAccountUiType =
     }
 
 let private aDiscoveryResult accounts : DiscoveryResultUiType =
-    { Accounts = accounts; ProfilesFound = []; Unreadable = [] }
+    { Accounts = accounts; ProfilesFound = []; Unreadable = []; SelectionCleared = false }
 
 /// A fake `MailAccountApi` with defaults that succeed and do nothing, overridable per test.
 let private api
@@ -187,6 +187,34 @@ let ``ScanForAccounts surfaces the unreadable directories from the scan result``
     let unreadable = AVal.force browser.UnreadableAval
     let entry = Assert.Single unreadable
     Assert.Equal(@"C:\denied", entry.Path)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``ScanForAccounts surfaces a cleared selection, and a later scan that clears nothing takes it back down`` () =
+    let clearedOnNextScan = ref true
+
+    let mailAccountApi =
+        api
+            (fun () -> Ok None)
+            (fun _ -> Ok())
+            (fun () -> Ok { aDiscoveryResult [] with SelectionCleared = clearedOnNextScan.Value })
+            (fun () -> Ok([], None))
+            (fun _ -> Ok())
+            (fun _ -> Ok 0)
+            (fun _ -> Ok())
+
+    let browser = MailAccountsBrowserModuleCreators.getMailAccountsBrowserModule runSynchronously mailAccountApi
+
+    // Nothing has been scanned yet, so there is nothing to announce.
+    Assert.False(AVal.force browser.SelectionClearedAval)
+
+    browser.ScanForAccounts()
+    Assert.True(AVal.force browser.SelectionClearedAval)
+    // Announcing a reconciliation is not reporting a failure - the alert channel stays free.
+    Assert.Equal(None, AVal.force browser.ErrorAval)
+
+    clearedOnNextScan.Value <- false
+    browser.ScanForAccounts()
+    Assert.False(AVal.force browser.SelectionClearedAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a failed scan surfaces the message and stops the scanning indicator`` () =

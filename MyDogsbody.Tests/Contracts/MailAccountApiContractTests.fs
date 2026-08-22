@@ -79,7 +79,15 @@ let private withFakeApi (test: MailAccountApi -> unit) =
                     | Some path when path = measuredShapeProfile ->
                         accounts.Clear()
                         accounts.AddRange [ for i in 1..10 -> fakeAccount $"fake-account-{i}" ]
-                        Ok { Accounts = List.ofSeq accounts; ProfilesFound = [ path ]; Unreadable = [] }
+                        Ok
+                            {
+                                Accounts = List.ofSeq accounts
+                                ProfilesFound = [ path ]
+                                Unreadable = []
+                                // The fake clears no selection here: the accounts it produces are
+                                // the same ten every time, so nothing selected can go missing.
+                                SelectionCleared = false
+                            }
                     | Some path -> fail ActionNames.MyDogsbody.Startup.MailAccountApi.scanForAccounts $"No Thunderbird profile was found under '{path}'."
 
             GetAccounts = fun () -> Ok(List.ofSeq accounts, selected)
@@ -147,6 +155,10 @@ let ``ScanForAccounts against the committed fixture finds ten accounts, and GetA
     withImplementation implementation (fun api ->
         api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
         api.ScanForAccounts() |> okOrFail "ScanForAccounts" |> ignore
+
+        let discovery = api.ScanForAccounts() |> okOrFail "ScanForAccounts second"
+        // Nothing was selected, so nothing can have been cleared - both implementations agree.
+        Assert.False discovery.SelectionCleared
 
         let accounts, selected = api.GetAccounts() |> okOrFail "GetAccounts"
         Assert.Equal(10, accounts.Length)

@@ -171,6 +171,112 @@ let ``readFolder reports a locked file as unreadable`` () =
     finally
         Directory.Delete(tempDir, true)
 
+// ---------- 4.1b a segment MimeKit cannot parse ----------
+//
+// mbox has no length header, so a boundary is guessed from an unquoted "From " at the start of a
+// line preceded by a blank one. A body line that reads "From the accounts team," therefore splits
+// a perfectly ordinary message in two, and the half after the split begins with body text where
+// RFC822 headers should be. MimeKit refuses that with a FormatException - which is neither an
+// IOException nor an UnauthorizedAccessException, so it escaped readMboxFile's and
+// readMaildirFolder's handlers, out of readFolder, out of read, and out of the whole call. One
+// such line anywhere in one folder therefore took down every folder of the account.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder discards a segment MimeKit cannot parse and still returns the rest of the folder`` () =
+    let load, save, store = inMemoryWatermarkStore ()
+
+    let actual = readFolder load save testAccountId (folder "UnquotedFromInBody.mbox") mboxFixtures Mbox noCutoff
+
+    match actual with
+    | Ok messages ->
+        Assert.Equal<string list>(
+            [ "<unquoted-1@example.com>"; "<unquoted-2@example.com>" ],
+            messages |> List.map (fun m -> m.SourceMessageId)
+        )
+
+        Assert.Equal<string list>(
+            [ "Invoice attached"; "Second message" ],
+            messages |> List.map (fun m -> m.Subject)
+        )
+
+        Assert.Equal<string list>(
+            [ "alice@example.com"; "bob@example.com" ],
+            messages |> List.map (fun m -> m.Sender)
+        )
+
+        Assert.Equal<DateTime list>(
+            [ DateTime(2024, 1, 1, 0, 0, 0); DateTime(2024, 1, 2, 0, 0, 0) ],
+            messages |> List.map (fun m -> m.ReceivedAt)
+        )
+
+        Assert.All(messages, fun m -> Assert.Empty m.Attachments)
+
+        // The whole file is consumed: the discarded fragment will never become parseable, so the
+        // offset must advance past it rather than re-reading it on every later scan.
+        let expectedLength = FileInfo(mboxFixture "UnquotedFromInBody.mbox").Length
+        Assert.Equal(expectedLength, store.[(MailAccountId.value testAccountId, "UnquotedFromInBody.mbox")].OffsetReached)
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``read continues past a folder holding a segment MimeKit cannot parse and still returns the other folders' messages`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        File.Copy(mboxFixture "UnquotedFromInBody.mbox", Path.Combine(tempDir, "Unparseable"))
+        File.Copy(mboxFixture "NoMessageId.mbox", Path.Combine(tempDir, "Ok"))
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        let account: DiscoveredMailAccount =
+            {
+                Id = testAccountId
+                ProfilePath = tempDir
+                DisplayName = "Test"
+                EmailAddresses = []
+                StoreFormat = Mbox
+                StoreDirectory = tempDir
+                StoreDirectoryExists = true
+                Folders = [ folder "Unparseable"; folder "Ok" ]
+                CachedMessageCount = None
+            }
+
+        let lookupAccount: LookupAccount = fun _ -> Ok(Some account)
+
+        match MailFolderReader.read lookupAccount load save testAccountId noCutoff with
+        | Ok messages -> Assert.Equal(3, messages.Length) // two from Unparseable, one from Ok
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder discards a maildir message MimeKit cannot parse and still returns the rest`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let inbox = Path.Combine(tempDir, "INBOX")
+        Directory.CreateDirectory(Path.Combine(inbox, "cur")) |> ignore
+        Directory.CreateDirectory(Path.Combine(inbox, "new")) |> ignore
+        Directory.CreateDirectory(Path.Combine(inbox, "tmp")) |> ignore
+
+        // No colon on the first line, so MimeKit has no header to parse at all.
+        File.WriteAllText(Path.Combine(inbox, "cur", "1.broken"), "not a header at all\nstill not one\n\nbody\n")
+
+        File.WriteAllText(
+            Path.Combine(inbox, "cur", "2.good"),
+            "Message-ID: <maildir-good@example.com>\nFrom: alice@example.com\nSubject: Good\nDate: Mon, 1 Jan 2024 00:00:00 +0000\n\nbody\n"
+        )
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        match readFolder load save testAccountId (folder "INBOX") tempDir Maildir noCutoff with
+        | Ok messages ->
+            let message = Assert.Single messages
+            Assert.Equal("<maildir-good@example.com>", message.SourceMessageId)
+            Assert.Equal("Good", message.Subject)
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
+
 [<Fact; Trait("Level", "Integration")>]
 let ``read continues past a locked folder and still returns the other folders' messages`` () =
     let tempDir = freshTempDirectory ()

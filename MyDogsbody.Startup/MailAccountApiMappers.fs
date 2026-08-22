@@ -44,6 +44,7 @@ let toDiscoveryResultUiType (result: DiscoveryResult) : DiscoveryResultUiType =
         Accounts = result.Accounts |> List.map toMailAccountUiType
         ProfilesFound = result.ProfilesFound
         Unreadable = result.Unreadable |> List.map toUnreadableDirectoryUiType
+        SelectionCleared = result.SelectionCleared
     }
 
 /// Inbound: an adapter's exception becomes the one domain case that stands for infrastructure

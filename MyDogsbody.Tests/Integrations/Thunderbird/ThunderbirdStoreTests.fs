@@ -141,6 +141,128 @@ let ``saveMailAccounts replaces the previous set rather than accumulating`` () =
         let allFolders = context.GetFoldersCollection().FindAll() |> Seq.toList
         Assert.All(allFolders, fun f -> Assert.Equal(@"C:\profile|account2", f.AccountId)))
 
+// ---------- Cached message count ----------
+//
+// `updateCachedMessageCount` was the one ThunderbirdStore function this change shipped with no
+// test at any level - no Ok path, no not-found path, no ActionNames assertion - while every other
+// function in the module has five to seven. It is what persists the figure the accounts table's
+// "Message count" column shows, so an untested no-op here reads on screen as "Not counted yet"
+// after the user has pressed Count messages and been told it succeeded.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``updateCachedMessageCount stores the count and the time it was taken, leaving the rest of the account alone`` () =
+    withContext (fun context ->
+        let id = MailAccountId.create @"C:\profile|account1" |> valueOrFail
+        let takenAt = DateTime(2026, 8, 20, 13, 45, 30, DateTimeKind.Utc)
+
+        [ account @"C:\profile|account1" @"C:\profile\a1"; account @"C:\profile|account2" @"C:\profile\a2" ]
+        |> ThunderbirdStore.saveMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection
+        |> okOrFail "saveMailAccounts"
+
+        ThunderbirdStore.updateCachedMessageCount handleError context.GetAccountsCollection id 42 takenAt
+        |> okOrFail "updateCachedMessageCount"
+
+        let readBack =
+            ThunderbirdStore.loadMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection ()
+            |> okOrFail "loadMailAccounts"
+
+        let updated = readBack |> List.find (fun a -> MailAccountId.value a.Id = @"C:\profile|account1")
+
+        match updated.CachedMessageCount with
+        | Some(count, storedAt) ->
+            Assert.Equal(42, count)
+            // LiteDB stores a DateTime as UTC and hands it back as DateTimeKind.Local, so the
+            // INSTANT is what survives, not the ticks - the same LiteDB behaviour that forced the
+            // watermark onto ModifiedAtTicksUtc. Here it is harmless and asserted as such: the
+            // column is only ever displayed, never compared for equality.
+            Assert.Equal(takenAt, storedAt.ToUniversalTime())
+        | None -> Assert.Fail("Expected a cached message count after updateCachedMessageCount")
+
+        // Everything else about the row survives the in-place update...
+        Assert.Equal("Account C:\\profile|account1", updated.DisplayName)
+        Assert.Equal(@"C:\profile\a1", updated.StoreDirectory)
+        Assert.Equal<string list>([ @"C:\profile|account1@example.com" ], updated.EmailAddresses)
+        Assert.Equal(Mbox, updated.StoreFormat)
+        Assert.True updated.StoreDirectoryExists
+        Assert.Equal(@"C:\profile", updated.ProfilePath)
+        let folder = Assert.Single updated.Folders
+        Assert.Equal("INBOX", folder.RelativePath)
+        Assert.Equal(10L, folder.SizeBytes)
+
+        // ...and the other account is untouched, so this really is an in-place update of one row
+        // rather than saveMailAccounts' replace-everything.
+        let other = readBack |> List.find (fun a -> MailAccountId.value a.Id = @"C:\profile|account2")
+        Assert.Equal(None, other.CachedMessageCount)
+        Assert.Equal(2, readBack.Length))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``updateCachedMessageCount replaces a previous count rather than adding a second row`` () =
+    withContext (fun context ->
+        let id = MailAccountId.create @"C:\profile|account1" |> valueOrFail
+
+        [ account @"C:\profile|account1" @"C:\profile\a1" ]
+        |> ThunderbirdStore.saveMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection
+        |> okOrFail "saveMailAccounts"
+
+        ThunderbirdStore.updateCachedMessageCount handleError context.GetAccountsCollection id 1 (DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc))
+        |> okOrFail "updateCachedMessageCount first"
+
+        ThunderbirdStore.updateCachedMessageCount handleError context.GetAccountsCollection id 7 (DateTime(2026, 8, 21, 0, 0, 0, DateTimeKind.Utc))
+        |> okOrFail "updateCachedMessageCount second"
+
+        let readBack =
+            ThunderbirdStore.loadMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection ()
+            |> okOrFail "loadMailAccounts"
+
+        let only = Assert.Single readBack
+
+        match only.CachedMessageCount with
+        | Some(count, storedAt) ->
+            Assert.Equal(7, count)
+            Assert.Equal(DateTime(2026, 8, 21, 0, 0, 0, DateTimeKind.Utc), storedAt.ToUniversalTime())
+        | None -> Assert.Fail("Expected a cached message count"))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``updateCachedMessageCount leaves the collection untouched when no account carries that id`` () =
+    withContext (fun context ->
+        let known = MailAccountId.create @"C:\profile|account1" |> valueOrFail
+        let unknown = MailAccountId.create @"C:\profile|nobody" |> valueOrFail
+
+        [ account @"C:\profile|account1" @"C:\profile\a1" ]
+        |> ThunderbirdStore.saveMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection
+        |> okOrFail "saveMailAccounts"
+
+        // Not an error: MailAccountApiFactory only reaches here after countMessages has already
+        // resolved the account, so an id with no row is a state the call cannot produce. What it
+        // must not do is invent a row or fail the call the user was already told succeeded.
+        ThunderbirdStore.updateCachedMessageCount handleError context.GetAccountsCollection unknown 42 DateTime.UtcNow
+        |> okOrFail "updateCachedMessageCount"
+
+        let readBack =
+            ThunderbirdStore.loadMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection ()
+            |> okOrFail "loadMailAccounts"
+
+        let only = Assert.Single readBack
+        Assert.Equal(MailAccountId.value known, MailAccountId.value only.Id)
+        Assert.Equal(None, only.CachedMessageCount))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``updateCachedMessageCount reports a MyDogsbodyException carrying its action when the collection cannot be reached`` () =
+    let logged = ResizeArray<MyDogsbodyException>()
+    let recordingHandleError = HandleErrorBuilder logged.Add
+    let failingGetter: unit -> AccountsCollection = fun () -> raise (InvalidOperationException "database is gone")
+    let id = MailAccountId.create "a" |> valueOrFail
+
+    let actual = ThunderbirdStore.updateCachedMessageCount recordingHandleError failingGetter id 42 DateTime.UtcNow
+
+    match actual with
+    | Error ex ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.updateCachedMessageCount, ex.ActionName)
+        Assert.Equal("Failed to update the cached message count.", ex.Message)
+        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Single logged |> ignore
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
 // ---------- Selection ----------
 
 [<Fact; Trait("Level", "Integration")>]

@@ -16,6 +16,7 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
     let accountsCval = cval<MailAccountUiType list> []
     let selectedAccountIdCval = cval<string option> None
     let unreadableCval = cval<UnreadableDirectoryUiType list> []
+    let selectionClearedCval = cval false
 
     /// Reloads the accounts table and the current selection together, so the table always shows
     /// what was actually stored rather than what an action optimistically assumed.
@@ -73,6 +74,10 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
             | Ok discovery ->
                 transact (fun _ ->
                     unreadableCval.Value <- discovery.Unreadable
+                    // Set from every successful scan, not only a clearing one, so a later scan
+                    // that clears nothing takes the notice back down - the same "cleared by the
+                    // next success" rule ErrorAval follows.
+                    selectionClearedCval.Value <- discovery.SelectionCleared
                     errorCval.Value <- None
                     isScanningCval.Value <- false)
 
@@ -105,6 +110,7 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
         AccountsAval = accountsCval
         SelectedAccountIdAval = selectedAccountIdCval
         UnreadableAval = unreadableCval
+        SelectionClearedAval = selectionClearedCval
         IsScanningAval = isScanningCval
         IsLoadingAval = isLoadingCval
         ErrorAval = errorCval
