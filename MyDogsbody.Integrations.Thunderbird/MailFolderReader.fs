@@ -58,13 +58,28 @@ let private messageIdOf (headerBlock: string) : string =
 /// The index just past the blank line separating headers from body, or None if the segment has
 /// no such separator at all - which for the LAST message in a file means it is torn: Thunderbird
 /// was still writing it.
+///
+/// BOTH line endings are recognised, and that is load-bearing rather than defensive. RFC 5322
+/// mandates CRLF, and a message written to the store exactly as it arrived over IMAP or SMTP
+/// keeps it, so a folder can hold CRLF messages whatever the file's own convention is. Looking
+/// only for "\n\n" made every such message report "no separator", which processSegment turns
+/// into a silently dropped message and readMboxFile turns into "torn" - data loss with nothing
+/// on screen to show for it. Whichever separator appears first wins, so a CRLF header block
+/// followed by an LF blank line inside the body still splits at the header block.
 let private headerBlockAndRest (text: string) : (string * string) option =
-    let idx = text.IndexOf("\n\n", StringComparison.Ordinal)
+    let lfIndex = text.IndexOf("\n\n", StringComparison.Ordinal)
+    let crlfIndex = text.IndexOf("\r\n\r\n", StringComparison.Ordinal)
 
-    if idx < 0 then
-        None
-    else
-        Some(text.Substring(0, idx), text.Substring(idx + 2))
+    let separator =
+        match lfIndex, crlfIndex with
+        | -1, -1 -> None
+        | -1, crlf -> Some(crlf, 4)
+        | lf, -1 -> Some(lf, 2)
+        | lf, crlf when lf <= crlf -> Some(lf, 2)
+        | _, crlf -> Some(crlf, 4)
+
+    separator
+    |> Option.map (fun (index, separatorLength) -> text.Substring(0, index), text.Substring(index + separatorLength))
 
 /// Splits raw mbox bytes into per-message byte ranges at "From " envelope lines - the only
 /// place this file looks for a boundary, independent of MIME structure entirely, so one
@@ -72,12 +87,28 @@ let private headerBlockAndRest (text: string) : (string * string) option =
 /// follow it in the same file. A boundary line is the first line of the buffer, or any line
 /// immediately preceded by a blank one - a properly mbox-quoted body never produces a false
 /// match (FromQuotedBody.mbox exercises exactly this).
-let private splitIntoMessages (bytes: byte[]) : byte[] list =
+///
+/// Each segment is returned with its byte offset WITHIN `bytes`, and is a real slice of the
+/// buffer rather than a re-joined string. Both matter for the watermark: rebuilding a segment
+/// with String.Join dropped the newline that separated it from the next one, so the summed
+/// lengths under-counted the bytes consumed by one per message, and bytes lying before the
+/// first boundary were not counted at all. Slicing by offset is exact, so "the offset reached"
+/// is the offset actually reached and an incremental read resumes where the last one stopped.
+let private splitIntoMessages (bytes: byte[]) : (int * byte[]) list =
     if bytes.Length = 0 then
         []
     else
         let text = latin1.GetString bytes
         let lines = text.Split('\n')
+
+        // Latin1 is one byte per char, so a char index into `text` is a byte index into `bytes`.
+        // Every line but the last was terminated by the '\n' that Split consumed, hence the +1.
+        let lineStartOffsets = Array.zeroCreate<int> (lines.Length + 1)
+
+        for i in 0 .. lines.Length - 1 do
+            lineStartOffsets.[i + 1] <- lineStartOffsets.[i] + lines.[i].Length + 1
+
+        lineStartOffsets.[lines.Length] <- bytes.Length
 
         let isBoundary i =
             lines.[i].StartsWith("From ", StringComparison.Ordinal)
@@ -96,8 +127,9 @@ let private splitIntoMessages (bytes: byte[]) : byte[] list =
                     else
                         lines.Length
 
-                let segmentLines = lines.[startLine .. endLineExclusive - 1]
-                latin1.GetBytes(String.Join("\n", segmentLines)))
+                let startOffset = lineStartOffsets.[startLine]
+                let endOffset = lineStartOffsets.[endLineExclusive]
+                startOffset, bytes.[startOffset .. endOffset - 1])
             |> Array.toList
 
 /// Strips the leading "From ..." envelope line, leaving standard RFC822 content MimeMessage.Load
@@ -173,9 +205,29 @@ let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64)
     try
         use stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
         let totalLength = stream.Length
+        let remainingLength64 = totalLength - fromOffset
+
+        // The span is buffered whole, so it has to fit a single array. Without this guard
+        // `int remainingLength64` wraps silently for anything past 2 GiB - the measured profile
+        // has a single 2.5 GB mbox - and Array.zeroCreate then throws a negative-length
+        // ArgumentException that neither handler below catches, escaping the whole API call.
+        // Reporting the folder as unreadable keeps the other folders returning, per
+        // requirements.md -> "Reading safely while Thunderbird is running". Reading a folder
+        // this large WITHOUT buffering it whole is requirements.md's "read it without loading
+        // the whole folder into memory", and needs the streaming reader this does not have -
+        // see outcome.md -> "Not implemented".
+        if remainingLength64 > int64 Array.MaxLength then
+            Error(
+                MailFolderUnreadable(
+                    path,
+                    $"The folder is {remainingLength64} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes)."
+                )
+            )
+        else
+
         stream.Seek(fromOffset, SeekOrigin.Begin) |> ignore
 
-        let remainingLength = int (totalLength - fromOffset)
+        let remainingLength = int remainingLength64
         let buffer = Array.zeroCreate<byte> remainingLength
         let mutable readSoFar = 0
 
@@ -193,26 +245,26 @@ let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64)
         | segments ->
             let lastIndex = segments.Length - 1
 
-            let mutable offsetWithinBuffer = 0
             let mutable finalOffset = fromOffset
             let messages = ResizeArray<MailMessage>()
 
             segments
-            |> List.iteri (fun i segment ->
+            |> List.iteri (fun i (segmentStart, segment) ->
                 let isLast = i = lastIndex
                 let segmentText = latin1.GetString segment
 
                 let isTorn = isLast && (headerBlockAndRest segmentText).IsNone
 
                 if isTorn then
-                    () // discarded; finalOffset stops BEFORE this segment, so it is re-tried later
+                    // Discarded, and the offset stops BEFORE it rather than after the previous
+                    // segment, so the whole torn message is re-read once Thunderbird finishes it.
+                    finalOffset <- fromOffset + int64 segmentStart
                 else
                     match processSegment cutoff segment with
                     | Some message -> messages.Add message
                     | None -> ()
 
-                    offsetWithinBuffer <- offsetWithinBuffer + segment.Length
-                    finalOffset <- fromOffset + int64 offsetWithinBuffer)
+                    finalOffset <- fromOffset + int64 (segmentStart + segment.Length))
 
             Ok(List.ofSeq messages, finalOffset)
     with
@@ -367,7 +419,7 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
                         let segments = splitIntoMessages buffer
 
                         segments
-                        |> List.mapi (fun i segment -> i = segments.Length - 1, latin1.GetString segment)
+                        |> List.mapi (fun i (_, segment) -> i = segments.Length - 1, latin1.GetString segment)
                         |> List.filter (fun (isLast, text) -> not (isLast && (headerBlockAndRest text).IsNone))
                         |> List.length
                     with _ ->

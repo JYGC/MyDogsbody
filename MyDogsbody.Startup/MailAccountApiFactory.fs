@@ -86,6 +86,21 @@ let createMailAccountApi (handleError: HandleErrorBuilder) (thunderbirdContext: 
     let discoverMailAccounts: DiscoverMailAccounts =
         fun profileRoot ->
             let rootPath = ProfileRootPath.value profileRoot
+
+            // Checked before the walk rather than inferred from it. ThunderbirdFolderScanner
+            // cannot canonicalise a path that is not there, so it silently returns an empty
+            // outcome, which is indistinguishable from "walked it, found no prefs.js" - and the
+            // user would be told to look for their profile when the real answer is that the
+            // drive is unplugged (requirements.md -> "Choosing the profile folder", "Edge cases").
+            if not (System.IO.Directory.Exists rootPath) then
+                Error(
+                    ProfileRootUnreachable(
+                        rootPath,
+                        "the folder no longer exists, or is on a drive or network share that is not available"
+                    )
+                )
+            else
+
             let scanOutcome = ThunderbirdFolderScanner.scan rootPath
             let accountResults = scanOutcome.ProfileDirectories |> List.map (fun dir -> dir, ThunderbirdAccountReader.read dir)
 

@@ -11,6 +11,29 @@ let private formatCachedCount (count: (int * DateTime) option) =
     | Some(n, takenAt) -> $"{n} (as of {takenAt:g})"
     | None -> "Not counted yet"
 
+/// Binary units, one decimal above bytes. Public so the figure the table shows is asserted
+/// directly rather than re-derived by a test that could drift from it.
+let formatSizeBytes (bytes: int64) : string =
+    let kb = 1024.0
+    let mb = kb * 1024.0
+    let gb = mb * 1024.0
+    let value = float bytes
+
+    if value < kb then $"{bytes} bytes"
+    elif value < mb then $"%.1f{value / kb} KB"
+    elif value < gb then $"%.1f{value / mb} MB"
+    else $"%.1f{value / gb} GB"
+
+/// The account's whole on-disk size - every folder, scannable or not.
+let accountSizeBytes (account: MailAccountUiType) : int64 =
+    account.Folders |> List.sumBy (fun folder -> folder.SizeBytes)
+
+/// What a scan will actually read: Trash/Deleted/Junk/Sent/Drafts are excluded from the
+/// scannable set (Q4.8), and on the measured profile that is 9.0 GB of 15.2 GB - the difference
+/// between a feasible scan and an infeasible one, so the page states it before the scan is run.
+let scannableSizeBytes (account: MailAccountUiType) : int64 =
+    account.Folders |> List.filter (fun folder -> folder.IsScannable) |> List.sumBy (fun folder -> folder.SizeBytes)
+
 let mailAccountsBrowser (mailAccountsBrowserModule: MailAccountsBrowserModule) (folderPicker: FolderPicker) =
     fragment {
         adapt {
@@ -109,6 +132,7 @@ let mailAccountsBrowser (mailAccountsBrowserModule: MailAccountsBrowserModule) (
                         MudTh''{ "Email addresses" }
                         MudTh''{ "Format" }
                         MudTh''{ "Folders" }
+                        MudTh''{ "Size" }
                         MudTh''{ "Message count" }
                         MudTh''{ "" }
                     }
@@ -140,6 +164,18 @@ let mailAccountsBrowser (mailAccountsBrowserModule: MailAccountsBrowserModule) (
                         MudTd''{ String.concat ", " account.EmailAddresses }
                         MudTd''{ account.StoreFormat }
                         MudTd''{ $"{account.Folders.Length}" }
+                        MudTd''{
+                            fragment {
+                                MudText''{ formatSizeBytes (accountSizeBytes account) }
+
+                                // What the scan will actually read, stated before it is run -
+                                // the excluded folders are most of the bytes on a real profile.
+                                MudText''{
+                                    Typo Typo.caption
+                                    $"{formatSizeBytes (scannableSizeBytes account)} to scan"
+                                }
+                            }
+                        }
                         MudTd''{ formatCachedCount account.CachedMessageCount }
                         MudTd''{
                             MudStack''{

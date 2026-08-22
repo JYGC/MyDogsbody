@@ -122,6 +122,11 @@ type MailMessage =
 type MailAccountError =
     | ProfileRootInvalid of reason: string
     | ProfileRootMissing
+    /// A folder WAS chosen, but it cannot be reached now - deleted, moved, or on a drive or
+    /// network share that has gone away. Distinct from NoProfileFound on purpose: "the folder is
+    /// gone" and "the folder is there but holds no profile" need different answers from the
+    /// user, and the stored path is kept either way so they can see what it was.
+    | ProfileRootUnreachable of path: string * reason: string
     | NoProfileFound of searchedPath: string
     | ProfileUnreadable of path: string * reason: string
     | MailAccountIdInvalid of reason: string

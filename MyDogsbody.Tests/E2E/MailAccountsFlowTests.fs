@@ -86,6 +86,29 @@ let ``selecting an account shows it selected and the selection persists across a
         reloadedRendered.WaitForAssertion(fun () -> Assert.Contains("Alpha Mail", reloadedRendered.Markup)))
 
 [<Fact; Trait("Level", "E2E")>]
+let ``the accounts table states each account's on-disk size and what a scan of it will cost`` () =
+    withMailAccountsHarness (fun () -> None) (fun harness ->
+        let browserModule, rendered = renderBrowser harness (fun () -> None)
+        browserModule.SetProfileRoot measuredShapeProfile
+        browserModule.ScanForAccounts()
+
+        rendered.WaitForAssertion(fun () -> Assert.Contains("Alpha Mail", rendered.Markup))
+
+        let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+        let alpha = accounts |> List.find (fun a -> a.DisplayName = "Alpha Mail")
+
+        let total = MailAccountsComponents.accountSizeBytes alpha
+        let scannable = MailAccountsComponents.scannableSizeBytes alpha
+
+        // The fixture's Trash/Junk/Sent/Drafts carry bytes, so the two figures must differ -
+        // a table showing only the total would not say what a scan is going to cost.
+        Assert.True(total > scannable, $"the fixture no longer distinguishes the two figures: {total} vs {scannable}")
+
+        Assert.Contains("Size", rendered.Markup)
+        Assert.Contains(MailAccountsComponents.formatSizeBytes total, rendered.Markup)
+        Assert.Contains($"{MailAccountsComponents.formatSizeBytes scannable} to scan", rendered.Markup))
+
+[<Fact; Trait("Level", "E2E")>]
 let ``a walk hitting an unreadable directory lists it and the other accounts still appear`` () =
     let root = Path.Combine(Path.GetTempPath(), $"mdb-e2e-{Guid.NewGuid()}")
     Directory.CreateDirectory root |> ignore

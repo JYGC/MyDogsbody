@@ -385,10 +385,11 @@ written against the format documentation instead — which is what the measureme
 
 - [x] **11.1** `dotnet build MyDogsbody.sln` — zero errors.
 - [x] **11.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-      *Totals:* 532 Unit + 198 Integration + 232 Contract + 22 E2E = **984**, zero failures, zero
+      *Totals:* 544 Unit + 205 Integration + 233 Contract + 23 E2E = **1005**, zero failures, zero
       skips (full-suite run confirmed clean after the known LiteDB `BsonMapper` warm-up race —
       see Phase 9.3's note — was hit and cleared on retry; re-measured during PR #17's round-1
-      review-fix, which found the count first recorded here undercounted the committed suite —
+      review-fix, which found the count first recorded here undercounted the committed suite, and
+      raised again by PR #17's round-2 review-fix, which added 21 tests with its five fixes —
       see `outcome.md`'s *Gate* section).
 - [x] **11.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass.
 - [x] **11.4** **Manual verification against the real profile, with Thunderbird running.** Record in

@@ -8,18 +8,19 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **984 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1005 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
-  contains — see per-level figures below, reproduced with `--filter "Level=..."`):
+  contains. PR #17's round-2 review-fix then added 21 tests with its five fixes — see per-level
+  figures below, reproduced with `--filter "Level=..."`):
 
-  | Level | Count |
-  | --- | --- |
-  | Unit | 532 |
-  | Integration | 198 |
-  | Contract | 232 |
-  | E2E | 22 |
-  | **Total** | **984** |
+  | Level | Round 1 | Round 2 |
+  | --- | --- | --- |
+  | Unit | 532 | 544 |
+  | Integration | 198 | 205 |
+  | Contract | 232 | 233 |
+  | E2E | 22 | 23 |
+  | **Total** | **984** | **1005** |
 
   No trustworthy pre-branch baseline was captured before this change started (the figure
   CLAUDE-project.md carried, 399, already predated the `invoice-ledger-foundation` and
@@ -88,7 +89,9 @@ contents, amounts, references or addresses in version control.
 - **`MailAccountError` gained an eighth case, `MailAccountIdInvalid of reason: string`, not in
   `design.md`'s listing.** `SelectMailAccountWorkflow` takes a raw string id; the documented DU had
   no case for a malformed (empty) one, only for one that parses but names no known account. Same
-  shape as `invoice-ledger-foundation`'s `PaymentTermInvalid` addition.
+  shape as `invoice-ledger-foundation`'s `PaymentTermInvalid` addition. PR #17's round-2 review
+  added a ninth, `ProfileRootUnreachable of path * reason` — see finding 5 below for why the
+  documented cases could not express it.
 - **The "eleven" dependency function types design.md's *Contract* section counts** turn out to be
   the ten domain types `MailAccountsTypes.fs` actually declares plus `FolderPicker`
   (`MyDogsbody.UI.Types`, Phase 7) — a UI-level function type, not a domain one, but one this
@@ -137,14 +140,87 @@ contents, amounts, references or addresses in version control.
    `MailFolderEnumerator.resolvePath storeDirectory format relativePath`, the format-aware inverse
    of enumeration, reused by both call sites.
 
+## Five defects PR #17's round-2 review found and fixed
+
+Round 2 re-read the code cold. Five findings, all raised by the review itself (the PR carried no
+open review comments at any point).
+
+1. **A message whose header block ended in a CRLF blank line was silently dropped.**
+   `MailFolderReader.headerBlockAndRest` looked only for `"\n\n"`. RFC 5322 mandates CRLF, and a
+   message written to the store exactly as it arrived over IMAP or SMTP keeps it — so
+   `headerBlockAndRest` returned `None`, `processSegment` dropped the message with no error and
+   nothing on screen, and `readMboxFile` classified a final CRLF message as torn. Measured: a
+   two-message CRLF folder returned `[]`, and `countMessages` on it returned 1 of 2. Nothing
+   caught it because `.gitattributes` pins every committed fixture to LF — that file's own comment
+   records that CRLF "silently breaks every test that reads one", which was treated as a checkout
+   problem rather than the parser defect it also is. Both separators are now recognised, earliest
+   wins.
+2. **The recorded watermark offset drifted backwards by one byte per message, and the deficit
+   accumulated.** `splitIntoMessages` rebuilt each segment with `String.Join("\n", ...)`, which
+   drops the newline separating it from the next segment, and `readMboxFile` summed those lengths;
+   bytes lying before the first boundary in the buffer were not counted at all. Measured: a
+   three-message folder of 771 bytes recorded `OffsetReached = 769`. Since each incremental read
+   adds a further (messages − 1), the offset walks backwards until it reaches back past an
+   already-read message's `From ` line and re-emits it. Segments are now byte slices carrying
+   their offset within the buffer, so the offset reached is the offset actually reached. Every
+   existing incremental test passed over this because each used a single-message file, the one
+   case where `String.Join("\n", s.Split('\n')) = s` exactly.
+3. **The accounts table did not show on-disk size.** requirements.md asks for it twice (*Selecting
+   an account*, *User interface*) and gives the reason in *Listing folders* — the page states what
+   a scan will cost before it is run. The data was already collected and already reached the UI on
+   `MailFolderUiType.SizeBytes`; only the column was missing. This was previously recorded here as
+   optional item **O.2**, described as "per-folder sizes", which mis-scoped a required per-account
+   figure as a nicety. The row now shows the account's total with the scannable subset beneath it,
+   because the Q4.8 exclusions are most of the bytes on a real profile.
+4. **A folder larger than one array could not be read, and failed in two different wrong ways.**
+   `readMboxFile` computed `int (totalLength - fromOffset)`, which wraps silently past 2 GiB — the
+   measured profile has a single 2.5 GB mbox — after which `Array.zeroCreate` threw a negative-length
+   `ArgumentException` that neither `with` handler catches, escaping the whole API call; in
+   `countMessages` the same allocation was swallowed by `with _ -> 0` and reported as an empty
+   folder. A guard now reports the folder as `MailFolderUnreadable` with the size in the message,
+   so the other folders still return. **This one carries no test**: reproducing it needs a >2 GB
+   fixture, and none is committed. Reading such a folder *without* buffering it whole is
+   requirements.md's "read it without loading the whole folder into memory" and still is not
+   implemented — see **O.5**.
+5. **A profile folder that has gone away was reported as "no profile found there".**
+   `ThunderbirdFolderScanner.scan` cannot canonicalise a path that is not there
+   (`DirectoryInfo.ResolveLinkTarget` throws `DirectoryNotFoundException`, `canonicalize` returns
+   `None`), so the walk returned an empty outcome indistinguishable from "walked it, found no
+   `prefs.js`", and `NoProfileFound` was what the user saw. requirements.md asks for that state to
+   be reported specifically, twice (*Choosing the profile folder*, and the network-path /
+   removable-drive edge case). `MailAccountError` gains a ninth case,
+   `ProfileRootUnreachable of path * reason`, checked in `MailAccountApiFactory` beside the
+   existing `NoProfileFound` decision. The stored path is kept either way, as required.
+
 ## Not implemented (Optional, deferred)
 
 - **O.1** Reading `global-messages-db.sqlite` (gloda) as a fast path — not guaranteed enabled or
   current, and the measured numbers above show the slow path is already fast enough.
-- **O.2** Per-folder sizes shown in the accounts table — the data is collected (`MailFolder.SizeBytes`)
-  but not surfaced in `MailAccountsComponents.fs` yet.
+- **O.2** *(closed by round 2, finding 3 — the accounts table now shows on-disk size.)* Per-folder
+  sizes broken out folder by folder, rather than the per-account total and scannable subtotal the
+  table now shows, remain unbuilt.
 - **O.3** Letting the user override the folder exclusions (Trash/Deleted/Junk/Sent/Drafts).
 - **O.4** Detecting a profile being written by a different Thunderbird version.
+- **O.5** **Streaming the mbox reader.** requirements.md → *Edge cases* asks that a large message be
+  read "without loading the whole folder into memory", and `readMboxFile` still buffers the whole
+  span. Round 2 added a guard so an over-large folder is reported rather than crashing or counting
+  zero (finding 4), but the requirement itself needs a streaming line reader that keeps exact byte
+  offsets. That is a design change, not a defect fix, and wants its own change folder.
+- **O.6** **Maildir folders record no watermark.** `MailFolderReader.readFolder` consults and
+  updates a watermark on the mbox branch only. requirements.md → *Incremental scanning* is written
+  unconditionally, but its three fields — file size, modification time and *offset reached* — are
+  mbox concepts; a maildir folder is a directory of one-message files with no offset, so what a
+  maildir watermark should even be is a design question rather than a bug. Deliberately left for
+  the change that decides it.
+- **O.7** **`MailFolderReader.read` discards each folder's failure reason.** It skips an unreadable
+  folder (`| Error _ -> []`) so the others still return, which is what requirements.md asks for,
+  but the reason never reaches anyone — the requirement also asks for "a reason a user can act
+  on". Surfacing it means widening the `ReadMailFolder` dependency type, which change #4 consumes;
+  it belongs to that change rather than to this one.
+- **O.8** `MailAccountApiFactory` binds `loadWatermark` and `saveWatermark` but nothing uses them
+  yet — `MailFolderReader.read` is not wired into `MailAccountApi`, because reading mail is change
+  #4's surface. Harmless today, and the bindings are what change #4 will attach `ReadMailFolder`
+  to; noted so it is not mistaken for live wiring.
 
 ## Stated plainly: maildir ships verified against synthetic fixtures only
 

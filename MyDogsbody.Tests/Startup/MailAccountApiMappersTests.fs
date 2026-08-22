@@ -130,6 +130,18 @@ let ``NoProfileFound becomes an unlogged exception naming the searched path`` ()
     Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
 
 [<Fact; Trait("Level", "Contract")>]
+let ``ProfileRootUnreachable becomes an unlogged exception naming the folder and the reason, distinct from NoProfileFound`` () =
+    let actual =
+        MailAccountApiMappers.toMyDogsbodyException anAction (ProfileRootUnreachable(@"Z:\gone", "drive not available"))
+
+    Assert.Contains(@"Z:\gone", actual.Message)
+    Assert.Contains("drive not available", actual.Message)
+    Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
+
+    let noProfileFound = MailAccountApiMappers.toMyDogsbodyException anAction (NoProfileFound @"Z:\gone")
+    Assert.NotEqual<string>(noProfileFound.Message, actual.Message)
+
+[<Fact; Trait("Level", "Contract")>]
 let ``ProfileUnreadable becomes an unlogged exception - a locked or malformed profile is expected, not a defect`` () =
     let actual = MailAccountApiMappers.toMyDogsbodyException anAction (ProfileUnreadable(@"C:\profile", "Access denied"))
 
@@ -195,6 +207,7 @@ let ``every MailAccountError case produces a non-empty message and the declared 
             ProfileRootInvalid "a"
             ProfileRootMissing
             NoProfileFound "b"
+            ProfileRootUnreachable("b2", "b3")
             ProfileUnreadable("c", "d")
             MailAccountIdInvalid "e"
             MailAccountNotFound id

@@ -93,6 +93,44 @@ let ``ScanForAccounts reports NoProfileFound as an unlogged exception when the f
             Directory.Delete(emptyFolder, true))
 
 [<Fact; Trait("Level", "Integration")>]
+let ``ScanForAccounts reports a chosen folder that no longer exists distinctly from one holding no profile`` () =
+    withApi (fun api ->
+        let goneFolder = Path.Combine(Path.GetTempPath(), $"mdb-gone-{Guid.NewGuid()}")
+        Directory.CreateDirectory goneFolder |> ignore
+        api.SetProfileRoot goneFolder |> okOrFail "SetProfileRoot"
+        Directory.Delete(goneFolder, true)
+
+        let gone = api.ScanForAccounts() |> errorOrFail "ScanForAccounts (folder deleted)"
+
+        let emptyFolder = Path.Combine(Path.GetTempPath(), $"mdb-empty-{Guid.NewGuid()}")
+        Directory.CreateDirectory emptyFolder |> ignore
+
+        try
+            api.SetProfileRoot emptyFolder |> okOrFail "SetProfileRoot 2"
+            let empty = api.ScanForAccounts() |> errorOrFail "ScanForAccounts (folder empty)"
+
+            // The two states need different answers from the user, so they must not share a
+            // message (requirements.md -> "Choosing the profile folder" / "Edge cases").
+            Assert.NotEqual<string>(empty.Message, gone.Message)
+            Assert.Contains(goneFolder, gone.Message)
+            Assert.IsType<ApplicationException>(gone.InnerException) |> ignore
+            Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.scanForAccounts, gone.ActionName)
+        finally
+            Directory.Delete(emptyFolder, true))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``a scan against a folder that has gone away keeps the stored path so the user can see what it was`` () =
+    withApi (fun api ->
+        let goneFolder = Path.Combine(Path.GetTempPath(), $"mdb-gone-{Guid.NewGuid()}")
+        Directory.CreateDirectory goneFolder |> ignore
+        api.SetProfileRoot goneFolder |> okOrFail "SetProfileRoot"
+        Directory.Delete(goneFolder, true)
+
+        api.ScanForAccounts() |> errorOrFail "ScanForAccounts" |> ignore
+
+        Assert.Equal(Some goneFolder, api.GetProfileRoot() |> okOrFail "GetProfileRoot"))
+
+[<Fact; Trait("Level", "Integration")>]
 let ``GetAccounts returns what a previous scan stored, with no selection`` () =
     withApi (fun api ->
         api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"

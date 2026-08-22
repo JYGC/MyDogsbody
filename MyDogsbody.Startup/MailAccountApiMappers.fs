@@ -65,6 +65,8 @@ let toMyDogsbodyException (action: string) (error: MailAccountError) : MyDogsbod
     match error with
     | ProfileRootInvalid reason -> expected reason
     | ProfileRootMissing -> expected "No Thunderbird profile folder has been chosen yet."
+    | ProfileRootUnreachable(path, reason) ->
+        expected $"The chosen Thunderbird profile folder '{path}' could not be reached: {reason}"
     | NoProfileFound searchedPath -> expected $"No Thunderbird profile was found under '{searchedPath}'."
     | ProfileUnreadable(path, reason) -> expected $"Could not read the profile at '{path}': {reason}"
     | MailAccountIdInvalid reason -> expected reason

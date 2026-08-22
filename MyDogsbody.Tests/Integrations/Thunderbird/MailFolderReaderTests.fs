@@ -412,6 +412,178 @@ let ``readFolder re-reads the whole folder when the modification time is inconsi
     finally
         Directory.Delete(tempDir, true)
 
+// ---------- 4.4b CRLF messages ----------
+
+/// RFC 5322 mandates CRLF, and a message stored exactly as it arrived over IMAP/SMTP keeps it.
+/// The committed fixtures are pinned to LF by .gitattributes, so nothing else in this file
+/// exercises a CRLF message at all.
+let private crlfMessage (messageId: string) (subject: string) =
+    $"From sender@example.com Mon Jan 05 09:00:00 2026\r\n"
+    + "X-Mozilla-Status: 0001\r\n"
+    + $"Message-ID: <{messageId}>\r\n"
+    + "From: sender@example.com\r\n"
+    + "To: bob@example.com\r\n"
+    + $"Subject: {subject}\r\n"
+    + "Date: Mon, 05 Jan 2026 09:00:00 +0000\r\n"
+    + "Content-Type: text/plain; charset=utf-8\r\n"
+    + "\r\n"
+    + $"Body of {subject}.\r\n"
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder returns a message whose header block ends in a CRLF blank line`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Crlf")
+        File.WriteAllText(path, crlfMessage "crlf-1@example.com" "CRLF only")
+
+        let load, save, _ = inMemoryWatermarkStore ()
+        let actual = readFolder load save testAccountId (folder "Crlf") tempDir Mbox noCutoff
+
+        match actual with
+        | Ok messages ->
+            let message = Assert.Single messages
+            Assert.Equal("<crlf-1@example.com>", message.SourceMessageId)
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder returns every message of a CRLF folder, not silently none of them`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "CrlfMany")
+
+        File.WriteAllText(
+            path,
+            crlfMessage "crlf-a@example.com" "First" + "\r\n" + crlfMessage "crlf-b@example.com" "Second"
+        )
+
+        let load, save, _ = inMemoryWatermarkStore ()
+        let actual = readFolder load save testAccountId (folder "CrlfMany") tempDir Mbox noCutoff
+
+        match actual with
+        | Ok messages ->
+            Assert.Equal<string list>(
+                [ "<crlf-a@example.com>"; "<crlf-b@example.com>" ],
+                messages |> List.map (fun m -> m.SourceMessageId) |> List.sort
+            )
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``countMessages counts a CRLF folder's final message rather than treating it as torn`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "CrlfCounted")
+
+        File.WriteAllText(
+            path,
+            crlfMessage "crlf-a@example.com" "First" + "\r\n" + crlfMessage "crlf-b@example.com" "Second"
+        )
+
+        let account: DiscoveredMailAccount =
+            {
+                Id = testAccountId
+                ProfilePath = tempDir
+                DisplayName = "Test"
+                EmailAddresses = []
+                StoreFormat = Mbox
+                StoreDirectoryExists = true
+                StoreDirectory = tempDir
+                Folders = [ folder "CrlfCounted" ]
+                CachedMessageCount = None
+            }
+
+        let lookupAccount: LookupAccount = fun _ -> Ok(Some account)
+
+        Assert.Equal(Ok 2, countMessages lookupAccount testAccountId)
+    finally
+        Directory.Delete(tempDir, true)
+
+// ---------- 4.4c the recorded offset is the offset actually reached ----------
+
+let private lfMessage (messageId: string) (subject: string) =
+    "From sender@example.com Mon Jan 05 09:00:00 2026\n"
+    + "X-Mozilla-Status: 0001\n"
+    + $"Message-ID: <{messageId}>\n"
+    + "From: sender@example.com\n"
+    + "To: bob@example.com\n"
+    + $"Subject: {subject}\n"
+    + "Date: Mon, 05 Jan 2026 09:00:00 +0000\n"
+    + "Content-Type: text/plain; charset=utf-8\n"
+    + "\n"
+    + $"Body of {subject}.\n"
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder records the whole file length as the offset reached for a multi-message folder`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "ManyMessages")
+
+        File.WriteAllText(
+            path,
+            lfMessage "many-1@example.com" "One"
+            + "\n"
+            + lfMessage "many-2@example.com" "Two"
+            + "\n"
+            + lfMessage "many-3@example.com" "Three"
+        )
+
+        let expectedSize = FileInfo(path).Length
+
+        let load, save, store = inMemoryWatermarkStore ()
+
+        match readFolder load save testAccountId (folder "ManyMessages") tempDir Mbox noCutoff with
+        | Ok messages -> Assert.Equal(3, messages.Length)
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+        let wm = store.[(MailAccountId.value testAccountId, "ManyMessages")]
+        Assert.Equal(expectedSize, wm.SizeBytes)
+        Assert.Equal(expectedSize, wm.OffsetReached)
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``the recorded offset stays exact across successive appends rather than drifting backwards`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Growing")
+        let load, save, store = inMemoryWatermarkStore ()
+
+        let mutable content = lfMessage "grow-1@example.com" "One" + "\n" + lfMessage "grow-2@example.com" "Two"
+        File.WriteAllText(path, content)
+
+        readFolder load save testAccountId (folder "Growing") tempDir Mbox noCutoff |> ignore
+
+        Assert.Equal(
+            FileInfo(path).Length,
+            store.[(MailAccountId.value testAccountId, "Growing")].OffsetReached
+        )
+
+        for round in 3..6 do
+            content <- content + "\n" + lfMessage $"grow-{round}@example.com" $"Round {round}"
+            File.WriteAllText(path, content)
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddSeconds(float round))
+
+            match readFolder load save testAccountId (folder "Growing") tempDir Mbox noCutoff with
+            | Ok messages ->
+                let ids = messages |> List.map (fun m -> m.SourceMessageId)
+                Assert.Equal<string list>([ $"<grow-{round}@example.com>" ], ids)
+            | Error error -> Assert.Fail($"Expected Ok on round {round}, but got Error: {error}")
+
+            Assert.Equal(
+                FileInfo(path).Length,
+                store.[(MailAccountId.value testAccountId, "Growing")].OffsetReached
+            )
+    finally
+        Directory.Delete(tempDir, true)
+
 // ---------- 4.5 countMessages ----------
 
 [<Fact; Trait("Level", "Integration")>]
