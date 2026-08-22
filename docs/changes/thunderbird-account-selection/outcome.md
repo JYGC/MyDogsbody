@@ -8,16 +8,18 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **878 tests, 0 failures, 0 skips**, all
-  four levels present:
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **984 tests, 0 failures, 0 skips**, all
+  four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
+  the time this change was first closed, 878, undercounted what the committed test project actually
+  contains — see per-level figures below, reproduced with `--filter "Level=..."`):
 
   | Level | Count |
   | --- | --- |
-  | Unit | 485 |
-  | Integration | 152 |
-  | Contract | 219 |
+  | Unit | 532 |
+  | Integration | 198 |
+  | Contract | 232 |
   | E2E | 22 |
-  | **Total** | **878** |
+  | **Total** | **984** |
 
   No trustworthy pre-branch baseline was captured before this change started (the figure
   CLAUDE-project.md carried, 399, already predated the `invoice-ledger-foundation` and
