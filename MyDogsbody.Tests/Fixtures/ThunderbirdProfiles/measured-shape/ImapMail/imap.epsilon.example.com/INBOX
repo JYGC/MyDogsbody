@@ -1,0 +1,13 @@
+From heidi@epsilon.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <epsilon-inbox-1@epsilon.example.com>
+From: someone@example.com
+To: heidi@epsilon.example.com
+Subject: Hello Heidi
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This account's (account18) prefs.js display name contains an escaped embedded quote:
+Heidi's "Backup" Mail.
+

@@ -12,6 +12,8 @@
     <Compile Include="SupplierApiFactory.fs" />
     <Compile Include="TemplateApiMappers.fs" />
     <Compile Include="TemplateApiFactory.fs" />
+    <Compile Include="MailAccountApiMappers.fs" />
+    <Compile Include="MailAccountApiFactory.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>
 
@@ -24,6 +26,7 @@
     <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Database\MyDogsbody.Database.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Database.Migrations\MyDogsbody.Database.Migrations.fsproj" />
   </ItemGroup>

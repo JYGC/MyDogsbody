@@ -1,0 +1,12 @@
+From secretary@surreyhillsorchestra.example.com Thu Jan 08 12:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <shorchestra-rehearsals-1@alpha.example.com>
+From: secretary@surreyhillsorchestra.example.com
+To: alice@alpha.example.com
+Subject: Rehearsal schedule
+Date: Thu, 08 Jan 2026 12:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Third level of the .sbd nesting: Music.sbd/Surrey Hills Orchestra.sbd/Rehearsals.
+

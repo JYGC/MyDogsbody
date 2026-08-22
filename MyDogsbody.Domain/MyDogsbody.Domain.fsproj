@@ -19,6 +19,11 @@
   -->
   <ItemGroup>
     <Compile Include="Result.fs" />
+    <Compile Include="MailAccounts\MailAccountsTypes.fs" />
+    <Compile Include="MailAccounts\SetProfileRootWorkflow.fs" />
+    <Compile Include="MailAccounts\ScanForMailAccountsWorkflow.fs" />
+    <Compile Include="MailAccounts\ListMailAccountsWorkflow.fs" />
+    <Compile Include="MailAccounts\SelectMailAccountWorkflow.fs" />
     <Compile Include="Credentials\CredentialsTypes.fs" />
     <Compile Include="Credentials\AddCredentialWorkflow.fs" />
     <Compile Include="Credentials\EditCredentialWorkflow.fs" />

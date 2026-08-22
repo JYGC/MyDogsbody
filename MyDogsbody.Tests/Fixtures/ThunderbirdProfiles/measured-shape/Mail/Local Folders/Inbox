@@ -1,0 +1,13 @@
+From nobody@localhost Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <localfolders-inbox-1@localhost>
+From: nobody@localhost
+To: nobody@localhost
+Subject: Local Folders test message
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+account20 is the Local Folders account: type "none", storeContractID berkeleystore, no
+identities. It lives under Mail/, not ImapMail/.
+

@@ -1,0 +1,25 @@
+From deleted-sender@example.com Fri Jan 09 08:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <alpha-trash-1@alpha.example.com>
+From: deleted-sender@example.com
+To: alice@alpha.example.com
+Subject: This was deleted
+Date: Fri, 09 Jan 2026 08:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Trash must be excluded from the scannable set - Q4.8.
+
+From another-deleted@example.com Fri Jan 09 08:30:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <alpha-trash-2@alpha.example.com>
+From: another-deleted@example.com
+To: alice@alpha.example.com
+Subject: Also deleted
+Date: Fri, 09 Jan 2026 08:30:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Padding so Trash is non-trivially sized, matching the real profile where exclusions remove
+9.0 GB of 15.2 GB - the difference between a feasible scan and an infeasible one.
+

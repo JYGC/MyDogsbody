@@ -1,0 +1,3 @@
+Git does not track empty directories; this placeholder keeps tmp/ present in the fixture so
+"a directory containing cur, new and tmp is a folder" has all three to find. tmp/ is normally
+empty in a real maildir (used only during in-progress delivery).

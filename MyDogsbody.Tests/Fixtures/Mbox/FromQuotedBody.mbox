@@ -1,0 +1,18 @@
+From alice@example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <fromquoted-1@example.com>
+From: alice@example.com
+To: bob@example.com
+Subject: Testing From quoting
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Here is a quote from an email I received:
+
+>From the original sender: "please see the attached invoice."
+
+The line above was escaped with a leading '>' by the mbox writer because it began with
+"From " - per mbox quoting, a reader must not treat it as the start of a new message. This
+fixture is a single message; if a reader mis-parses the quoted line as a boundary it will
+report two messages instead of one, or discard the rest of this message's body.

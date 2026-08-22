@@ -1,0 +1,36 @@
+From ghost@orphan1.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <orphan1-inbox-1@orphan1.example.com>
+From: ghost@orphan1.example.com
+To: nobody@orphan1.example.com
+Subject: Leftover from a deleted account
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This directory has no account in prefs.js pointing at it - it is a leftover from an account
+that was later deleted, exactly like the real profile's 2 GB orphan Deleted directory. It is
+padded below purely to be non-trivially sized; a structural directory walk would wrongly find
+this as if it were a real account, which is exactly what discovery must not do.
+
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+Padding padding padding padding padding padding padding padding padding padding padding.
+

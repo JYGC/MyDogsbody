@@ -1,0 +1,24 @@
+From billing@vendor.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <plainhtml-1@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Your invoice
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: multipart/alternative; boundary="BOUNDARY123"
+
+This is a multipart message in MIME format.
+
+--BOUNDARY123
+Content-Type: text/plain; charset=utf-8
+
+Invoice Number: 1001
+Amount Due: $250.00
+
+--BOUNDARY123
+Content-Type: text/html; charset=utf-8
+
+<html><body><table><tr><td>Invoice Number</td><td>1001</td></tr><tr><td>Amount Due</td><td>$250.00</td></tr></table></body></html>
+
+--BOUNDARY123--

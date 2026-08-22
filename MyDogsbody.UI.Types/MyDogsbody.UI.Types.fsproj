@@ -15,6 +15,11 @@
     <Compile Include="TemplateUiType.fs" />
     <Compile Include="TemplateTestUiType.fs" />
     <Compile Include="TemplateApi.fs" />
+    <Compile Include="MailFolderUiType.fs" />
+    <Compile Include="MailAccountUiType.fs" />
+    <Compile Include="MailAccountApi.fs" />
+    <Compile Include="FolderPicker.fs" />
+    <Compile Include="Modules\MailAccountsBrowserModule.fs" />
   </ItemGroup>
 
   <ItemGroup>

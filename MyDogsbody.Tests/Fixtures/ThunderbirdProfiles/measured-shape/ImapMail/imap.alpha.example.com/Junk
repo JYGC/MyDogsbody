@@ -1,0 +1,12 @@
+From spammer@junk.example.com Sat Jan 10 07:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <alpha-junk-1@alpha.example.com>
+From: spammer@junk.example.com
+To: alice@alpha.example.com
+Subject: You have won a prize
+Date: Sat, 10 Jan 2026 07:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Junk must be excluded from the scannable set - Q4.8.
+

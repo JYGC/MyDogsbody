@@ -1,0 +1,12 @@
+From ghost@orphan4.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <orphan4-inbox-1@orphan4.example.com>
+From: ghost@orphan4.example.com
+To: nobody@orphan4.example.com
+Subject: Leftover from a deleted account
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Orphan directory - no account in prefs.js points at it.
+

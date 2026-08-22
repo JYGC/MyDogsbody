@@ -1,0 +1,9 @@
+# The Thunderbird test fixtures (mbox files, prefs.js files, and the extensionless mbox-format
+# folder files under ThunderbirdProfiles/) must never have their line endings touched by git,
+# regardless of a checkout's core.autocrlf setting. MailFolderReader.fs's mbox parser looks for a
+# literal "\n\n" blank-line separator between headers and body; an autocrlf=true checkout
+# converting these to CRLF silently breaks every test that reads one (discovered while rebasing
+# change/thunderbird-account-selection - the committed blobs were always LF-only, only the
+# working tree copy after a Windows checkout was corrupted).
+MyDogsbody.Tests/Fixtures/ThunderbirdProfiles/** -text
+MyDogsbody.Tests/Fixtures/Mbox/** -text
