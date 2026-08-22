@@ -8,20 +8,20 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1038 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1050 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
   contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, round 3 a further
-  16, round 4 two more, round 5 twelve, and round 6 three — see per-level figures below, reproduced
-  with `--filter "Level=..."`):
+  16, round 4 two more, round 5 twelve, round 6 three, round 7 two and round 8 ten — see per-level
+  figures below, reproduced with `--filter "Level=..."`):
 
-  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 |
-  | --- | --- | --- | --- | --- | --- | --- |
-  | Unit | 532 | 544 | 554 | 556 | 559 | 559 |
-  | Integration | 198 | 205 | 209 | 209 | 216 | 219 |
-  | Contract | 232 | 233 | 235 | 235 | 236 | 236 |
-  | E2E | 22 | 23 | 23 | 23 | 24 | 24 |
-  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** |
+  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 | Round 7 | Round 8 |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Unit | 532 | 544 | 554 | 556 | 559 | 559 | 560 | 560 |
+  | Integration | 198 | 205 | 209 | 209 | 216 | 219 | 219 | 222 |
+  | Contract | 232 | 233 | 235 | 235 | 236 | 236 | 236 | 242 |
+  | E2E | 22 | 23 | 23 | 23 | 24 | 24 | 25 | 26 |
+  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** | **1040** | **1050** |
 
   Round 4 adds two Unit tests and changes four existing ones rather than adding to them — its
   finding was that two integration tests were aimed at the wrong boundary, so retargeting them was
@@ -502,6 +502,80 @@ unaffected. No change made.
    away, and then choosing one of the accounts that scan *did* find. Nothing is logged for either
    transition.
 
+## One defect PR #17's round-8 review found and fixed
+
+Round 8 read round 7's own work cold — nothing had reviewed it — and then spent the rest of its
+attention where six rounds had not: the account reader, the store and its mappers, the ApiFactory's
+error translation, the UI, and whether the change folder still agrees with what was built.
+
+**Round 7's own work held up on re-measurement.** Its `onSuccess` callback on
+`MailAccountsBrowserModuleCreators`' `write` is correct for every caller, not only `SelectAccount`:
+`CountMessages` and `ClearWatermarks` answer nothing the notice asks, so `ignore` is right for both;
+the flag is lowered only inside the `Ok` branch, so no failure path can take the notice down; and
+the failed-then-successful sequence is pinned by round 7's own unit test. The shape is within
+CLAUDE-project.md → *UI* rather than around it — the callback's only act is a `transact` on a `cval`
+the module creator owns, the write still reloads, and `startWork` is untouched. Its two judgement
+calls were re-checked and both stand: `CachedMessageCountTakenAt` is written by `DateTime.UtcNow`
+and read back as `DateTimeKind.Local` for the *same instant* (`ThunderbirdStoreTests` already asserts
+`storedAt.ToUniversalTime() = takenAt`), so `{takenAt:g}` renders the right local time and there was
+nothing to fix; and **O.12** genuinely belongs in change #4, because `MailFolderReader.read` is
+reachable from tests only — `grep` finds no call site in `MailAccountApiFactory` or anywhere else in
+production — so nothing it returns can be wrong for a user today.
+
+1. **Counting messages for a configured-but-missing account answered "0" instead of saying the store
+   was gone.** Discovery deliberately keeps such an account rather than dropping it
+   (requirements.md → *Reading the profile*) and the table marks it "Configured, but its store
+   directory is missing". `MailFolderEnumerator` then gives it no folders — there is no directory to
+   enumerate — so `MailFolderReader.countMessages` folded over an empty folder list and returned
+   `Ok 0`, and `read` returned `Ok []`. That is exactly what a real, empty account returns, so the
+   two were indistinguishable: the user pressed *Count messages* on the row labelled "its store
+   directory is missing" and the same row then read **`0 (as of 23/08/2026 07:15)`** — two
+   contradictory answers on one line, the second of them a number with nothing to suggest doubting
+   it. `MailAccountApiFactory` also cached that zero, so it survived to the next page load.
+
+   The area's own error DU has carried the case for this since the first commit and nothing ever
+   raised it: `StoreDirectoryMissing of MailAccountId * path` was declared in
+   `MailAccountsTypes.fs`, mapped to a sentence in `MailAccountApiMappers` ("The store directory for
+   account '…' does not exist: '…'"), and asserted in `MailAccountApiMappersTests` — while no
+   production line constructed it. `grep StoreDirectoryMissing` over the whole repository returns
+   the declaration, the mapper, its two tests and two design.md mentions, and no producer.
+
+   Fixed with one shared `MailFolderReader.accountWithReadableStore`, used by both `read` and
+   `countMessages`: the account is looked up as before, and a store directory that is not on disk is
+   reported rather than counted. Checked **live** with `Directory.Exists` rather than read off the
+   account's `StoreDirectoryExists` flag, because that flag is a snapshot from the last scan and the
+   likely real case is a drive unplugged or a folder deleted *between* scanning and counting, which
+   a snapshot cannot see — and because the message is written in the present tense. `read` gets the
+   same guard rather than only `countMessages`: it is the identical silent-wrong-result from the
+   other end, and change #4 is the consumer that would have inherited it.
+
+   Measured against `faecbd3`:
+
+   | | Before | After |
+   | --- | --- | --- |
+   | `countMessages` (fixture's `imap.delta.example.com`, declared by `prefs.js`, no directory) | `Ok 0` | `Error (StoreDirectoryMissing (id, "…\ImapMail\imap.delta.example.com"))` |
+   | `read` (same account) | `Ok []` | the same `Error` |
+   | The page (E2E, *Count messages* on the Delta Mail row) | the cell showed `0 (as of …)` | a `MudAlert` naming the missing directory; the cell stays "Not counted yet" |
+   | An account whose store IS there and holds nothing | `Ok 0` | `Ok 0` — unchanged |
+   | A neighbouring account whose store is there | counted | counted; the guard refuses the one account, not the page |
+
+   Red first at Integration (`countMessages reports a store directory that is gone rather than
+   counting it as zero` and its `read` twin, both failing with `Expected
+   Error(StoreDirectoryMissing _)` against `faecbd3`) and at E2E (`Assert.Contains() Failure:
+   Sub-string not found` — the page never said the directory was gone). A third Integration test
+   pins the half the guard must **not** swallow: a store directory that exists and holds no folders
+   still counts zero. **No Unit-level test:** the guard's decision is a filesystem fact, and this
+   repository's rule puts anything touching the filesystem at Integration — stated here rather than
+   claimed as covered. Contract coverage was added after the fix, not red-first: `CountMessages` and
+   `ReadMailFolder` are published dependency types, so both their real adapter and their in-memory
+   fake now answer the missing-store case in the same suite, and the fake was taught the new shape
+   so it cannot drift.
+
+2. **The suite total had drifted three ways again** — the same defect round 4 filed as its finding 2.
+   `CLAUDE-project.md` said 1040, this file's *Gate* section and its per-round table still said 1038
+   with no round-7 column, and `tasks.md` **11.2** still carried round 5's 1035. All three are back
+   in step at the measured 1050. No behavioural change, so no red-first test.
+
 ## Not implemented (Optional, deferred)
 
 - **O.1** Reading `global-messages-db.sqlite` (gloda) as a fast path — not guaranteed enabled or
@@ -587,6 +661,20 @@ unaffected. No change made.
   naming decisions, not a defect fix, and change #4 is where an actual attachment consumer exists to
   specify it against. It closes with **O.7** in that change, next to the diagnostic channel the same
   signature has to grow.
+- **O.13** *(found by PR #17's round-8 review.)* **Enumeration treats every file that is not `.msf`
+  as a folder's mbox, where requirements.md says "an extensionless file".**
+  `MailFolderEnumerator.enumerateMboxLevel` excludes directories and `.msf` and accepts everything
+  else, so a real profile's per-server sidecar files — `msgFilterRules.dat`, `popstate.dat`,
+  `filterlog.html` — are listed as folders. The cost is a folder count and a "to scan" size that are
+  both slightly too large on the accounts page, and a scan that opens a `.dat` file expecting mbox
+  (it finds no `From ` boundary and contributes nothing, so nothing worse follows). Not fixed here
+  because the obvious fix is wrong: Thunderbird lets a folder be named with a dot in it
+  (`Amazon.co.uk`), so a literal "extensionless only" rule would silently drop a real mailbox — a
+  worse defect than the one it closes. Getting it right means excluding Thunderbird's sidecars by
+  name, which is a decision about what the integration knows of Thunderbird's on-disk conventions
+  rather than a defect fix, and no committed fixture carries one to test against yet. The measured
+  profile's manual run (10 accounts, 59 folders on the largest) did not separate real folders from
+  sidecars, so re-measure when this is picked up.
 
 ## Stated plainly: maildir ships verified against synthetic fixtures only
 

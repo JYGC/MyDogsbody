@@ -443,6 +443,38 @@ let readFolder
                 return messages
             }
 
+/// The account this id names, refusing one whose store directory is not on disk.
+///
+/// Discovery deliberately KEEPS a configured-but-missing account rather than dropping it
+/// (requirements.md -> "Reading the profile"), and enumeration gives it no folders, because there
+/// is no directory to enumerate. Both readers below then fold over an empty folder list and answer
+/// "nothing here" - `Ok 0` and `Ok []` - which is exactly what a real, empty account answers. The
+/// user asked how many messages their account holds, was told none, and nothing said the store had
+/// gone: a silent wrong result, and the one this area's own error DU has carried the case for
+/// (`StoreDirectoryMissing`) since the first commit without anything ever raising it.
+///
+/// Checked live rather than read off the account's `StoreDirectoryExists` flag: that flag is a
+/// snapshot from the last scan, and the likely case is a drive unplugged or a folder deleted
+/// BETWEEN scanning and counting, which a snapshot cannot see. The error says "does not exist" in
+/// the present tense, so the present is what it has to be checked against.
+let private accountWithReadableStore
+    (lookupAccount: LookupAccount)
+    (accountId: MailAccountId)
+    : Result<DiscoveredMailAccount, MailAccountError> =
+    result {
+        let! accountOpt = lookupAccount accountId
+
+        let! account =
+            match accountOpt with
+            | Some a -> Ok a
+            | None -> Error(MailAccountNotFound accountId)
+
+        if not (Directory.Exists account.StoreDirectory) then
+            return! Error(StoreDirectoryMissing(accountId, account.StoreDirectory))
+        else
+            return account
+    }
+
 /// Reads every scannable folder of one account, smallest first (Decisions taken #10). A folder
 /// that cannot be read is skipped rather than failing the whole call - the other folders still
 /// return, matching requirements.md -> "Reading safely while Thunderbird is running".
@@ -454,12 +486,7 @@ let read
     (cutoff: ScanCutoff)
     : Result<MailMessage list, MailAccountError> =
     result {
-        let! accountOpt = lookupAccount accountId
-
-        let! account =
-            match accountOpt with
-            | Some a -> Ok a
-            | None -> Error(MailAccountNotFound accountId)
+        let! account = accountWithReadableStore lookupAccount accountId
 
         let orderedFolders = account.Folders |> List.filter (fun f -> f.IsScannable) |> List.sortBy (fun f -> f.SizeBytes)
 
@@ -477,12 +504,7 @@ let read
 /// folder, without parsing any body or attachment.
 let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Result<int, MailAccountError> =
     result {
-        let! accountOpt = lookupAccount accountId
-
-        let! account =
-            match accountOpt with
-            | Some a -> Ok a
-            | None -> Error(MailAccountNotFound accountId)
+        let! account = accountWithReadableStore lookupAccount accountId
 
         // A folder this cannot read contributes 0 and the rest still count - EXCEPT a folder that
         // is merely too large to buffer, which is reported. The two are not the same failure and

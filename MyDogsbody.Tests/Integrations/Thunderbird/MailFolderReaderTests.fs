@@ -1136,3 +1136,72 @@ let ``countMessages does not parse any body, so a folder with malformed message 
         Assert.Equal(Ok 4, actual)
     finally
         Directory.Delete(tempDir, true)
+
+// ---------- 4.6 a configured-but-missing store directory ----------
+//
+// Discovery keeps such an account rather than dropping it (requirements.md -> "Reading the
+// profile"), and the table marks it. Everything downstream then enumerated no folders for it, so
+// both readers folded over an empty list and answered "nothing here" - `Ok 0` from countMessages
+// and `Ok []` from read - which is exactly what a genuinely empty account answers. The one fact
+// that separates them is that the store directory is gone, and `MailAccountError` has carried the
+// case for it (`StoreDirectoryMissing`) since the first commit without anything ever raising it.
+
+/// `imap.delta.example.com` is declared by the measured-shape fixture's prefs.js and has no
+/// directory under `ImapMail/` - the fixture shape requirements.md asks for ("an account whose
+/// store directory is missing"), and the same state a real profile reaches when a mail directory
+/// is deleted or its drive goes away.
+let private missingStoreDirectory =
+    Path.Combine(measuredShapeProfile, "ImapMail", "imap.delta.example.com")
+
+let private missingStoreAccount: DiscoveredMailAccount =
+    {
+        Id = testAccountId
+        ProfilePath = measuredShapeProfile
+        DisplayName = "Delta Mail"
+        EmailAddresses = []
+        StoreFormat = Mbox
+        StoreDirectory = missingStoreDirectory
+        StoreDirectoryExists = false
+        Folders = []
+        CachedMessageCount = None
+    }
+
+[<Fact; Trait("Level", "Integration")>]
+let ``countMessages reports a store directory that is gone rather than counting it as zero`` () =
+    Assert.False(Directory.Exists missingStoreDirectory)
+
+    let lookupAccount: LookupAccount = fun _ -> Ok(Some missingStoreAccount)
+
+    match countMessages lookupAccount testAccountId with
+    | Error(StoreDirectoryMissing(id, path)) ->
+        Assert.Equal(testAccountId, id)
+        Assert.Equal(missingStoreDirectory, path)
+    | other -> Assert.Fail(sprintf "Expected Error(StoreDirectoryMissing _), but got: %A" other)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``read reports a store directory that is gone rather than returning no messages`` () =
+    Assert.False(Directory.Exists missingStoreDirectory)
+
+    let load, save, _ = inMemoryWatermarkStore ()
+    let lookupAccount: LookupAccount = fun _ -> Ok(Some missingStoreAccount)
+
+    match read lookupAccount load save testAccountId noCutoff with
+    | Error(StoreDirectoryMissing(id, path)) ->
+        Assert.Equal(testAccountId, id)
+        Assert.Equal(missingStoreDirectory, path)
+    | other -> Assert.Fail(sprintf "Expected Error(StoreDirectoryMissing _), but got: %A" other)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``an account whose store directory is there but holds no folders still counts zero`` () =
+    // The half the guard must NOT swallow: "the store is gone" and "the store is there and empty"
+    // are different answers, and only the first is an error.
+    let tempDir = freshTempDirectory ()
+
+    try
+        let account = { missingStoreAccount with StoreDirectory = tempDir; StoreDirectoryExists = true }
+        let lookupAccount: LookupAccount = fun _ -> Ok(Some account)
+
+        Assert.Equal(Ok 0, countMessages lookupAccount testAccountId)
+        Assert.Equal(Ok [], read lookupAccount (fun _ _ -> Ok None) (fun _ _ _ -> Ok()) testAccountId noCutoff)
+    finally
+        Directory.Delete(tempDir, true)

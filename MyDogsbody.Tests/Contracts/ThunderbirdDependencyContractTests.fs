@@ -59,6 +59,12 @@ let private anAccount id storeDirectory : DiscoveredMailAccount =
         CachedMessageCount = None
     }
 
+/// A store directory that is configured but not on disk - the state discovery deliberately keeps
+/// an account in rather than dropping it. `imap.delta.example.com` is declared by the
+/// measured-shape fixture's prefs.js and has no directory under `ImapMail/`.
+let private goneStoreDirectory =
+    Path.Combine(measuredShapeProfile, "ImapMail", "imap.delta.example.com")
+
 // ---------- ProfileRoot: LoadProfileRoot / SaveProfileRoot ----------
 
 type private ProfileRootDependencies = { Load: LoadProfileRoot; Save: SaveProfileRoot }
@@ -359,18 +365,32 @@ let private realCountMessagesDependencies (test: CountMessagesDependencies -> un
     let alphaStoreDirectory = Path.Combine(measuredShapeProfile, "ImapMail", "imap.alpha.example.com")
     let folders = MailFolderEnumerator.enumerate alphaStoreDirectory Mbox
     let account = { anAccount "alpha" alphaStoreDirectory with Folders = folders }
-    let lookupAccount: LookupAccount = fun id -> Ok(if id = account.Id then Some account else None)
+
+    // Discovery keeps a configured-but-missing account and gives it no folders, so both sides of
+    // the suite have to answer for one.
+    let gone = { anAccount "gone" goneStoreDirectory with StoreDirectoryExists = false; Folders = [] }
+
+    let lookupAccount: LookupAccount =
+        fun id ->
+            if id = account.Id then Ok(Some account)
+            elif id = gone.Id then Ok(Some gone)
+            else Ok None
+
     test { Count = fun id -> MailFolderReader.countMessages lookupAccount id }
 
 let private fakeCountMessagesDependencies (test: CountMessagesDependencies -> unit) =
     let lookupAccount: LookupAccount =
         fun id ->
             if MailAccountId.value id = "alpha" then
+                // A store directory that exists, holding no folder file - "the account is empty",
+                // which must stay distinguishable from "the store is gone" below.
                 Ok(
                     Some
-                        { anAccount "alpha" "unused" with
+                        { anAccount "alpha" (Path.GetTempPath()) with
                             Folders = [ { RelativePath = "INBOX"; DisplayName = "INBOX"; SizeBytes = 0L; IsScannable = true } ] }
                 )
+            elif MailAccountId.value id = "gone" then
+                Ok(Some { anAccount "gone" goneStoreDirectory with StoreDirectoryExists = false; Folders = [] })
             else
                 Ok None
 
@@ -390,6 +410,35 @@ let ``CountMessages returns MailAccountNotFound for an unknown account`` (implem
     withCountMessagesImplementation implementation (fun deps ->
         let unknown = MailAccountId.create "not-alpha" |> valueOrFail
         Assert.Equal(Error(MailAccountNotFound unknown), deps.Count unknown))
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof countMessagesImplementations)>]
+let ``CountMessages reports a store directory that is gone rather than counting it as zero`` (implementation: string) =
+    // "The store is gone" and "the account holds no messages" are different answers and must not
+    // arrive as the same one - a count of zero for an account whose mail directory has been
+    // deleted or whose drive is unplugged is a silent wrong result. The `alpha` case above pins
+    // the other half: a store that IS there and holds nothing still counts zero.
+    withCountMessagesImplementation implementation (fun deps ->
+        let gone = MailAccountId.create "gone" |> valueOrFail
+
+        match deps.Count gone with
+        | Error(StoreDirectoryMissing(id, path)) ->
+            Assert.Equal(gone, id)
+            Assert.Equal(goneStoreDirectory, path)
+        | other -> Assert.Fail(sprintf "Expected Error(StoreDirectoryMissing _), but got: %A" other))
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof countMessagesImplementations)>]
+let ``CountMessages counts an account whose store directory is on disk`` (implementation: string) =
+    // The half the guard must not swallow. Both sides hold different fixtures, so the count
+    // itself differs - what the contract pins is that a store that IS there is counted, never
+    // refused as missing.
+    withCountMessagesImplementation implementation (fun deps ->
+        let alpha = MailAccountId.create "alpha" |> valueOrFail
+
+        match deps.Count alpha with
+        | Ok count -> Assert.True(count >= 0)
+        | other -> Assert.Fail(sprintf "Expected Ok, but got: %A" other))
 
 // ---------- DiscoverMailAccounts ----------
 
@@ -485,7 +534,14 @@ let private realReadMailFolderDependencies (test: ReadMailFolderDependencies -> 
         { anAccount "reader-account" mboxFixtures with
             Folders = [ { RelativePath = "NoMessageId.mbox"; DisplayName = "NoMessageId.mbox"; SizeBytes = 0L; IsScannable = true } ] }
 
-    let lookupAccount: LookupAccount = fun id -> Ok(if id = account.Id then Some account else None)
+    let gone = { anAccount "gone-account" goneStoreDirectory with StoreDirectoryExists = false; Folders = [] }
+
+    let lookupAccount: LookupAccount =
+        fun id ->
+            if id = account.Id then Ok(Some account)
+            elif id = gone.Id then Ok(Some gone)
+            else Ok None
+
     let noWatermark: LoadWatermark = fun _ _ -> Ok None
     let ignoreWatermark: SaveWatermark = fun _ _ _ -> Ok()
 
@@ -507,7 +563,13 @@ let private fakeReadMailFolderDependencies (test: ReadMailFolderDependencies -> 
         {
             Read =
                 fun accountId _cutoff ->
-                    if MailAccountId.value accountId = "reader-account" then Ok [ message ] else Error(MailAccountNotFound accountId)
+                    match MailAccountId.value accountId with
+                    | "reader-account" -> Ok [ message ]
+                    // A configured-but-missing store is not "this account has no mail" - the fake
+                    // has to say so too, or a workflow test could stay green over a shape the real
+                    // reader never produces.
+                    | "gone-account" -> Error(StoreDirectoryMissing(accountId, goneStoreDirectory))
+                    | _ -> Error(MailAccountNotFound accountId)
         }
 
 let readMailFolderImplementations: obj[] seq = [ [| box "real adapter" |]; [| box "in-memory fake" |] ]
@@ -540,6 +602,19 @@ let ``ReadMailFolder returns MailAccountNotFound for an unknown account`` (imple
         let cutoff = ScanCutoff.ofStartOfDay (DateTime(2000, 1, 1))
 
         Assert.Equal(Error(MailAccountNotFound unknown), deps.Read unknown cutoff))
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof readMailFolderImplementations)>]
+let ``ReadMailFolder reports a store directory that is gone rather than returning no messages`` (implementation: string) =
+    withReadMailFolderImplementation implementation (fun deps ->
+        let gone = MailAccountId.create "gone-account" |> valueOrFail
+        let cutoff = ScanCutoff.ofStartOfDay (DateTime(2000, 1, 1))
+
+        match deps.Read gone cutoff with
+        | Error(StoreDirectoryMissing(id, path)) ->
+            Assert.Equal(gone, id)
+            Assert.Equal(goneStoreDirectory, path)
+        | other -> Assert.Fail(sprintf "Expected Error(StoreDirectoryMissing _), but got: %A" other))
 
 // ---------- FolderPicker (Phase 7's UI-level type - no real, GUI-only implementation to run
 // headlessly against; both members here are the kind of lambda a test substitutes it with) ----------

@@ -177,6 +177,45 @@ let ``choosing an account takes the cleared-selection notice down`` () =
         Assert.Empty harness.Logged)
 
 [<Fact; Trait("Level", "E2E")>]
+let ``counting messages for an account whose store directory is missing says so instead of answering zero`` () =
+    // The table already marks such an account "Configured, but its store directory is missing" -
+    // and then answered "0 (as of ...)" when the user pressed Count messages beside that very
+    // label, because enumeration gave it no folders and a fold over none is zero. Two
+    // contradictory answers on one row, the second of them a number the user has no reason to
+    // doubt.
+    withMailAccountsHarness (fun () -> None) (fun harness ->
+        let browserModule, rendered = renderBrowser harness (fun () -> None)
+
+        browserModule.SetProfileRoot measuredShapeProfile
+        browserModule.ScanForAccounts()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("Delta Mail", rendered.Markup)
+            Assert.Contains("Configured, but its store directory is missing", rendered.Markup))
+
+        browserModule.CountMessages $"{measuredShapeProfile}|account17"
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("does not exist", rendered.Markup)
+            Assert.Contains("imap.delta.example.com", rendered.Markup)
+            // The cached-count cell must be left alone rather than showing a confident zero.
+            Assert.DoesNotContain("0 (as of", rendered.Markup))
+
+        // An expected failure: the user pointed at a store that is gone, so it reaches the alert
+        // channel without reaching the log.
+        Assert.Empty harness.Logged
+
+        // A neighbouring account whose store IS there still counts, so the guard refuses the one
+        // account rather than the page.
+        browserModule.CountMessages $"{measuredShapeProfile}|account1"
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("(as of", rendered.Markup)
+            Assert.DoesNotContain("does not exist", rendered.Markup))
+
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``the accounts table states each account's on-disk size and what a scan of it will cost`` () =
     withMailAccountsHarness (fun () -> None) (fun harness ->
         let browserModule, rendered = renderBrowser harness (fun () -> None)
