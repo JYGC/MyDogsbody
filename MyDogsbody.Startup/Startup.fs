@@ -84,9 +84,13 @@ let private mainDatabaseContext = DatabaseContextSetup.createDatabaseContext mai
 let supplierApi: SupplierApi =
     SupplierApiFactory.createSupplierApi handleError mainDatabaseContext
 
+let templateApi: TemplateApi =
+    TemplateApiFactory.createTemplateApi handleError mainDatabaseContext
+
 /// The host's entire share of the wiring. Every registration is expressed here, in F#, so
 /// MainWindow.xaml.cs states which services exist without stating how they are built.
 let registerServices (services: IServiceCollection) : IServiceCollection =
     services
         .AddSingleton<CredentialApi>(credentialApi)
         .AddSingleton<SupplierApi>(supplierApi)
+        .AddSingleton<TemplateApi>(templateApi)

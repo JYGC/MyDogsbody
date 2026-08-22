@@ -46,11 +46,15 @@
     <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
+    <Compile Include="Database\TemplateRecordMappersTests.fs" />
+    <Compile Include="Database\TemplateStoreTests.fs" />
     <Compile Include="Database\SupplierStoreTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />
     <Compile Include="Startup\SupplierApiFactoryTests.fs" />
+    <Compile Include="Startup\TemplateApiMappersTests.fs" />
+    <Compile Include="Startup\TemplateApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
     <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />

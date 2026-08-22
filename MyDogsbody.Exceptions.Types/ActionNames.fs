@@ -33,6 +33,15 @@ module MyDogsbody =
             let editSupplier = $"{supplierApi}.editSupplier"
             let deleteSupplier = $"{supplierApi}.deleteSupplier"
 
+        module TemplateApi =
+            let private templateApi = $"{startup}.TemplateApi"
+            let getTemplatesForSupplier = $"{templateApi}.getTemplatesForSupplier"
+            let addTemplate = $"{templateApi}.addTemplate"
+            let editTemplate = $"{templateApi}.editTemplate"
+            let deleteTemplate = $"{templateApi}.deleteTemplate"
+            let reorderTemplates = $"{templateApi}.reorderTemplates"
+            let testTemplate = $"{templateApi}.testTemplate"
+
     /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
     /// it - MyDogsbody.Database is the application's main store, not an integration, so its
     /// entries do not go under Integrations.
@@ -45,6 +54,14 @@ module MyDogsbody =
             let insertOne = $"{supplierStore}.insertOne"
             let updateOne = $"{supplierStore}.updateOne"
             let deleteOne = $"{supplierStore}.deleteOne"
+
+        module TemplateStore =
+            let private templateStore = $"{database}.TemplateStore"
+            let getForSupplier = $"{templateStore}.getForSupplier"
+            let insertOne = $"{templateStore}.insertOne"
+            let updateOne = $"{templateStore}.updateOne"
+            let deleteOne = $"{templateStore}.deleteOne"
+            let reorder = $"{templateStore}.reorder"
 
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"

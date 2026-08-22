@@ -152,6 +152,12 @@ type TemplateError =
     | TemplateNameInvalid of reason: string
     | TemplateIdInvalid of reason: string
     | TemplateSupplierIdInvalid of reason: string
+    /// The UI sent a TargetField/FieldRule-kind/ParseHint-kind/DocumentPart/DocumentFormat string
+    /// with no domain equivalent - a mapping-level concern, distinct from PatternInvalid (a
+    /// pattern that does not compile) or DateFormatInvalid (a format string that is not real).
+    /// Mirrors SupplierError.MatcherInvalid: Result rather than raising, because the top mapper
+    /// is called from Async.Start, where an uncaught exception reaches neither an alert nor a log.
+    | TemplateRuleShapeInvalid of reason: string
     | PatternInvalid of field: TargetField * reason: string
     | PatternHasNoCaptureGroup of field: TargetField
     | DateFormatInvalid of field: TargetField * reason: string

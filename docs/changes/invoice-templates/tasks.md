@@ -209,12 +209,12 @@ until normalization is correct, so it goes first.
       **deleting a template deletes its rules**; deleting a **supplier** deletes templates *and*
       rules; `Down()` reverses it.
       *Depends on:* 7.1.
-- [ ] **7.3** *(test-first)* `TemplateRecordMappers.fs` — the bottom mapper, with the split-column
+- [x] **7.3** *(test-first)* `TemplateRecordMappers.fs` — the bottom mapper, with the split-column
       encoding for `DocumentPart`, `FieldRule` and `ParseHint`.
       Tests: field-for-field both directions for **every** case of all four unions; an unrecognised
       stored string maps to an error rather than a default.
       *Depends on:* 2.2, 7.2.
-- [ ] **7.4** *(test-first)* `TemplateStore.fs` — `getForSupplier`, `insertOne`, `updateOne`,
+- [x] **7.4** *(test-first)* `TemplateStore.fs` — `getForSupplier`, `insertOne`, `updateOne`,
       `deleteOne`, `reorder`. Outer-ring shape, `handleError`, `Result<_, MyDogsbodyException>`.
       **Copy four shapes from `SupplierStore.fs` rather than re-deriving them:** `runSync` (the
       Dapper.FSharp async-only bridge); `inTransaction`; plain parameterised SQL with
@@ -233,12 +233,12 @@ until normalization is correct, so it goes first.
       Tests *(Unit)*: each error path asserts the declared `ActionNames` string, the message and a
       preserved inner exception.
       *Depends on:* 7.3.
-- [ ] **7.5** `ActionNames.MyDogsbody.Database.TemplateStore.*`, five entries.
+- [x] **7.5** `ActionNames.MyDogsbody.Database.TemplateStore.*`, five entries.
       *Outcome:* the structural suite still passes.
 
 ## Phase 8 — Composition root (required)
 
-- [ ] **8.1** *(test-first)* `TemplateApiMappers.fs` — domain ⇄ UI, `toTemplateError`,
+- [x] **8.1** *(test-first)* `TemplateApiMappers.fs` — domain ⇄ UI, `toTemplateError`,
       `toMyDogsbodyException`.
       **Every string → union conversion returns `Result<_, TemplateError>` — none raises.** Four
       unions arrive from the UI as plain strings (`DocumentPart`, the `FieldRule` kind, `TargetField`,
@@ -250,13 +250,13 @@ until normalization is correct, so it goes first.
       per union returns its error case rather than raising**; each `TemplateError` case → its intended
       action and message, with the **expected/unexpected split** asserted (everything but
       `TemplateStoreFailed` wraps an `ApplicationException` and is not logged).
-- [ ] **8.2** *(test-first)* `TemplateApiFactory.createTemplateApi handleError databaseContext`,
+- [x] **8.2** *(test-first)* `TemplateApiFactory.createTemplateApi handleError databaseContext`,
       including a `TestTemplate` member that runs `ValidateTemplateWorkflow` then
       `ApplyTemplateWorkflow` over a pasted-text `ScannedMessage` and returns the per-field results.
       Tests *(Integration)*: each API member against a real temp database. No module-level I/O.
       *Depends on:* 7.4, 8.1.
-- [ ] **8.3** `ActionNames.MyDogsbody.Startup.TemplateApi.*`.
-- [ ] **8.4** `Startup.fs`: `templateApi` bound and registered.
+- [x] **8.3** `ActionNames.MyDogsbody.Startup.TemplateApi.*`.
+- [x] **8.4** `Startup.fs`: `templateApi` bound and registered.
       *Outcome:* `MainWindow.xaml.cs` unchanged.
 
 ## Phase 9 — UI (required)
