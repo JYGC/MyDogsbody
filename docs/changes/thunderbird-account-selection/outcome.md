@@ -8,19 +8,23 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1021 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1023 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
-  contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, and round 3 a
-  further 16 — see per-level figures below, reproduced with `--filter "Level=..."`):
+  contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, round 3 a further
+  16, and round 4 two more — see per-level figures below, reproduced with `--filter "Level=..."`):
 
-  | Level | Round 1 | Round 2 | Round 3 |
-  | --- | --- | --- | --- |
-  | Unit | 532 | 544 | 554 |
-  | Integration | 198 | 205 | 209 |
-  | Contract | 232 | 233 | 235 |
-  | E2E | 22 | 23 | 23 |
-  | **Total** | **984** | **1005** | **1021** |
+  | Level | Round 1 | Round 2 | Round 3 | Round 4 |
+  | --- | --- | --- | --- | --- |
+  | Unit | 532 | 544 | 554 | 556 |
+  | Integration | 198 | 205 | 209 | 209 |
+  | Contract | 232 | 233 | 235 | 235 |
+  | E2E | 22 | 23 | 23 | 23 |
+  | **Total** | **984** | **1005** | **1021** | **1023** |
+
+  Round 4 adds two Unit tests and changes four existing ones rather than adding to them — its
+  finding was that two integration tests were aimed at the wrong boundary, so retargeting them was
+  the fix's own red-first step. See *Two defects PR #17's round-4 review found and fixed*.
 
   No trustworthy pre-branch baseline was captured before this change started (the figure
   CLAUDE-project.md carried, 399, already predated the `invoice-ledger-foundation` and
@@ -250,10 +254,58 @@ the review itself; the PR has still never carried an open review comment.
    somewhere less well-behaved.
 
 The `bufferSpan` guards behind findings 2 and 3 are exercised by an integration test that creates a
-file one byte past `Array.MaxLength` with `FileStream.SetLength` and deletes it: NTFS records the
-length without zeroing the clusters, so it costs about 3 ms and no measurable I/O. That is what
-makes round 2's "no test — it needs a fixture over 2 GB" unnecessary. The test is Windows/NTFS-
-specific, which this repository already is (the host is WPF).
+file one byte past the limit with `FileStream.SetLength` and deletes it: NTFS records the length
+without zeroing the clusters, so it costs about 3 ms and no measurable I/O. That is what makes
+round 2's "no test — it needs a fixture over 2 GB" unnecessary. The test is Windows/NTFS-specific,
+which this repository already is (the host is WPF). *(Round 4 correction: that file was one byte
+past `Array.MaxLength`, which is nearly twice the reader's real limit — see round 4's finding 1.)*
+
+## Two defects PR #17's round-4 review found and fixed
+
+Round 4 re-read the code cold, with particular suspicion of `bufferSpan` and its callers, since
+rounds 2 and 3 had both rewritten them. Two findings, both raised by the review itself; the PR has
+still never carried an open review comment.
+
+1. **The size guard was set to nearly twice the reader's real limit, so both defects rounds 2 and 3
+   reported as closed were still reachable — between 1.0 GiB and 2.0 GiB.** `bufferSpan` refused a
+   span over `Array.MaxLength` (2,147,483,591 bytes). But the buffer is only ever an intermediate:
+   `splitIntoMessages` turns the whole of it into a Latin1 string on its first line, and .NET caps
+   a string at **1,073,741,791** chars — the 2 GB object-size ceiling at two bytes per char, a
+   little under *half* what an array holds. Measured on this machine with 51 GB of memory free, so
+   it is a hard runtime ceiling and not memory pressure: `new string('a', 1_073_741_792)` is
+   rejected on the size alone.
+
+   A folder in that window therefore sailed through the guard and died converting. Measured
+   against `f964b29` on sparse files of 1.12 GiB and 1.49 GiB:
+
+   | | Before | After |
+   | --- | --- | --- |
+   | `countMessages` | `Ok 0` — the folder silently counted as empty | `Error (MailFolderUnreadable (path, "The folder has 1200000000 bytes still to read, more than this reader can buffer in one pass (1073741791 bytes)."))` |
+   | `readFolder` | `System.OutOfMemoryException` at `Latin1Encoding.GetString`, out of `splitIntoMessages` → `readMboxFile` → `readFolder` → `read` → the whole API call, past both `with` handlers | the same `Error (MailFolderUnreadable …)` |
+
+   Those are round 3's finding 2 and finding 3 verbatim, still live at every size in the window.
+   The two existing integration tests missed it because they created a file one byte past
+   `Array.MaxLength`, i.e. past *both* ceilings — the only size at which the mis-set guard still
+   looks right. Fixed by sizing the guard on `MailFolderReader.MaxBufferableBytes` (the string
+   ceiling) rather than on `Array.MaxLength`, and by retargeting those two tests to one byte past
+   *it*, where they were red for exactly the two behaviours above. A unit test pins the constant to
+   the runtime ceiling by asserting one char more cannot be allocated — free, because the runtime
+   rejects it on size without allocating anything — so a future runtime that lowers the ceiling
+   fails there rather than as an `OutOfMemoryException` in production. The error message now names
+   the span still to read rather than "the folder is N bytes", which was the wrong number on an
+   incremental read of a partly-consumed folder.
+
+   Side effect worth having: the guard now short-circuits before allocating, so
+   `MailFolderReaderTests` runs in 258 ms rather than 1 s, and the two oversized fixtures cost
+   1 GiB of disk each instead of 2 GiB.
+2. **Stale figures the previous rounds left behind.** `tasks.md` **11.2** still recorded the
+   round-2 totals (1005) after round 3 added 16 tests and corrected the same figure in
+   `outcome.md` and `CLAUDE-project.md` — the third of the three places round 1 had gone through.
+   And `CLAUDE-project.md` lists, twice, the database files this application opens in its working
+   directory; this change adds a fourth, `Thunderbird.db`, and neither list was updated, so a
+   developer following *Commands → Run*'s "delete them after a manual test" leaves it behind for
+   `git status`. Both corrected. No behavioural change, so neither has a red-first test — stated
+   here rather than counted as covered.
 
 ## Not implemented (Optional, deferred)
 
@@ -266,11 +318,16 @@ specific, which this repository already is (the host is WPF).
 - **O.4** Detecting a profile being written by a different Thunderbird version.
 - **O.5** **Streaming the mbox reader.** requirements.md → *Edge cases* asks that a large message be
   read "without loading the whole folder into memory", and `readMboxFile` still buffers the whole
-  span. Rounds 2 and 3 added a guard so an over-large folder is reported rather than crashing or
-  counting zero (round 2 finding 4, round 3 finding 2), but the requirement itself needs a
-  streaming line reader that keeps exact byte offsets. That is a design change, not a defect fix,
-  and wants its own change folder. **Until it lands, an account holding a folder over ~2 GiB
-  cannot be counted or read at all** — the measured profile has one, so this is not hypothetical.
+  span. Rounds 2, 3 and 4 added and then correctly sized a guard so an over-large folder is
+  reported rather than crashing or counting zero (round 2 finding 4, round 3 finding 2, round 4
+  finding 1), but the requirement itself needs a streaming line reader that keeps exact byte
+  offsets. That is a design change, not a defect fix, and wants its own change folder. **Until it
+  lands, an account holding a folder over `MailFolderReader.MaxBufferableBytes` — 1,073,741,791
+  bytes, about 1.0 GiB — cannot be counted or read at all**, and *Count messages* fails for the
+  whole account rather than under-reporting it. Rounds 2 and 3 stated that threshold as "~2 GiB";
+  it is half that, because the span becomes a string and a .NET string cannot exceed the 2 GB
+  object-size ceiling. The measured profile has a 2.5 GB mbox, so this is not hypothetical at
+  either figure.
 - **O.6** **Maildir folders record no watermark.** `MailFolderReader.readFolder` consults and
   updates a watermark on the mbox branch only. requirements.md → *Incremental scanning* is written
   unconditionally, but its three fields — file size, modification time and *offset reached* — are
@@ -286,6 +343,20 @@ specific, which this repository already is (the host is WPF).
   yet — `MailFolderReader.read` is not wired into `MailAccountApi`, because reading mail is change
   #4's surface. Harmless today, and the bindings are what change #4 will attach `ReadMailFolder`
   to; noted so it is not mistaken for live wiring.
+- **O.9** *(found by PR #17's round-4 review; not previously recorded here.)* **Three prefs.js
+  fields requirements.md asks for are neither read nor stored.** requirements.md → *Reading the
+  profile* says an account SHALL take its "type, hostname, username, display name and store
+  format" from `mail.server.<server>.*` and "every identity's email address **and full name**"
+  from `mail.identity.<id>.*`. `ThunderbirdAccountReader` reads `name`, `hostname` (only as a
+  fallback when `name` is absent), `storeContractID`, `directory-rel` and `useremail` — the server
+  `type`, the server `userName` and the identity `fullName` are never read. That is not an
+  oversight of the implementation so much as of the design: design.md's own
+  `DiscoveredMailAccount` has no field for any of the three, so the type had nowhere to put them
+  while its data-flow diagram still listed them. Nothing in this change or in change #4's stated
+  surface consumes them, so adding fields no caller reads would be speculative; the honest record
+  is that these three SHALLs are unmet, and the change that first needs a server type, a login
+  name or a sender's display name adds them to `DiscoveredMailAccount`, to
+  `DiscoveredAccountEntity`, and to both boundary mappers together.
 
 ## Stated plainly: maildir ships verified against synthetic fixtures only
 

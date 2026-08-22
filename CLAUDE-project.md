@@ -64,7 +64,7 @@ dotnet build MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj   # fastest loop w
 dotnet run --project MyDogsbody\MyDogsbody.csproj   # launches the WPF app (Windows only, net9.0-windows)
 ```
 
-`Logging.db`, `Credentials.db` and `MyDogsbody.db` are created relative to the process working directory. Measured directly while closing `invoice-ledger-foundation`: running the command above from the repository root (as written) puts all three **at the repository root**, not under `bin\Debug\net9.0-windows\` — `dotnet run` does not change directory into the build output before launching the app. They are gitignore'd nowhere in particular, so delete them after a manual test rather than leaving them for `git status` to trip over.
+`Logging.db`, `Credentials.db`, `MyDogsbody.db` and `Thunderbird.db` are created relative to the process working directory. Measured directly while closing `invoice-ledger-foundation`: running the command above from the repository root (as written) puts all of them **at the repository root**, not under `bin\Debug\net9.0-windows\` — `dotnet run` does not change directory into the build output before launching the app. They are gitignore'd nowhere in particular, so delete them after a manual test rather than leaving them for `git status` to trip over. (`Thunderbird.db` joined the list with `thunderbird-account-selection`; a change that adds a per-integration store adds a file here too, so add it to this sentence in the same change.)
 
 ### Migrate (main database)
 
@@ -95,7 +95,7 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1021 tests — 554 Unit, 209 Integration, 235 Contract, 23 E2E**, zero skips (measured against `thunderbird-account-selection`'s actual head commit, via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1023 tests — 556 Unit, 209 Integration, 235 Contract, 23 E2E**, zero skips (measured against `thunderbird-account-selection`'s actual head commit, via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
 
 If you see an intermittent failure, do not re-run until it passes. **There is one known flake**, in any test that constructs a LiteDB context: LiteDB's global `BsonMapper` still has a first-use race that the documented warm-up narrows but does not close — see *Per-integration databases*, which carries the captured stack trace. Anything else intermittent is yours.
 
@@ -152,7 +152,7 @@ Covers the outer ring against real storage: adapters/repositories, `*DatabaseCon
 **LiteDB stores (each integration's, and the log store):**
 
 - Fresh temp database per test — `Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")`, `connection=direct`, deleted in `try/finally`. `CredentialStoreTests.withStore` demonstrates the shape. Production uses `shared`; if a change touches concurrent access, pin that mode explicitly.
-- **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db`, `Credentials.db` and `MyDogsbody.db` (and run its migrations) in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways per API: test `CredentialApiMappers`/`SupplierApiMappers` and `CredentialApiFactory`/`SupplierApiFactory` — all four are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
+- **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db`, `Credentials.db`, `MyDogsbody.db` and `Thunderbird.db` (and run its migrations) in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways per API: test `CredentialApiMappers`/`SupplierApiMappers` and `CredentialApiFactory`/`SupplierApiFactory` — all four are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
 - **Both context records carry a `Dispose`**, so call it before deleting the temp file — Windows keeps a LiteDB file locked until the handle is released. `CredentialsDatabaseContextModuleTests` asserts the delete actually succeeds afterwards.
 - Required round-trips: insert → `getAll` returns the row with `ObjectId` surfaced as the `Id` string; update → re-read reflects the new values.
 - `MyDogsbody.Tests` **does** reference `MyDogsbody.Logging`, because the log store's repository and use cases are tested against a temp file like any other LiteDB store. Nothing reaches the `Logging.db` in the working directory; a test that wants to prove *whether something was logged* passes a recording `HandleErrorBuilder` instead.

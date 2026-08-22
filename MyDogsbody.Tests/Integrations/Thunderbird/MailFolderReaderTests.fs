@@ -48,9 +48,19 @@ let private freshTempDirectory () =
 // ---------- 4.0 bufferSpan: the two size guards, exercised without a file ----------
 
 /// `bufferSpan` is pure, so every value the guards turn on is reachable here directly - including
-/// the ones no committed fixture could carry. The over-2-GiB decision reached production untested
+/// the ones no committed fixture could carry. The over-limit decision reached production untested
 /// once already, and the negative-span one crashed out of the whole API call.
-let private oneByteOverTheLimit = int64 Array.MaxLength + 1L
+let private oneByteOverTheLimit = int64 MaxBufferableBytes + 1L
+
+/// The constant is a hard runtime ceiling, not a taste. `splitIntoMessages` turns the whole
+/// buffered span into a Latin1 string, and .NET caps a string at 1,073,741,791 chars - the 2 GB
+/// object-size limit at two bytes per char, which is HALF what `Array.MaxLength` allows. Asking
+/// for one char more is rejected by the runtime on the size alone, so this costs nothing to
+/// assert and pins the constant to the ceiling it was chosen from: if a future runtime lowers
+/// that ceiling, this fails here rather than as an OutOfMemoryException in production.
+[<Fact; Trait("Level", "Unit")>]
+let ``the buffer limit is the largest string .NET can build, so one byte more could not be turned into text`` () =
+    Assert.Throws<OutOfMemoryException>(Action(fun () -> String('a', MaxBufferableBytes + 1) |> ignore)) |> ignore
 
 [<Fact; Trait("Level", "Unit")>]
 let ``bufferSpan buffers the whole file when nothing has been read yet`` () =
@@ -79,15 +89,25 @@ let ``bufferSpan restarts at zero for a negative stored offset`` () =
     Assert.Equal(Ok(0L, 1000), bufferSpan 1000L -1L)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan accepts a span of exactly the largest array`` () =
-    Assert.Equal(Ok(0L, Array.MaxLength), bufferSpan (int64 Array.MaxLength) 0L)
+let ``bufferSpan accepts a span of exactly the limit`` () =
+    Assert.Equal(Ok(0L, MaxBufferableBytes), bufferSpan (int64 MaxBufferableBytes) 0L)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan reports a span one byte past the largest array, naming both sizes`` () =
+let ``bufferSpan reports a span one byte past the limit, naming both sizes`` () =
     Assert.Equal(
         Error
-            $"The folder is {oneByteOverTheLimit} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes).",
+            $"The folder has {oneByteOverTheLimit} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
         bufferSpan oneByteOverTheLimit 0L
+    )
+
+/// `Array.MaxLength` is what the guard used to be set to, and it is nearly twice the limit - a
+/// span that size was accepted, buffered, and then killed the process converting it to text.
+[<Fact; Trait("Level", "Unit")>]
+let ``bufferSpan reports a span of the largest array, which is far past the limit`` () =
+    Assert.Equal(
+        Error
+            $"The folder has {int64 Array.MaxLength} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
+        bufferSpan (int64 Array.MaxLength) 0L
     )
 
 [<Fact; Trait("Level", "Unit")>]
@@ -676,7 +696,7 @@ let ``readFolder re-reads the whole folder when the stored offset lies past the 
 
 /// A file of `sizeBytes` whose bytes are never written: NTFS records the length without zeroing
 /// the clusters, so this costs single-digit milliseconds and no measurable I/O. That is what
-/// makes the over-2-GiB guards testable at all - round 2 added one and shipped it untested,
+/// makes the over-limit guards testable at all - round 2 added one and shipped it untested,
 /// stating a fixture that large could not be committed, which is true of a *committed* fixture
 /// but not of one the test makes and deletes.
 let private withOversizedFolder (test: string -> string -> unit) =
@@ -686,9 +706,13 @@ let private withOversizedFolder (test: string -> string -> unit) =
         let path = Path.Combine(tempDir, "Oversized")
 
         (use stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write)
-         // One byte past the largest array this reader could buffer, so the guard is exercised
-         // at its boundary rather than somewhere comfortably beyond it.
-         stream.SetLength(int64 Array.MaxLength + 1L))
+         // One byte past what this reader can buffer, so the guard is exercised at its boundary
+         // rather than somewhere comfortably beyond it. This size matters: rounds 2 and 3 set
+         // the guard at `Array.MaxLength`, nearly twice the real ceiling, so a folder of exactly
+         // this many bytes sailed past it - `countMessages` answered `Ok 0` and `readFolder`
+         // threw an uncaught OutOfMemoryException out of the whole API, which are precisely the
+         // two defects those rounds reported as closed.
+         stream.SetLength(int64 MaxBufferableBytes + 1L))
 
         test tempDir path
     finally
@@ -704,7 +728,7 @@ let ``readFolder reports a folder too large to buffer in one pass rather than th
             Assert.Equal(path, reportedPath)
 
             Assert.Equal(
-                $"The folder is {int64 Array.MaxLength + 1L} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes).",
+                $"The folder has {int64 MaxBufferableBytes + 1L} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
                 reason
             )
         | Error other -> Assert.Fail($"Expected MailFolderUnreadable, but got Error: {other}")
@@ -737,7 +761,7 @@ let ``countMessages reports a folder too large to buffer rather than silently co
             Assert.Equal(path, reportedPath)
 
             Assert.Equal(
-                $"The folder is {int64 Array.MaxLength + 1L} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes).",
+                $"The folder has {int64 MaxBufferableBytes + 1L} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
                 reason
             )
         | Error other -> Assert.Fail($"Expected MailFolderUnreadable, but got Error: {other}")

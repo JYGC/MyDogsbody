@@ -81,14 +81,33 @@ let private headerBlockAndRest (text: string) : (string * string) option =
     separator
     |> Option.map (fun (index, separatorLength) -> text.Substring(0, index), text.Substring(index + separatorLength))
 
+/// The largest span this reader can buffer in one pass, and it is NOT `Array.MaxLength`.
+///
+/// The buffer is only ever an intermediate: `splitIntoMessages` turns the whole of it into a
+/// Latin1 string on its first line, and every step after that works on text. .NET caps a string
+/// at 1,073,741,791 chars - the 2 GB object-size ceiling at two bytes per char - which is a
+/// little under HALF what an array may hold. So a span between this and `Array.MaxLength`
+/// allocates fine and then dies converting, with 51 GB of memory still free: it is a hard
+/// runtime ceiling, not memory pressure, and no machine grows out of it.
+///
+/// Sizing the guard by the array rather than by the string is what let a folder of 1.0-2.0 GiB
+/// through it. `countMessages` answered `Ok 0` for one (its `with _ -> Ok 0` swallowed the
+/// `OutOfMemoryException` into "this folder holds no messages") and `readFolder` threw the same
+/// exception straight out of `read`, `readFolder` and the whole API call, past both `with`
+/// handlers in this file - which are the two failures the guard was added to prevent in the
+/// first place, still reachable at every size between the two ceilings.
+[<Literal>]
+let MaxBufferableBytes = 1_073_741_791
+
 /// The span of a folder file to buffer for one read: where to start, and how many bytes that is.
 /// Pure, and public, so both size guards it encodes are testable directly - a fixture large
 /// enough to reach them cannot be committed, and neither is reachable from one that can.
 ///
 /// It encodes the two ways this arithmetic went wrong, at opposite ends of the range:
 ///
-///  - Past 2 GiB, `int (totalLength - fromOffset)` wraps silently - the measured profile has a
-///    single 2.5 GB mbox - and `Array.zeroCreate` then throws an `ArgumentException` that neither
+///  - Past `MaxBufferableBytes` the span cannot be turned into text at all (see above), and past
+///    2 GiB `int (totalLength - fromOffset)` also wraps silently - the measured profile has a
+///    single 2.5 GB mbox - after which `Array.zeroCreate` throws an `ArgumentException` that no
 ///    handler in this file catches. Reported as a value instead, so the caller decides.
 ///  - A stored offset can outlive the bytes it pointed at. `readFolder` measures the size BEFORE
 ///    opening the file, so a folder that grew in between records an `OffsetReached` past the
@@ -97,12 +116,17 @@ let private headerBlockAndRest (text: string) : (string * string) option =
 ///    `ArgumentException`, from the other end. The file cannot contain what the watermark claims,
 ///    so the span restarts at 0 and the folder is read in full: re-reading a message is
 ///    recoverable, crashing out of the whole API call is not.
+///
+/// The reported figure is the span still to read, not the file's size - on an incremental read
+/// of a folder already partly consumed those are different numbers, and the one that decides the
+/// answer is the one the message has to name.
 let bufferSpan (totalLength: int64) (fromOffset: int64) : Result<int64 * int, string> =
     let startOffset = if fromOffset < 0L || fromOffset > totalLength then 0L else fromOffset
     let remaining = totalLength - startOffset
 
-    if remaining > int64 Array.MaxLength then
-        Error $"The folder is {remaining} bytes, larger than this reader can buffer in one pass ({Array.MaxLength} bytes)."
+    if remaining > int64 MaxBufferableBytes then
+        Error
+            $"The folder has {remaining} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes)."
     else
         Ok(startOffset, int remaining)
 
@@ -230,12 +254,13 @@ let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64)
     try
         use stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
 
-        // The span is buffered whole, so it has to fit a single array - and the offset it starts
-        // from has to still be inside the file. `bufferSpan` decides both; reporting the folder
-        // as unreadable keeps the other folders returning, per requirements.md -> "Reading safely
-        // while Thunderbird is running". Reading a folder too large for one array WITHOUT
-        // buffering it whole is requirements.md's "read it without loading the whole folder into
-        // memory", and needs the streaming reader this does not have - see outcome.md -> O.5.
+        // The span is buffered whole and then turned into one string, so it has to fit both - and
+        // the offset it starts from has to still be inside the file. `bufferSpan` decides all of
+        // that; reporting the folder as unreadable keeps the other folders returning, per
+        // requirements.md -> "Reading safely while Thunderbird is running". Reading a folder too
+        // large for one buffer WITHOUT buffering it whole is requirements.md's "read it without
+        // loading the whole folder into memory", and needs the streaming reader this does not
+        // have - see outcome.md -> O.5.
         match bufferSpan stream.Length fromOffset with
         | Error reason -> Error(MailFolderUnreadable(path, reason))
         | Ok(startOffset, remainingLength) ->
@@ -411,11 +436,16 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
         // A folder this cannot read contributes 0 and the rest still count - EXCEPT a folder that
         // is merely too large to buffer, which is reported. The two are not the same failure and
         // must not look the same: a locked folder is momentary and a later count gets it, whereas
-        // one over `Array.MaxLength` is unreadable by this reader every single time. `int
+        // one over `MaxBufferableBytes` is unreadable by this reader every single time. `int
         // stream.Length` wrapped negative for it, `Array.zeroCreate` threw, and `with _ -> 0`
         // swallowed that into "the folder holds no messages" - so the user was told a confident
         // total that silently omitted their largest folder. Answering with the reason instead is
         // the only honest option until O.5's streaming reader lands.
+        //
+        // `with _ -> Ok 0` is still the last line of defence here, and it is still capable of
+        // turning any unexpected exception into "empty folder" - which is exactly how the
+        // over-limit case hid for two review rounds. The guard being sized correctly is what
+        // keeps it out of that branch; do not widen the range it lets through.
         let countOneFolder (folder: MailFolder) : Result<int, MailAccountError> =
             let fullPath = MailFolderEnumerator.resolvePath account.StoreDirectory account.StoreFormat folder.RelativePath
 
