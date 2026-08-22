@@ -29,6 +29,11 @@ let settingsNavMenu(body: NodeRenderFragment) =
                         Icon Icons.Material.TwoTone.Store
                         "Suppliers"
                     }
+                    MudNavLink'' {
+                        Href "/settings/mail-accounts"
+                        Icon Icons.Material.TwoTone.Email
+                        "Mail accounts"
+                    }
                     MudNavGroup'' {
                         Title "Logs"
                         Icon Icons.Material.TwoTone.MonitorHeart

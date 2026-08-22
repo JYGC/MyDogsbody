@@ -42,6 +42,16 @@ module MyDogsbody =
             let reorderTemplates = $"{templateApi}.reorderTemplates"
             let testTemplate = $"{templateApi}.testTemplate"
 
+        module MailAccountApi =
+            let private mailAccountApi = $"{startup}.MailAccountApi"
+            let getProfileRoot = $"{mailAccountApi}.getProfileRoot"
+            let setProfileRoot = $"{mailAccountApi}.setProfileRoot"
+            let scanForAccounts = $"{mailAccountApi}.scanForAccounts"
+            let getAccounts = $"{mailAccountApi}.getAccounts"
+            let selectAccount = $"{mailAccountApi}.selectAccount"
+            let countMessages = $"{mailAccountApi}.countMessages"
+            let clearWatermarks = $"{mailAccountApi}.clearWatermarks"
+
     /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
     /// it - MyDogsbody.Database is the application's main store, not an integration, so its
     /// entries do not go under Integrations.
@@ -81,6 +91,28 @@ module MyDogsbody =
             module PdfDocumentReader =
                 let private pdfDocumentReader = $"{pdf}.PdfDocumentReader"
                 let readContent = $"{pdfDocumentReader}.readContent"
+
+        /// Only ThunderbirdStore's functions appear here - ThunderbirdFolderScanner,
+        /// ThunderbirdAccountReader, MailFolderEnumerator and MailFolderReader construct
+        /// MailAccountError directly rather than going through handleError, because their
+        /// failures (a locked file, a malformed prefs.js) are expected in the domain's own
+        /// terms - see design.md -> "Error-handling approach". ThunderbirdStore is genuine
+        /// LiteDB CRUD, the same shape as CredentialStore, so it keeps the usual pattern.
+        module Thunderbird =
+            let private thunderbird = $"{integrations}.Thunderbird"
+
+            module ThunderbirdStore =
+                let private thunderbirdStore = $"{thunderbird}.ThunderbirdStore"
+                let loadProfileRoot = $"{thunderbirdStore}.loadProfileRoot"
+                let saveProfileRoot = $"{thunderbirdStore}.saveProfileRoot"
+                let loadMailAccounts = $"{thunderbirdStore}.loadMailAccounts"
+                let saveMailAccounts = $"{thunderbirdStore}.saveMailAccounts"
+                let loadSelectedMailAccount = $"{thunderbirdStore}.loadSelectedMailAccount"
+                let saveSelectedMailAccount = $"{thunderbirdStore}.saveSelectedMailAccount"
+                let loadWatermark = $"{thunderbirdStore}.loadWatermark"
+                let saveWatermark = $"{thunderbirdStore}.saveWatermark"
+                let clearWatermarks = $"{thunderbirdStore}.clearWatermarks"
+                let updateCachedMessageCount = $"{thunderbirdStore}.updateCachedMessageCount"
 
     module Logging =
         let private logging = $"{myDogsbody}.Logging"

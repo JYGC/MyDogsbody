@@ -1,0 +1,2 @@
+// A second .msf orphan with no matching mbox file, so a test can assert this isn't a one-off.
+<mork:mork xmlns:mork="http://www.mozilla.org/mork">FAKE-MORK-CONTENT-NOT-A-REAL-INDEX</mork:mork>

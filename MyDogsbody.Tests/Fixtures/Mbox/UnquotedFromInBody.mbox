@@ -1,0 +1,20 @@
+From alice@example.com Mon Jan  1 00:00:00 2024
+Message-ID: <unquoted-1@example.com>
+From: alice@example.com
+To: bob@example.com
+Subject: Invoice attached
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+
+Please find the invoice attached.
+
+From the accounts team,
+Best regards
+
+From bob@example.com Tue Jan  2 00:00:00 2024
+Message-ID: <unquoted-2@example.com>
+From: bob@example.com
+To: alice@example.com
+Subject: Second message
+Date: Tue, 2 Jan 2024 00:00:00 +0000
+
+The second message must still be returned.

@@ -8,6 +8,11 @@
 
   <ItemGroup>
     <Compile Include="Domain\ResultTests.fs" />
+    <Compile Include="Domain\MailAccounts\MailAccountsTypesTests.fs" />
+    <Compile Include="Domain\MailAccounts\SetProfileRootWorkflowTests.fs" />
+    <Compile Include="Domain\MailAccounts\ScanForMailAccountsWorkflowTests.fs" />
+    <Compile Include="Domain\MailAccounts\ListMailAccountsWorkflowTests.fs" />
+    <Compile Include="Domain\MailAccounts\SelectMailAccountWorkflowTests.fs" />
     <Compile Include="Domain\Credentials\CredentialsTypesTests.fs" />
     <Compile Include="Domain\Credentials\AddCredentialWorkflowTests.fs" />
     <Compile Include="Domain\Credentials\EditCredentialWorkflowTests.fs" />
@@ -33,9 +38,17 @@
     <Compile Include="Domain\Invoices\MatchSupplierWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ApplyTemplateWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\SelectTemplateWorkflowTests.fs" />
+    <Compile Include="Fixtures\ThunderbirdFixturePaths.fs" />
     <Compile Include="Fixtures\MeasuredTemplates.fs" />
     <Compile Include="Fixtures\MeasuredTemplatesTests.fs" />
     <Compile Include="Contracts\DomainIsolationTests.fs" />
+    <Compile Include="Integrations\Thunderbird\ThunderbirdFolderScannerTests.fs" />
+    <Compile Include="Integrations\Thunderbird\ThunderbirdAccountReaderTests.fs" />
+    <Compile Include="Integrations\Thunderbird\MailFolderEnumeratorTests.fs" />
+    <Compile Include="Integrations\Thunderbird\MailFolderReaderTests.fs" />
+    <Compile Include="Integrations\Thunderbird\ThunderbirdDatabaseContextModuleTests.fs" />
+    <Compile Include="Integrations\Thunderbird\ThunderbirdEntityMappersTests.fs" />
+    <Compile Include="Integrations\Thunderbird\ThunderbirdStoreTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialsDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
     <Compile Include="Integrations\Pdf\PdfDocumentReaderTests.fs" />
@@ -55,22 +68,31 @@
     <Compile Include="Startup\SupplierApiFactoryTests.fs" />
     <Compile Include="Startup\TemplateApiMappersTests.fs" />
     <Compile Include="Startup\TemplateApiFactoryTests.fs" />
+    <Compile Include="Startup\MailAccountApiMappersTests.fs" />
+    <Compile Include="Startup\MailAccountApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
     <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\CredentialApiContractTests.fs" />
     <Compile Include="Contracts\PersistedShapeTests.fs" />
     <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
+    <Compile Include="Contracts\ThunderbirdDependencyContractTests.fs" />
     <Compile Include="Contracts\SupplierApiContractTests.fs" />
     <Compile Include="Contracts\SupplierPersistedShapeTests.fs" />
+    <Compile Include="Contracts\MailAccountApiContractTests.fs" />
+    <Compile Include="Contracts\ThunderbirdPersistedShapeTests.fs" />
     <Compile Include="Contracts\MessageNormalizationContractTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
+    <Compile Include="UI\ModuleCreators\MailAccountsBrowserModuleCreatorsTests.fs" />
+    <Compile Include="UI\Components\MailAccountsComponentsTests.fs" />
     <Compile Include="E2E\BlazorTestHarness.fs" />
     <Compile Include="E2E\CredentialsFlowTests.fs" />
     <Compile Include="E2E\SuppliersTestHarness.fs" />
     <Compile Include="E2E\SuppliersFlowTests.fs" />
+    <Compile Include="E2E\MailAccountsTestHarness.fs" />
+    <Compile Include="E2E\MailAccountsFlowTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -90,6 +112,7 @@
     <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Startup\MyDogsbody.Startup.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />

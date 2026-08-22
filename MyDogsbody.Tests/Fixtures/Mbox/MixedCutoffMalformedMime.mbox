@@ -1,0 +1,57 @@
+From billing@vendor.example.com Mon Dec 15 09:00:00 2025
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <cutoff-old-1@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Old message before the cutoff (malformed body 1)
+Date: Mon, 15 Dec 2025 09:00:00 +0000
+Content-Type: multipart/mixed; boundary="NEVER-APPEARS"
+Content-Transfer-Encoding: base64
+
+!!! THIS IS NOT VALID BASE64 AND THE DECLARED BOUNDARY "NEVER-APPEARS" NEVER OCCURS BELOW !!!
+A reader that fully parses this body (multipart split, then base64 decode) must throw or
+otherwise fail. The cutoff (2026-01-01, start of day) is meant to make the reader skip this
+message on its Date header alone, without ever reaching this body - proving that with a test
+that would blow up if the skip-before-parsing rule were violated.
+
+From billing@vendor.example.com Tue Dec 30 10:00:00 2025
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <cutoff-old-2@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Old message before the cutoff (malformed body 2)
+Date: Tue, 30 Dec 2025 10:00:00 +0000
+Content-Type: multipart/mixed; boundary="ALSO-NEVER-APPEARS"
+Content-Transfer-Encoding: base64
+
+@@@ ALSO NOT VALID BASE64, ALSO NO MATCHING BOUNDARY MARKER BELOW @@@
+Second old, deliberately-malformed message - same point as the first, so a test can prove the
+skip-without-parsing rule holds for more than one message in a row.
+
+From billing@vendor.example.com Thu Jan 01 00:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <cutoff-boundary-new-1@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Message exactly on the cutoff boundary
+Date: Thu, 01 Jan 2026 00:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This message's Date is exactly the cutoff instant (2026-01-01, start of day) and must be
+INCLUDED - the cutoff is inclusive of its own boundary.
+
+From billing@vendor.example.com Fri Jan 02 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <cutoff-new-2@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Well-formed message after the cutoff
+Date: Fri, 02 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This message is after the cutoff and well-formed, and must be returned along with the
+boundary message above - exactly two messages out of the four in this file.

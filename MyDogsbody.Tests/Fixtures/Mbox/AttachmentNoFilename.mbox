@@ -1,0 +1,25 @@
+From billing@vendor.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <no-filename-attachment-1@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Your invoice is attached
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: multipart/mixed; boundary="BOUNDARY789"
+
+This is a multipart message in MIME format.
+
+--BOUNDARY789
+Content-Type: text/plain; charset=utf-8
+
+Please see the attached invoice.
+
+--BOUNDARY789
+Content-Type: application/pdf
+Content-Disposition: attachment
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQgRkFLRSBQREYgQ09OVEVOVCBGT1IgRklYVFVSRSAtIE5PVCBBIFJFQUwgUERGCg==
+
+--BOUNDARY789--

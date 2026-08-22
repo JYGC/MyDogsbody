@@ -1,0 +1,12 @@
+From secretary@surreyhillsorchestra.example.com Wed Jan 07 11:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <shorchestra-1@alpha.example.com>
+From: secretary@surreyhillsorchestra.example.com
+To: alice@alpha.example.com
+Subject: Concert programme
+Date: Wed, 07 Jan 2026 11:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Second level of the .sbd nesting - see the sibling .sbd directory for the third level.
+

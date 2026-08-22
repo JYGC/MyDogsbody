@@ -1,0 +1,12 @@
+From alice@alpha.example.com Sun Jan 11 06:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <alpha-sent-1@alpha.example.com>
+From: alice@alpha.example.com
+To: someone@example.com
+Subject: Re: hello
+Date: Sun, 11 Jan 2026 06:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Sent must be excluded from the scannable set - Q4.8.
+

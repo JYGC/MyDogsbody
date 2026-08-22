@@ -1,0 +1,11 @@
+From: sender@maildir.example.com
+To: mallory@maildir.example.com
+Subject: A read message in cur/
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <maildir-cur-1@maildir.example.com>
+Content-Type: text/plain; charset=utf-8
+
+A message already moved into cur/ (the maildir "seen" state), per the standard cur/new/tmp
+layout. The real maildir spec appends ",S=<size>:2,<flags>" to a cur/ filename, but a literal
+colon is not a legal Windows filename character, so this fixture omits that suffix - the
+walk/enumerator only needs to know the file lives under cur/, not parse its flags.

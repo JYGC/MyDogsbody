@@ -1,0 +1,12 @@
+From noreply@musicclub.example.com Tue Jan 06 10:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <alpha-music-1@alpha.example.com>
+From: noreply@musicclub.example.com
+To: alice@alpha.example.com
+Subject: Music Club newsletter
+Date: Tue, 06 Jan 2026 10:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This is the parent of the .sbd nesting used to test three-level-deep folder discovery.
+
