@@ -217,6 +217,38 @@ let ``ScanForAccounts surfaces a cleared selection, and a later scan that clears
     Assert.False(AVal.force browser.SelectionClearedAval)
 
 [<Fact; Trait("Level", "Unit")>]
+let ``SelectAccount takes the cleared-selection notice down, and a failed one leaves it up`` () =
+    // The notice the scan raises reads "...the selection has been cleared. Choose an account
+    // below." Once the user has chosen one its premise is false, so it must come down here rather
+    // than waiting for some later scan that happens to clear nothing.
+    let selectSucceeds = ref false
+
+    let mailAccountApi =
+        api
+            (fun () -> Ok None)
+            (fun _ -> Ok())
+            (fun () -> Ok { aDiscoveryResult [ anAccount "1" ] with SelectionCleared = true })
+            (fun () -> Ok([ anAccount "1" ], None))
+            (fun _ -> if selectSucceeds.Value then Ok() else Error(failure "could not select"))
+            (fun _ -> Ok 0)
+            (fun _ -> Ok())
+
+    let browser = MailAccountsBrowserModuleCreators.getMailAccountsBrowserModule runSynchronously mailAccountApi
+
+    browser.ScanForAccounts()
+    Assert.True(AVal.force browser.SelectionClearedAval)
+
+    // A select that failed answered nothing, so the notice stays up and the failure is reported.
+    browser.SelectAccount "1"
+    Assert.True(AVal.force browser.SelectionClearedAval)
+    Assert.Equal(Some "could not select", AVal.force browser.ErrorAval)
+
+    selectSucceeds.Value <- true
+    browser.SelectAccount "1"
+    Assert.False(AVal.force browser.SelectionClearedAval)
+    Assert.Equal(None, AVal.force browser.ErrorAval)
+
+[<Fact; Trait("Level", "Unit")>]
 let ``a failed scan surfaces the message and stops the scanning indicator`` () =
     let mailAccountApi =
         api (fun () -> Ok None) (fun _ -> Ok()) (fun () -> Error(failure "no profile found")) (fun () -> Ok([], None)) (fun _ -> Ok()) (fun _ -> Ok 0) (fun _ -> Ok())

@@ -90,13 +90,17 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
                     isScanningCval.Value <- false))
 
     /// Runs a write and reloads, so the table shows what was actually stored rather than what
-    /// the action optimistically assumed.
-    let write operation =
+    /// the action optimistically assumed. `onSuccess` is the one thing a particular write knows
+    /// that this function does not - it runs only when the write actually succeeded, before the
+    /// reload, and does its own `transact` so a write with nothing to say costs no transaction.
+    let write (onSuccess: unit -> unit) operation =
         transact (fun _ -> isLoadingCval.Value <- true)
 
         startWork (fun () ->
             match operation () with
-            | Ok() -> loadAccounts ()
+            | Ok() ->
+                onSuccess ()
+                loadAccounts ()
             | Error(ex: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
                 transact (fun _ ->
                     errorCval.Value <- Some ex.Message
@@ -116,7 +120,17 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
         ErrorAval = errorCval
         SetProfileRoot = setProfileRoot
         ScanForAccounts = scanForAccounts
-        SelectAccount = fun id -> write (fun () -> mailAccountApi.SelectAccount id)
-        CountMessages = fun id -> write (fun () -> mailAccountApi.CountMessages id |> Result.map ignore)
-        ClearWatermarks = fun id -> write (fun () -> mailAccountApi.ClearWatermarks id)
+        // Selecting an account is the answer to the "...the selection has been cleared. Choose an
+        // account below." notice, so the notice comes down on the selection itself rather than on
+        // whichever later scan happens to clear nothing. Left up, it contradicts the ticked row
+        // beside it - two answers to the same question on the same screen. Only the success path
+        // clears it: a select that failed answered nothing, and `scanForAccounts` still sets the
+        // flag from every scan, so a scan that clears again puts the notice straight back up.
+        SelectAccount =
+            fun id ->
+                write
+                    (fun () -> transact (fun _ -> selectionClearedCval.Value <- false))
+                    (fun () -> mailAccountApi.SelectAccount id)
+        CountMessages = fun id -> write ignore (fun () -> mailAccountApi.CountMessages id |> Result.map ignore)
+        ClearWatermarks = fun id -> write ignore (fun () -> mailAccountApi.ClearWatermarks id)
     }

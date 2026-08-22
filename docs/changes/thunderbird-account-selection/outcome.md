@@ -447,6 +447,61 @@ and the store and the workflow are right; this is a stale notice, not a wrong re
 final-round bar for pushing was a defect that materially costs the user. Recorded as **O.10** below
 rather than fixed, so a human decides whether it is worth a commit.
 
+*(Round 7 decided: fixed. See below.)*
+
+## One defect PR #17's round-7 review found and fixed
+
+Round 7 opened a fresh loop and read round 6's own work cold. It re-measured the round-6 fix rather
+than trusting it, then deliberately spent its remaining attention away from `MailFolderReader`,
+which five rounds had already concentrated on.
+
+**Round 6's fix was confirmed complete, not merely present.** Truncating five different message
+shapes at *every one of their byte offsets* and running the production parse path — the
+multipart/mixed text+PDF invoice round 6 measured, plus a bare `text/plain`, a
+`multipart/alternative`, a `message/rfc822` attachment and a deliberately corrupt base64 part —
+produced **only `FormatException`, which `tryParseMessage` holds, and zero `NullReferenceException`
+across all 1,791 truncation points**. The two follow-up questions it raised both answered cleanly:
+a `TextPart` whose `Content` is null does *not* throw out of `message.TextBody`/`HtmlBody`, so the
+attachment filter had no untreated sibling; and a *complete* attachment with a zero-length body is
+the only real part the filter drops, which is right — there are no bytes to hand on either way.
+
+One candidate was raised and then **dropped on measurement**: `CachedMessageCountTakenAt` is still
+stored as a raw LiteDB `DateTime` while the watermark was moved to ticks, so the "as of ..." stamp
+under *Count messages* looked like it should show a UTC instant formatted as local time. Measured
+against a real LiteDB file, it does not: LiteDB normalises to UTC on write and converts to
+`DateTimeKind.Local` on read, so `DateTime.UtcNow` written at `2026-08-22 20:51` UTC came back as
+`2026-08-23 06:51` Local and formats identically to `DateTime.Now`. The round-2 watermark defect was
+the *comparison* breaking on that conversion, not the value being wrong; a display-only timestamp is
+unaffected. No change made.
+
+1. **The "selection was cleared" notice stayed on screen after the user answered it** — recorded by
+   round 6 as **O.10** and left for a human, because round 6 was under a final-round materiality
+   bar. Round 7 was not, and judged it worth closing: `selectionClearedCval` was written only by
+   `scanForAccounts`, so after a scan cleared a vanished selection the `Severity.Warning` alert
+   reading "...the selection has been cleared. Choose an account below." stayed up while the row
+   the user had just ticked sat beneath it — two answers to the same question on the same screen,
+   until some later scan happened to clear nothing.
+
+   Fixed in `MailAccountsBrowserModuleCreators` by giving `write` an `onSuccess` callback and having
+   `SelectAccount` pass one that lowers the flag. Only the success path clears it — a select that
+   failed has answered nothing — and `scanForAccounts` still sets the flag from *every* scan, so a
+   scan that clears again puts the notice straight back up. `CountMessages` and `ClearWatermarks`
+   pass `ignore`; they do their own `transact`, so a write with nothing to say costs no transaction.
+
+   Two red-first tests, both failing against `f384587` for exactly the predicted reason:
+
+   | Level | Test | Red against `f384587` |
+   | --- | --- | --- |
+   | Unit | `SelectAccount takes the cleared-selection notice down, and a failed one leaves it up` | `Assert.False() Failure — Expected: False, Actual: True` |
+   | E2E | `choosing an account takes the cleared-selection notice down` | `Assert.DoesNotContain() Failure: Sub-string found` — the notice was still rendered |
+
+   The unit test also pins the half the fix must *not* do: a failed select leaves the notice up and
+   reports its own message. The E2E test drives the real stack — module creator → `MailAccountApi` →
+   workflows → the LiteDB store on a temp file → rendered markup — selecting from the maildir
+   fixture profile, moving the root to the measured-shape profile so the selection is reconciled
+   away, and then choosing one of the accounts that scan *did* find. Nothing is logged for either
+   transition.
+
 ## Not implemented (Optional, deferred)
 
 - **O.1** Reading `global-messages-db.sqlite` (gloda) as a fast path — not guaranteed enabled or
@@ -501,17 +556,10 @@ rather than fixed, so a human decides whether it is worth a commit.
   is that these three SHALLs are unmet, and the change that first needs a server type, a login
   name or a sender's display name adds them to `DiscoveredMailAccount`, to
   `DiscoveredAccountEntity`, and to both boundary mappers together.
-- **O.10** *(found by PR #17's round-6 review.)* **The "selection was cleared" notice comes down on
-  the next scan, not when the user answers it.** `selectionClearedCval` is written only by
-  `scanForAccounts`; `SelectAccount` goes through `write` → `loadAccounts`, which never touches it.
-  So after a scan clears a vanished selection, the `Severity.Warning` alert saying "Choose an
-  account below" stays on screen after the user has chosen one, until a later scan clears nothing.
-  Everything else in the chain is correct — the workflow computes the flag fresh per scan, the
-  adapter reports `false` and the workflow overwrites it, and round 5's E2E test covers the notice
-  going up and coming down across scans. Left as a stale notice rather than fixed, because round 6
-  was the review loop's final round and its bar for pushing was a defect that materially costs the
-  user; the fix is one line (`selectionClearedCval.Value <- false` in the `SelectAccount` path) plus
-  the E2E assertion that pins it.
+- **O.10** *(found by PR #17's round-6 review; **closed by round 7** — see the round-7 section
+  above.)* The "selection was cleared" notice came down on the next scan rather than when the user
+  answered it. `SelectAccount` now lowers the flag on success, with a Unit and an E2E test pinning
+  both halves of the behaviour.
 - **O.11** *(found by PR #17's round-6 review.)* **An mbox message that is half-written but has its
   header/body separator is consumed rather than re-read.** `readMboxFile`'s torn test asks only
   whether the last segment has a header/body separator. A message whose top-level headers and blank
@@ -524,6 +572,21 @@ rather than fixed, so a human decides whether it is worth a commit.
   MIME tree" — would close it, at the cost of a folder whose last message is *permanently*
   malformed re-reading the same bytes on every scan; that trade wants its own change folder rather
   than a review-fix commit.
+- **O.12** *(found by PR #17's round-7 review.)* **An attachment that is not a `MimePart` is
+  silently dropped.** `parseMessage` maps `message.Attachments` with `| :? MimePart as part ... | _
+  -> None`, so a `message/rfc822` attachment — a forwarded email carried as `MessagePart`, which
+  derives from `MimeEntity` and *not* from `MimePart` — is skipped without a trace, even though it
+  has a `Content-Disposition: attachment`, a filename and bytes. requirements.md → *Reading
+  messages* says "WHEN a message carries attachments THE SYSTEM SHALL return each attachment's
+  filename and its bytes", so this is a stated SHALL that is unmet, and it is the silent-wrong-
+  result shape: the message reports `Attachments = []`, indistinguishable from carrying none. It
+  predates round 6's filter rather than being caused by it (the `:? MimePart` test is from the
+  original commit) and costs nothing today, because `MailFolderReader.read` is not wired into
+  `MailAccountApi` at all — see **O.8**. Not fixed here on purpose: serialising a nested message
+  back to bytes and synthesising a filename for it is *new behaviour* with its own encoding and
+  naming decisions, not a defect fix, and change #4 is where an actual attachment consumer exists to
+  specify it against. It closes with **O.7** in that change, next to the diagnostic channel the same
+  signature has to grow.
 
 ## Stated plainly: maildir ships verified against synthetic fixtures only
 

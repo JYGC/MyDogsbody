@@ -139,6 +139,44 @@ let ``a scan that clears a selection naming a vanished account says so on the pa
         Directory.Delete(otherProfile, true)
 
 [<Fact; Trait("Level", "E2E")>]
+let ``choosing an account takes the cleared-selection notice down`` () =
+    // The notice ends "Choose an account below." Once the user has, its premise is false. Leaving
+    // it up until some later scan happens to clear nothing tells the user their selection is gone
+    // while the row beside it is ticked - two answers to the same question, on the same screen.
+    withMailAccountsHarness (fun () -> None) (fun harness ->
+        let browserModule, rendered = renderBrowser harness (fun () -> None)
+
+        // One profile's account is selected, then the root moves to a profile that does not
+        // contain it - the same reconciliation the test above covers, but this one has accounts
+        // left to choose from afterwards.
+        browserModule.SetProfileRoot maildirShapeProfile
+        browserModule.ScanForAccounts()
+        rendered.WaitForAssertion(fun () -> Assert.Contains("Maildir Mail", rendered.Markup))
+
+        browserModule.SelectAccount $"{maildirShapeProfile}|account1"
+
+        rendered.WaitForAssertion(fun () ->
+            let _, selected = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+            Assert.Equal(Some $"{maildirShapeProfile}|account1", selected))
+
+        browserModule.SetProfileRoot measuredShapeProfile
+        browserModule.ScanForAccounts()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("selected mail account was not found", rendered.Markup)
+            Assert.Contains("Alpha Mail", rendered.Markup))
+
+        browserModule.SelectAccount $"{measuredShapeProfile}|account1"
+
+        rendered.WaitForAssertion(fun () ->
+            let _, selected = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+            Assert.Equal(Some $"{measuredShapeProfile}|account1", selected)
+            Assert.DoesNotContain("selected mail account was not found", rendered.Markup))
+
+        // Answering a reconciliation is not a failure - nothing is logged and no alert appears.
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``the accounts table states each account's on-disk size and what a scan of it will cost`` () =
     withMailAccountsHarness (fun () -> None) (fun harness ->
         let browserModule, rendered = renderBrowser harness (fun () -> None)
