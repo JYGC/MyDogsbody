@@ -8,20 +8,20 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1035 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1038 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
   contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, round 3 a further
-  16, round 4 two more, and round 5 twelve — see per-level figures below, reproduced with
-  `--filter "Level=..."`):
+  16, round 4 two more, round 5 twelve, and round 6 three — see per-level figures below, reproduced
+  with `--filter "Level=..."`):
 
-  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 |
-  | --- | --- | --- | --- | --- | --- |
-  | Unit | 532 | 544 | 554 | 556 | 559 |
-  | Integration | 198 | 205 | 209 | 209 | 216 |
-  | Contract | 232 | 233 | 235 | 235 | 236 |
-  | E2E | 22 | 23 | 23 | 23 | 24 |
-  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** |
+  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Unit | 532 | 544 | 554 | 556 | 559 | 559 |
+  | Integration | 198 | 205 | 209 | 209 | 216 | 219 |
+  | Contract | 232 | 233 | 235 | 235 | 236 | 236 |
+  | E2E | 22 | 23 | 23 | 23 | 24 | 24 |
+  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** |
 
   Round 4 adds two Unit tests and changes four existing ones rather than adding to them — its
   finding was that two integration tests were aimed at the wrong boundary, so retargeting them was
@@ -381,6 +381,72 @@ raised by the review itself; the PR has still never carried an open review comme
    duplicating, an unknown id changing nothing, and the error path's exact `ActionName`, message and
    preserved inner exception.
 
+## One defect PR #17's round-6 review found and fixed
+
+Round 6 read round 5's own work cold — nothing had reviewed it — concentrating on whether
+`tryParseMessage`'s discard-and-advance is right in every case and whether the new `SelectionCleared`
+signal is correct end to end. The `SelectionCleared` chain held up (see *the one thing left open*
+below); `tryParseMessage` did not, because it closed one exception type rather than the class.
+
+1. **A message whose attachment part has headers but no content yet threw an uncaught
+   `NullReferenceException` out of the whole account read — the same escape round 5 fixed, through
+   the door it left open.** Round 5's `tryParseMessage` catches `FormatException`, which is what
+   MimeKit raises for content it cannot parse as a message *at all*. It is not the only way the
+   parse throws. MimeKit leaves `MimePart.Content` **null** for a part whose headers were parsed but
+   whose body was not there, and `toMailAttachment`'s first line is `part.Content.DecodeTo content`.
+   A `NullReferenceException` is neither a `FormatException`, an `IOException` nor an
+   `UnauthorizedAccessException`, so it walked past `tryParseMessage`, past `readMboxFile`'s and
+   `readMaildirFolder`'s `with` clauses, out of `readFolder`, out of `read` and out of the whole API
+   call — from signatures that say `Result<_, MailAccountError>`, exactly the contract round 5 was
+   restoring.
+
+   This is the *ordinary* state of an mbox while Thunderbird is flushing a message with an
+   attachment: a part's headers go down before its base64 does. It is not caught by the torn-message
+   rule, because that rule asks whether the segment has a header/body separator — and the message's
+   own headers and blank line are already on disk by the time the attachment part is being written,
+   so `isTorn` says the segment is complete and hands it to the full parse. requirements.md →
+   *Reading safely while Thunderbird is running* is precisely the scenario.
+
+   Measured against `7dc0b53`, truncating one realistic invoice email (multipart/mixed, a text part
+   and a base64 PDF, 666 bytes) at **every one of its byte offsets** and running the production
+   parse path:
+
+   | | Before | After |
+   | --- | --- | --- |
+   | Offsets throwing `NullReferenceException` (escapes the reader) | **64** | **0** |
+   | Offsets throwing `FormatException` (held by `tryParseMessage`) | 52 | 52 |
+   | `readFolder` (mbox, new `Fixtures/Mbox/AttachmentContentNotYetWritten.mbox`) | `NullReferenceException` at `MailFolderReader.toMailAttachment` → `parseMessage` → `tryParseMessage` → `processSegment` → `readMboxFile` → `readFolder` | `Ok` with both messages, every field asserted |
+   | `read` (whole account, one such folder plus a good one) | the same exception, so **every** folder of the account was lost | `Ok` with 3 messages |
+   | `readFolder` (maildir) | the same exception | `Ok`, the message returned |
+
+   Fixed by filtering the part rather than widening the catch: `parseMessage` now maps only a
+   `MimePart` that actually has content. Widening `tryParseMessage` to a bare `with _ ->` was
+   considered and rejected — this file's own `countMessages` comment records that a blanket handler
+   is exactly what turned an over-limit folder into "this folder holds no messages" and hid it for
+   two review rounds, so the fix addresses the cause instead of catching its symptom.
+
+   The content-less part is **dropped and the message kept**, rather than the message being discarded
+   whole: the bytes are genuinely not in the file, so there is no attachment to report, while the
+   message around it — sender, subject, date, body — is entirely readable and is what the reader
+   exists to return. Reporting it as a zero-byte `invoice.pdf` instead would turn "not written yet"
+   into "this PDF is corrupt" for the invoice pipeline downstream.
+
+   No unit-level seam exists for this: `parseMessage` and `toMailAttachment` are private and reached
+   only through a file on disk, so the red-first tests are Integration, the same level and the same
+   file as round 5's tests for the identical defect class. Three added; all three were red against
+   `7dc0b53` with the `NullReferenceException` above, and the existing
+   `AttachmentDeclaredOctetStream` / `AttachmentNoFilename` tests hold the filter honest by proving
+   a part that *does* have content is still returned.
+
+### The one thing left open, and why it was not fixed here
+
+`SelectionClearedAval` is set only by a scan, so the warning it drives stays on screen after the
+user answers it by picking an account — it comes down on the next scan that clears nothing, not on
+the selection itself. Round 5's E2E test covers the on and off transitions across scans correctly,
+and the store and the workflow are right; this is a stale notice, not a wrong result, and the
+final-round bar for pushing was a defect that materially costs the user. Recorded as **O.10** below
+rather than fixed, so a human decides whether it is worth a commit.
+
 ## Not implemented (Optional, deferred)
 
 - **O.1** Reading `global-messages-db.sqlite` (gloda) as a fast path — not guaranteed enabled or
@@ -435,6 +501,29 @@ raised by the review itself; the PR has still never carried an open review comme
   is that these three SHALLs are unmet, and the change that first needs a server type, a login
   name or a sender's display name adds them to `DiscoveredMailAccount`, to
   `DiscoveredAccountEntity`, and to both boundary mappers together.
+- **O.10** *(found by PR #17's round-6 review.)* **The "selection was cleared" notice comes down on
+  the next scan, not when the user answers it.** `selectionClearedCval` is written only by
+  `scanForAccounts`; `SelectAccount` goes through `write` → `loadAccounts`, which never touches it.
+  So after a scan clears a vanished selection, the `Severity.Warning` alert saying "Choose an
+  account below" stays on screen after the user has chosen one, until a later scan clears nothing.
+  Everything else in the chain is correct — the workflow computes the flag fresh per scan, the
+  adapter reports `false` and the workflow overwrites it, and round 5's E2E test covers the notice
+  going up and coming down across scans. Left as a stale notice rather than fixed, because round 6
+  was the review loop's final round and its bar for pushing was a defect that materially costs the
+  user; the fix is one line (`selectionClearedCval.Value <- false` in the `SelectAccount` path) plus
+  the E2E assertion that pins it.
+- **O.11** *(found by PR #17's round-6 review.)* **An mbox message that is half-written but has its
+  header/body separator is consumed rather than re-read.** `readMboxFile`'s torn test asks only
+  whether the last segment has a header/body separator. A message whose top-level headers and blank
+  line are on disk but whose MIME body is still being flushed passes that test, is parsed as
+  complete, and the offset advances past it — so the finished version is never re-read, and with
+  **O.10**'s sibling fix in place the attachment that arrives a moment later is permanently absent
+  from that folder's messages rather than merely absent from this scan. This predates round 6 (it
+  applies to a truncated plain-text body just as much) and round 6's fix converts a crash into it
+  rather than causing it. Making the torn test structural — "does this segment parse into a complete
+  MIME tree" — would close it, at the cost of a folder whose last message is *permanently*
+  malformed re-reading the same bytes on every scan; that trade wants its own change folder rather
+  than a review-fix commit.
 
 ## Stated plainly: maildir ships verified against synthetic fixtures only
 

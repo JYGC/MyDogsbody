@@ -277,6 +277,151 @@ let ``readFolder discards a maildir message MimeKit cannot parse and still retur
     finally
         Directory.Delete(tempDir, true)
 
+// ---------- 4.1c an attachment part whose content has not been written yet ----------
+//
+// `tryParseMessage` catches `FormatException`, which is the exception MimeKit raises for content
+// it cannot parse as a message AT ALL. It is not the only way the parse throws, and the other way
+// is reached by ordinary use rather than by a corrupt file.
+//
+// MimeKit leaves `MimePart.Content` NULL for a part whose headers are present but whose body is
+// not - the exact state an mbox is in while Thunderbird is flushing a message with an attachment,
+// because the headers go down before the base64 does. The top-level headers and their blank line
+// are already on disk by then, so `readMboxFile`'s `isTorn` test (no header/body separator) says
+// the segment is NOT torn and hands it to the full parse. `toMailAttachment` then dereferences
+// that null `Content`, and a `NullReferenceException` is neither a `FormatException` nor an
+// `IOException` nor an `UnauthorizedAccessException`: it walked out of `tryParseMessage`, out of
+// `readMboxFile`/`readMaildirFolder`, out of `readFolder`, out of `read` and out of the whole API
+// call - from functions whose signature says `Result<_, MailAccountError>`.
+//
+// Measured, not theorised: truncating one realistic invoice email (multipart/mixed, a text part
+// and a base64 PDF) at each of its 666 byte offsets throws 64 `NullReferenceException`s and 52
+// `FormatException`s. Round 4 closed the 52; these tests close the 64.
+//
+// The content-less part is dropped and the message is kept, rather than the message being
+// discarded whole: the bytes of that attachment are genuinely not in the file, so there is no
+// attachment to report, while the message around it - sender, subject, date, body - is entirely
+// readable and is what the reader exists to return.
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder returns a message whose attachment content is not yet on disk, reporting no attachment for it`` () =
+    let load, save, _ = inMemoryWatermarkStore ()
+
+    let actual = readFolder load save testAccountId (folder "AttachmentContentNotYetWritten.mbox") mboxFixtures Mbox noCutoff
+
+    match actual with
+    | Ok messages ->
+        Assert.Equal<string list>(
+            [ "<written-1@example.com>"; "<halfwritten-2@example.com>" ],
+            messages |> List.map (fun m -> m.SourceMessageId)
+        )
+
+        Assert.Equal<string list>(
+            [ "A complete message"; "Attachment part not yet written" ],
+            messages |> List.map (fun m -> m.Subject)
+        )
+
+        Assert.Equal<string list>(
+            [ "alice@example.com"; "billing@vendor.example.com" ],
+            messages |> List.map (fun m -> m.Sender)
+        )
+
+        Assert.Equal<DateTime list>(
+            [ DateTime(2024, 1, 1, 0, 0, 0); DateTime(2024, 1, 2, 0, 0, 0) ],
+            messages |> List.map (fun m -> m.ReceivedAt)
+        )
+
+        // CRLF although the fixture on disk is LF: MimeKit normalises a decoded text body's line
+        // endings, so this is the reader's own output rather than the file's convention.
+        let complete = messages.[0]
+        Assert.Equal(Some "This message is complete and must still be returned.\r\n\r\n", complete.BodyText)
+        Assert.Equal(None, complete.BodyHtml)
+        Assert.Empty complete.Attachments
+
+        // The half-written message keeps everything that IS on disk - only the part with no bytes
+        // behind it is left out, so nothing downstream is handed a zero-byte "invoice-2002.pdf".
+        let halfWritten = messages.[1]
+        Assert.Equal(Some "Invoice attached.\r\n", halfWritten.BodyText)
+        Assert.Equal(None, halfWritten.BodyHtml)
+        Assert.Empty halfWritten.Attachments
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``read continues past a folder holding an unwritten attachment part and still returns the other folders' messages`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        File.Copy(mboxFixture "AttachmentContentNotYetWritten.mbox", Path.Combine(tempDir, "HalfWritten"))
+        File.Copy(mboxFixture "NoMessageId.mbox", Path.Combine(tempDir, "Ok"))
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        let account: DiscoveredMailAccount =
+            {
+                Id = testAccountId
+                ProfilePath = tempDir
+                DisplayName = "Test"
+                EmailAddresses = []
+                StoreFormat = Mbox
+                StoreDirectory = tempDir
+                StoreDirectoryExists = true
+                Folders = [ folder "HalfWritten"; folder "Ok" ]
+                CachedMessageCount = None
+            }
+
+        let lookupAccount: LookupAccount = fun _ -> Ok(Some account)
+
+        match MailFolderReader.read lookupAccount load save testAccountId noCutoff with
+        | Ok messages -> Assert.Equal(3, messages.Length) // two from HalfWritten, one from Ok
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder returns a maildir message whose attachment content is not yet on disk`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let inbox = Path.Combine(tempDir, "INBOX")
+        Directory.CreateDirectory(Path.Combine(inbox, "cur")) |> ignore
+
+        // Headers of the attachment part written, its base64 not yet - MimePart.Content is null.
+        File.WriteAllText(
+            Path.Combine(inbox, "cur", "1.halfwritten"),
+            "Message-ID: <maildir-halfwritten@example.com>\n"
+            + "From: billing@vendor.example.com\n"
+            + "Subject: Maildir attachment not yet written\n"
+            + "Date: Tue, 2 Jan 2024 00:00:00 +0000\n"
+            + "MIME-Version: 1.0\n"
+            + "Content-Type: multipart/mixed; boundary=\"BOUND\"\n"
+            + "\n"
+            + "--BOUND\n"
+            + "Content-Type: text/plain; charset=utf-8\n"
+            + "\n"
+            + "Invoice attached.\n"
+            + "\n"
+            + "--BOUND\n"
+            + "Content-Type: application/pdf; name=\"invoice-3003.pdf\"\n"
+            + "Content-Disposition: attachment; filename=\"invoice-3003.pdf\"\n"
+            + "Content-Transfer-Encoding: base64\n"
+            + "\n"
+        )
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        match readFolder load save testAccountId (folder "INBOX") tempDir Maildir noCutoff with
+        | Ok messages ->
+            let message = Assert.Single messages
+            Assert.Equal("<maildir-halfwritten@example.com>", message.SourceMessageId)
+            Assert.Equal("Maildir attachment not yet written", message.Subject)
+            Assert.Equal("billing@vendor.example.com", message.Sender)
+            Assert.Equal(DateTime(2024, 1, 2, 0, 0, 0), message.ReceivedAt)
+            Assert.Equal(Some "Invoice attached.\r\n", message.BodyText)
+            Assert.Equal(None, message.BodyHtml)
+            Assert.Empty message.Attachments
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
+
 [<Fact; Trait("Level", "Integration")>]
 let ``read continues past a locked folder and still returns the other folders' messages`` () =
     let tempDir = freshTempDirectory ()

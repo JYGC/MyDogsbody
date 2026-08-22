@@ -189,6 +189,10 @@ let private stripEnvelopeLine (bytes: byte[]) : byte[] =
 
     if firstNewline < 0 then [||] else latin1.GetBytes(text.Substring(firstNewline + 1))
 
+/// Decodes one attachment part's bytes. Only ever called for a part that HAS content - see
+/// `parseMessage`'s filter, which is load-bearing rather than defensive: MimeKit leaves
+/// `MimePart.Content` null for a part whose headers were parsed but whose body was not there,
+/// and this line dereferences it.
 let private toMailAttachment (part: MimePart) : MailAttachment =
     use content = new MemoryStream()
     part.Content.DecodeTo content
@@ -222,7 +226,25 @@ let private parseMessage (rfc822Bytes: byte[]) (headerBlock: string) : MailMessa
             message.Attachments
             |> Seq.choose (fun entity ->
                 match entity with
-                | :? MimePart as part -> Some(toMailAttachment part)
+                // A part whose headers are on disk but whose body is not has a NULL `Content`, and
+                // that is the ordinary state of an mbox while Thunderbird is flushing a message
+                // with an attachment: the part's headers go down before its base64 does. The
+                // message's own headers and their blank line are already written by then, so
+                // `readMboxFile`'s torn test (no header/body separator) passes it as complete and
+                // it reaches this line - where `toMailAttachment` used to dereference the null and
+                // throw a `NullReferenceException`. That is not a `FormatException`, so
+                // `tryParseMessage` did not hold it, and not an `IOException` or an
+                // `UnauthorizedAccessException`, so neither `readMboxFile` nor `readMaildirFolder`
+                // did either: it escaped `readFolder`, `read` and the whole API call, from
+                // signatures that say `Result<_, MailAccountError>`. Truncating one realistic
+                // invoice email at each of its 666 byte offsets reaches this state at 64 of them.
+                //
+                // Skipped rather than reported as an empty attachment: there are no bytes behind
+                // it, so handing the invoice pipeline a zero-byte "invoice.pdf" would turn "not
+                // written yet" into "this PDF is corrupt". The message around it is entirely
+                // readable and is still returned - the same instinct as the torn-message rule,
+                // which keeps everything before the tear.
+                | :? MimePart as part when not (isNull part.Content) -> Some(toMailAttachment part)
                 | _ -> None)
             |> Seq.toList
     }

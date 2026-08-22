@@ -1,0 +1,29 @@
+From alice@example.com Mon Jan  1 00:00:00 2024
+Message-ID: <written-1@example.com>
+From: alice@example.com
+To: bob@example.com
+Subject: A complete message
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This message is complete and must still be returned.
+
+From billing@vendor.example.com Tue Jan  2 00:00:00 2024
+Message-ID: <halfwritten-2@example.com>
+From: billing@vendor.example.com
+To: alice@example.com
+Subject: Attachment part not yet written
+Date: Tue, 2 Jan 2024 00:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUND"
+
+--BOUND
+Content-Type: text/plain; charset=utf-8
+
+Invoice attached.
+
+--BOUND
+Content-Type: application/pdf; name="invoice-2002.pdf"
+Content-Disposition: attachment; filename="invoice-2002.pdf"
+Content-Transfer-Encoding: base64
+
