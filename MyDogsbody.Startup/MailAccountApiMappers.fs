@@ -27,6 +27,7 @@ let toMailFolderUiType (folder: MailFolder) : MailFolderUiType =
 let toMailAccountUiType (account: DiscoveredMailAccount) : MailAccountUiType =
     {
         Id = MailAccountId.value account.Id
+        ProfilePath = account.ProfilePath
         DisplayName = account.DisplayName
         EmailAddresses = account.EmailAddresses
         StoreFormat = toStoreFormatUiString account.StoreFormat

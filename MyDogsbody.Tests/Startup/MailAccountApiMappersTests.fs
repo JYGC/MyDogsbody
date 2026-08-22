@@ -46,6 +46,7 @@ let ``toMailAccountUiType carries every field including a cached count`` () =
     let actual = MailAccountApiMappers.toMailAccountUiType account
 
     Assert.Equal(@"C:\profile|account1", actual.Id)
+    Assert.Equal(@"C:\profile", actual.ProfilePath)
     Assert.Equal("Alpha Mail", actual.DisplayName)
     Assert.Equal<string list>([ "alice@alpha.example.com" ], actual.EmailAddresses)
     Assert.Equal("Mbox", actual.StoreFormat)
@@ -74,6 +75,38 @@ let ``toMailAccountUiType maps Maildir to its UI string`` () =
 
     Assert.Equal("Maildir", actual.StoreFormat)
     Assert.Equal(None, actual.CachedMessageCount)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toMailAccountUiType keeps two profiles' copies of one account apart`` () =
+    // The account is byte-identical in every other field on purpose: a live profile beside a
+    // backup copy of it is one of the three shapes the walk is required to handle, so this is the
+    // ordinary case. If the mapper drops ProfilePath, the two UI records differ only in an Id the
+    // table does not render, and the user picking one for import is choosing blind.
+    let inProfile (profilePath: string) : DiscoveredMailAccount =
+        {
+            Id = MailAccountId.create $"{profilePath}|account1" |> valueOrFail
+            ProfilePath = profilePath
+            DisplayName = "Duplicated Mail"
+            EmailAddresses = [ "dup@example.com" ]
+            StoreFormat = Mbox
+            StoreDirectory = $@"{profilePath}\ImapMail\imap.dup.example.com"
+            StoreDirectoryExists = true
+            Folders = [ { RelativePath = "INBOX"; DisplayName = "INBOX"; SizeBytes = 10L; IsScannable = true } ]
+            CachedMessageCount = None
+        }
+
+    let live = MailAccountApiMappers.toMailAccountUiType (inProfile @"C:\profiles\live")
+    let backup = MailAccountApiMappers.toMailAccountUiType (inProfile @"C:\profiles\backup")
+
+    Assert.Equal(@"C:\profiles\live", live.ProfilePath)
+    Assert.Equal(@"C:\profiles\backup", backup.ProfilePath)
+    Assert.NotEqual<string>(live.ProfilePath, backup.ProfilePath)
+
+    // Everything else about them really is the same, which is what makes the profile the only
+    // thing separating them.
+    Assert.Equal<string>(live.DisplayName, backup.DisplayName)
+    Assert.Equal<string list>(live.EmailAddresses, backup.EmailAddresses)
+    Assert.Equal<string>(live.StoreFormat, backup.StoreFormat)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toDiscoveryResultUiType carries every field`` () =

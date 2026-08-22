@@ -44,6 +44,7 @@ let private withRealApi (test: MailAccountApi -> unit) =
 let private fakeAccount (id: string) : MailAccountUiType =
     {
         Id = id
+        ProfilePath = measuredShapeProfile
         DisplayName = $"Account {id}"
         EmailAddresses = [ $"{id}@example.com" ]
         StoreFormat = "Mbox"
@@ -200,6 +201,22 @@ let ``CountMessages returns a count, and GetAccounts reflects a cached count aft
         let accounts, _ = api.GetAccounts() |> okOrFail "GetAccounts"
         let account = accounts |> List.find (fun a -> a.Id = firstId)
         Assert.True(account.CachedMessageCount.IsSome))
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``every account GetAccounts returns names the profile it was discovered in`` (implementation: string) =
+    // requirements.md -> "Walking the chosen folder" (Q4.9): accounts are listed "qualified by the
+    // profile path they came from". `DiscoveredMailAccount` has carried `ProfilePath` since the
+    // first commit and `DiscoveredAccountEntity` persists it, but the top mapper dropped it - so
+    // the UI record, which is the whole of what the screen can see, had no way to tell one
+    // profile's copy of an account from another's.
+    withImplementation implementation (fun api ->
+        api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
+        api.ScanForAccounts() |> okOrFail "ScanForAccounts" |> ignore
+
+        let accounts, _ = api.GetAccounts() |> okOrFail "GetAccounts"
+        Assert.NotEmpty accounts
+        Assert.All(accounts, (fun a -> Assert.Equal(measuredShapeProfile, a.ProfilePath))))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]

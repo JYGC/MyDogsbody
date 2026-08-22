@@ -8,20 +8,20 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1050 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1054 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
   contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, round 3 a further
-  16, round 4 two more, round 5 twelve, round 6 three, round 7 two and round 8 ten — see per-level
-  figures below, reproduced with `--filter "Level=..."`):
+  16, round 4 two more, round 5 twelve, round 6 three, round 7 two, round 8 ten and round 9 four —
+  see per-level figures below, reproduced with `--filter "Level=..."`):
 
-  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 | Round 7 | Round 8 |
-  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-  | Unit | 532 | 544 | 554 | 556 | 559 | 559 | 560 | 560 |
-  | Integration | 198 | 205 | 209 | 209 | 216 | 219 | 219 | 222 |
-  | Contract | 232 | 233 | 235 | 235 | 236 | 236 | 236 | 242 |
-  | E2E | 22 | 23 | 23 | 23 | 24 | 24 | 25 | 26 |
-  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** | **1040** | **1050** |
+  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 | Round 7 | Round 8 | Round 9 |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Unit | 532 | 544 | 554 | 556 | 559 | 559 | 560 | 560 | 561 |
+  | Integration | 198 | 205 | 209 | 209 | 216 | 219 | 219 | 222 | 222 |
+  | Contract | 232 | 233 | 235 | 235 | 236 | 236 | 236 | 242 | 244 |
+  | E2E | 22 | 23 | 23 | 23 | 24 | 24 | 25 | 26 | 27 |
+  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** | **1040** | **1050** | **1054** |
 
   Round 4 adds two Unit tests and changes four existing ones rather than adding to them — its
   finding was that two integration tests were aimed at the wrong boundary, so retargeting them was
@@ -575,6 +575,94 @@ production — so nothing it returns can be wrong for a user today.
    `CLAUDE-project.md` said 1040, this file's *Gate* section and its per-round table still said 1038
    with no round-7 column, and `tasks.md` **11.2** still carried round 5's 1035. All three are back
    in step at the measured 1050. No behavioural change, so no red-first test.
+
+## Two defects PR #17's round-9 review found and fixed
+
+Round 9 read `a3a6edd` cold. Eight rounds had concentrated on `MailFolderReader` and, latterly, on
+the readers' entry conditions; this one re-measured round 8's guard and then spent its attention on
+the top boundary mapper and the screen, which had had the least.
+
+**Round 8's own work held up on re-measurement.** `accountWithReadableStore` is correct where it
+matters and its two judgement calls stand. Checking `Directory.Exists` live rather than reading the
+account's `StoreDirectoryExists` flag is right: the flag is a scan-time snapshot, the failure the
+guard is written for (a drive unplugged, a folder deleted) happens after the scan, and the message
+is in the present tense. An account whose store IS there and holds no folders still answers `Ok 0`,
+which is the half the guard must not swallow and which round 8 pinned with its own Integration test.
+`StoreDirectoryExists` is **not** dead — the table still disables the tick and prints "Configured,
+but its store directory is missing" from it — and the two can legitimately disagree, in the
+direction that makes the page more honest rather than less. Two limits are real but not worth
+widening the DU for: `Directory.Exists` answers `false` for a path that is a file, an unreadable
+directory or a broken junction as well as for one that is absent, so all four arrive as
+`StoreDirectoryMissing`; and a directory that disappears *between* the guard and the read degrades
+to the old `Ok 0` / `Ok []` in that window. Both are strictly smaller than the defect the guard
+closed. Skipping the Unit level there was justified: the whole of the decision is
+`Directory.Exists`, this repository puts anything touching the filesystem at Integration, and the
+only separable part (`lookupAccount` returning `None`) is a path that predates the guard.
+
+1. **Two profiles' copies of one account render as the same row twice.** requirements.md asks
+   twice for this and neither ask had any behaviour behind it: *Walking the chosen folder* — "WHEN
+   several profiles are found THE SYSTEM SHALL list all of their accounts, **qualified by the
+   profile path they came from**, so two profiles containing the same account are distinguishable
+   (Q4.9)" — and *Edge cases* — "WHEN two profiles declare accounts with the same email address THE
+   SYSTEM SHALL list both, **qualified by profile path**."
+
+   `ProfilePath` is carried the whole way and then dropped at the last hop.
+   `DiscoveredMailAccount` has declared it since the first commit, `ThunderbirdAccountReader` fills
+   it, `DiscoveredAccountEntity` persists it, `ThunderbirdEntityMappers` maps it both ways and
+   `ThunderbirdPersistedShapeTests` asserts its stored field name — and then
+   `MailAccountApiMappers.toMailAccountUiType`, the top boundary mapper, left it out, so
+   `MailAccountUiType` never had it and the screen could not see it. The unit test covering that
+   mapper is named `toMailAccountUiType carries every field` and did not carry this one.
+
+   The chosen folder holding a live profile **and a backup copy of it** is one of the three shapes
+   the walk is explicitly required to handle (requirements.md → *Walking the chosen folder*), so
+   this is the ordinary case rather than a contrived one. Both rows then carry the same display
+   name, the same address, the same format, the same folder count and the same size; the only
+   thing separating them is an `Id` the table does not render. The user is being asked to tick one
+   of them for import, and change #4 reads mail from whichever they tick — so picking the backup
+   instead of the live profile is silently possible, and nothing on the page could have told them
+   apart.
+
+   Fixed by carrying `ProfilePath` through `MailAccountUiType` and the top mapper, and printing it
+   under the account's name in the table, beside where "Configured, but its store directory is
+   missing" already goes.
+
+   | Level | Test | Red against `a3a6edd` |
+   | --- | --- | --- |
+   | E2E | `two profiles declaring the same account are told apart on the page by the profile they came from` | `Assert.Contains() Failure: Sub-string not found` — both accounts listed, both named "Duplicated Mail", neither profile path anywhere in the markup |
+   | Unit | `toMailAccountUiType keeps two profiles' copies of one account apart` | the field did not exist |
+   | Unit | `toMailAccountUiType carries every field including a cached count` | extended to assert the field it was named for |
+   | Contract | `every account GetAccounts returns names the profile it was discovered in` (real API **and** fake) | the field did not exist |
+
+   No new Integration test: nothing about storage changed — `ProfilePath` already round-trips
+   through `ThunderbirdStore` and is already asserted there and in the persisted-shape suite.
+
+2. **A test whose setup could silently not happen.** `ThunderbirdFolderScannerTests`' "scan records
+   an unreadable directory and continues the walk" denies itself access to a directory by spawning
+   `icacls`, and never looked at its exit code. If the deny does not apply, the directory is
+   readable, the walk correctly records nothing, and the test fails on its scanner assertions — so
+   a setup that did not happen is indistinguishable from a defect in the scanner. That is precisely
+   how it read when a full-suite run of this round hit it once. Both copies of that setup (the
+   scanner test and the E2E walk test) now assert `icacls` exited 0, naming the setup as the
+   failure when it is. No behavioural change, so no red-first test.
+
+## The intermittent failures, measured
+
+Round 9 measured the flake rate directly rather than describing it, 30 full-suite runs in all:
+
+| Tree | Runs | Failed runs | Cause |
+| --- | --- | --- | --- |
+| `a3a6edd` (before this round) | 14 | 1 | the LiteDB `BsonMapper.Global` race |
+| with this round's fix | 16 | 3 | two confirmed the same race; one was the `icacls` setup above |
+
+Every `BsonMapper` failure carries the same signature — `System.InvalidOperationException:
+Collection was modified; enumeration operation may not execute` out of `BsonMapper.SerializeObject`,
+raised at `ThunderbirdDatabaseContextModule.fs:16`, the warm-up line — and lands on whichever test
+happened to construct a context first. It is the pre-existing, documented race (CLAUDE-project.md →
+*Per-integration databases*), not anything this change introduced, and closing it needs a
+process-wide lock and its own change folder. **The rate is unchanged by this round**: the difference
+between 1-in-14 and 3-in-16 is well inside the noise for samples this size, and two of the three
+are that same race.
 
 ## Not implemented (Optional, deferred)
 

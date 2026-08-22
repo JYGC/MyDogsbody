@@ -16,6 +16,7 @@ let private failure message = MyDogsbodyException("test.action", message, Applic
 let private anAccount id : MailAccountUiType =
     {
         Id = id
+        ProfilePath = $"C:\\profiles\\{id}"
         DisplayName = $"Account {id}"
         EmailAddresses = [ $"{id}@example.com" ]
         StoreFormat = "Mbox"

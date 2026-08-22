@@ -74,6 +74,13 @@ let ``scan records an unreadable directory and continues the walk`` () =
         use denyProcess = Process.Start icacls
         denyProcess.WaitForExit()
 
+        // The deny is this test's entire premise: without it the directory is readable and the
+        // walk correctly records nothing, so the assertions below fail as though the SCANNER were
+        // at fault. icacls is an external process and its exit code was not being looked at, so a
+        // setup that did not happen was indistinguishable from a defect - which is exactly how it
+        // read when a full-suite run hit it. Fail on the real cause instead.
+        Assert.True(denyProcess.ExitCode = 0, $"icacls could not deny access to '{deniedDir}' (exit code {denyProcess.ExitCode}); the test setup, not the scanner, is what failed")
+
         try
             let outcome = ThunderbirdFolderScanner.scan root
 

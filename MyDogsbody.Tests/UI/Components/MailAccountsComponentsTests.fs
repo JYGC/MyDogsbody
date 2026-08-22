@@ -21,6 +21,7 @@ let private folder relativePath sizeBytes isScannable : MailFolderUiType =
 let private account (folders: MailFolderUiType list) : MailAccountUiType =
     {
         Id = "profile|account1"
+        ProfilePath = @"C:\profile"
         DisplayName = "Alpha Mail"
         EmailAddresses = [ "alpha@example.com" ]
         StoreFormat = "Mbox"

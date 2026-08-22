@@ -168,6 +168,17 @@ let mailAccountsBrowser (mailAccountsBrowserModule: MailAccountsBrowserModule) (
                             fragment {
                                 MudText''{ account.DisplayName }
 
+                                // Which profile this row came from. The chosen folder may hold a
+                                // live profile and a backup copy of it - one of the three shapes
+                                // the walk is required to handle - and two rows for the same
+                                // account are otherwise identical in every field the table shows,
+                                // while the user is being asked to pick one of them for import
+                                // (requirements.md -> "Walking the chosen folder", Q4.9).
+                                MudText''{
+                                    Typo Typo.caption
+                                    $"Profile: {account.ProfilePath}"
+                                }
+
                                 if not account.StoreDirectoryExists then
                                     MudText''{
                                         Color Color.Error

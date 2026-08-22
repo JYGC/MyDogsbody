@@ -277,6 +277,14 @@ let ``a walk hitting an unreadable directory lists it and the other accounts sti
         use denyProcess = Diagnostics.Process.Start icacls
         denyProcess.WaitForExit()
 
+        // Same reason as ThunderbirdFolderScannerTests' copy of this setup: if icacls did not
+        // apply the deny, the directory is readable, "could not be read" never appears, and the
+        // failure reads as a defect in the walk rather than in the test's own setup.
+        Assert.True(
+            denyProcess.ExitCode = 0,
+            $"icacls could not deny access to '{deniedDir}' (exit code {denyProcess.ExitCode}); the test setup, not the walk, is what failed"
+        )
+
         try
             withMailAccountsHarness (fun () -> None) (fun harness ->
                 let browserModule, rendered = renderBrowser harness (fun () -> None)
@@ -294,6 +302,71 @@ let ``a walk hitting an unreadable directory lists it and the other accounts sti
 
             use resetProcess = Diagnostics.Process.Start reset
             resetProcess.WaitForExit()
+    finally
+        Directory.Delete(root, true)
+
+/// One profile directory declaring exactly one account, whose every displayed field is fixed by
+/// the caller - so two of these differ in nothing the table renders except the profile they came
+/// from.
+let private writeDuplicateProfile (profileDir: string) =
+    Directory.CreateDirectory profileDir |> ignore
+
+    File.WriteAllText(
+        Path.Combine(profileDir, "prefs.js"),
+        "user_pref(\"mail.account.lastKey\", 1);\n"
+        + "user_pref(\"mail.accountmanager.accounts\", \"account1\");\n"
+        + "user_pref(\"mail.account.account1.identities\", \"id1\");\n"
+        + "user_pref(\"mail.account.account1.server\", \"server1\");\n"
+        + "user_pref(\"mail.server.server1.hostname\", \"imap.dup.example.com\");\n"
+        + "user_pref(\"mail.server.server1.name\", \"Duplicated Mail\");\n"
+        + "user_pref(\"mail.server.server1.storeContractID\", \"@mozilla.org/msgstore/berkeleystore;1\");\n"
+        + "user_pref(\"mail.server.server1.directory-rel\", \"[ProfD]ImapMail/imap.dup.example.com\");\n"
+        + "user_pref(\"mail.identity.id1.useremail\", \"dup@example.com\");\n"
+    )
+
+    let storeDir = Path.Combine(profileDir, "ImapMail", "imap.dup.example.com")
+    Directory.CreateDirectory storeDir |> ignore
+    File.WriteAllText(Path.Combine(storeDir, "INBOX"), "")
+
+[<Fact; Trait("Level", "E2E")>]
+let ``two profiles declaring the same account are told apart on the page by the profile they came from`` () =
+    // requirements.md -> "Walking the chosen folder": "WHEN several profiles are found THE SYSTEM
+    // SHALL list all of their accounts, QUALIFIED BY THE PROFILE PATH THEY CAME FROM, so two
+    // profiles containing the same account are distinguishable (Q4.9)" - and again under "Edge
+    // cases": "WHEN two profiles declare accounts with the same email address THE SYSTEM SHALL list
+    // both, qualified by profile path."
+    //
+    // The chosen folder being "a backup copy" alongside the live profile is one of the three
+    // shapes the walk is required to handle, so this is the ordinary case, not a contrived one.
+    // Both rows carry the same display name, the same address, the same format, the same folder
+    // count and the same size; the only thing that separates them is the profile - and the user is
+    // being asked to pick ONE of them for import.
+    let root = Path.Combine(Path.GetTempPath(), $"mdb-e2e-{Guid.NewGuid()}")
+    Directory.CreateDirectory root |> ignore
+
+    try
+        let liveProfile = Path.Combine(root, "live")
+        let backupProfile = Path.Combine(root, "backup")
+        writeDuplicateProfile liveProfile
+        writeDuplicateProfile backupProfile
+
+        withMailAccountsHarness (fun () -> None) (fun harness ->
+            let browserModule, rendered = renderBrowser harness (fun () -> None)
+            browserModule.SetProfileRoot root
+            browserModule.ScanForAccounts()
+
+            rendered.WaitForAssertion(fun () ->
+                // Both are listed, as they must be...
+                let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+                Assert.Equal(2, accounts.Length)
+                Assert.All(accounts, fun a -> Assert.Equal("Duplicated Mail", a.DisplayName))
+
+                // ...and the page says which profile each one came from, so the two rows are not
+                // the same row twice.
+                Assert.Contains(liveProfile, rendered.Markup)
+                Assert.Contains(backupProfile, rendered.Markup))
+
+            Assert.Empty harness.Logged)
     finally
         Directory.Delete(root, true)
 
