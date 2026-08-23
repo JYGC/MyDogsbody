@@ -1,0 +1,8 @@
+From: sender@maildir.example.com
+To: mallory@maildir.example.com
+Subject: An unread message in new/
+Date: Mon, 05 Jan 2026 09:10:00 +0000
+Message-ID: <maildir-new-1@maildir.example.com>
+Content-Type: text/plain; charset=utf-8
+
+A message still in new/ (unread), per the standard cur/new/tmp layout.

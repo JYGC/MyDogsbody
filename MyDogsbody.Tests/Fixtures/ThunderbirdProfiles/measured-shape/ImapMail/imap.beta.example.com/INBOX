@@ -1,0 +1,13 @@
+From erin@beta.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <beta-inbox-1@beta.example.com>
+From: billing@vendor2.example.com
+To: erin@beta.example.com
+Subject: Statement ready
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This account (account9) has a stale absolute `directory` value pointing at a user path that no
+longer exists; resolution must use `directory-rel` instead.
+

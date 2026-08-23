@@ -15,6 +15,7 @@ open System
 open Microsoft.Extensions.DependencyInjection
 open MyDogsbody.Builders
 open MyDogsbody.Integrations.Credentials.Database
+open MyDogsbody.Integrations.Thunderbird.Database
 open MyDogsbody.Logging.Database
 open MyDogsbody.Logging.Types
 open MyDogsbody.Logging.UseCases
@@ -87,6 +88,17 @@ let supplierApi: SupplierApi =
 let templateApi: TemplateApi =
     TemplateApiFactory.createTemplateApi handleError mainDatabaseContext
 
+let private thunderbirdDatabasePath = "Thunderbird.db"
+let private thunderbirdDatabaseConnectionType = "shared"
+
+let private thunderbirdDatabaseContext =
+    ThunderbirdDatabaseContextModule.getDatabaseContext
+        thunderbirdDatabasePath
+        thunderbirdDatabaseConnectionType
+
+let mailAccountApi: MailAccountApi =
+    MailAccountApiFactory.createMailAccountApi handleError thunderbirdDatabaseContext
+
 /// The host's entire share of the wiring. Every registration is expressed here, in F#, so
 /// MainWindow.xaml.cs states which services exist without stating how they are built.
 let registerServices (services: IServiceCollection) : IServiceCollection =
@@ -94,3 +106,4 @@ let registerServices (services: IServiceCollection) : IServiceCollection =
         .AddSingleton<CredentialApi>(credentialApi)
         .AddSingleton<SupplierApi>(supplierApi)
         .AddSingleton<TemplateApi>(templateApi)
+        .AddSingleton<MailAccountApi>(mailAccountApi)

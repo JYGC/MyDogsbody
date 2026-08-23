@@ -1,0 +1,13 @@
+From frank@gamma.example.com Mon Jan 05 09:00:00 2026
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+Message-ID: <gamma-inbox-1@gamma.example.com>
+From: someone@example.com
+To: frank@gamma.example.com
+Subject: Hello Frank
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+This account (account10) has two identities: frank@gamma.example.com and
+frank.alt@gamma.example.com.
+

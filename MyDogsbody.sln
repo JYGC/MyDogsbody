@@ -49,6 +49,10 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Startup", "MyDog
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Domain", "MyDogsbody.Domain\MyDogsbody.Domain.fsproj", "{FFF11430-BC68-485F-9257-7EF6C07D2103}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MyDogsbody.Integrations.Thunderbird.Database.Models", "MyDogsbody.Integrations.Thunderbird.Database.Models\MyDogsbody.Integrations.Thunderbird.Database.Models.csproj", "{054601D9-432A-4AD4-8595-31C6A78ED2AE}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Integrations.Thunderbird", "MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj", "{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -335,6 +339,30 @@ Global
 		{FFF11430-BC68-485F-9257-7EF6C07D2103}.Release|x64.Build.0 = Release|Any CPU
 		{FFF11430-BC68-485F-9257-7EF6C07D2103}.Release|x86.ActiveCfg = Release|Any CPU
 		{FFF11430-BC68-485F-9257-7EF6C07D2103}.Release|x86.Build.0 = Release|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Debug|x64.Build.0 = Debug|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Debug|x86.Build.0 = Debug|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Release|x64.ActiveCfg = Release|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Release|x64.Build.0 = Release|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Release|x86.ActiveCfg = Release|Any CPU
+		{054601D9-432A-4AD4-8595-31C6A78ED2AE}.Release|x86.Build.0 = Release|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Debug|x64.Build.0 = Debug|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Debug|x86.Build.0 = Debug|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Release|x64.ActiveCfg = Release|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Release|x64.Build.0 = Release|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Release|x86.ActiveCfg = Release|Any CPU
+		{9E9DA3BC-A8C2-46B9-B801-5BE3264AE319}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

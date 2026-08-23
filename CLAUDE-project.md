@@ -18,10 +18,11 @@ One solution, `MyDogsbody.sln`. Every project targets `net9.0` except the WPF ho
 
 | Ring | Project | Holds |
 | --- | --- | --- |
-| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/`, `Documents/` and `Suppliers/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
+| **Centre** | `MyDogsbody.Domain` | The pure domain: `Credentials/`, `Documents/`, `Suppliers/`, `InvoiceTemplates/`, `Invoices/` and `MailAccounts/`, each holding `<Area>Types.fs` (constrained types, stage types, the error DU, the dependency function types) and one `<Workflow>Workflow.fs` per workflow. Plus `Result.fs`, its own generic `result` builder. References **no other project**, and a build target in its `.fsproj` fails the build if one is ever added |
 | Outer ring | `MyDogsbody.Integrations.Credentials` (+ `.Database.Models`, C#) | LiteDB context, `CredentialEntityMappers.fs` (the bottom mapper), `CredentialStore.fs` (the adapter), `Credential` entity. An integration is an **adapter**: it implements the function types the domain declares |
 | Outer ring | `MyDogsbody.Integrations.Pdf` | `PdfDocumentReader.fs` — PdfPig behind the domain's `ReadDocumentContent` |
-| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` / `SupplierApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` / `SupplierApiFactory.fs` (`createCredentialApi` / `createSupplierApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, the main SQLite context, migration run, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
+| Outer ring | `MyDogsbody.Integrations.Thunderbird` (+ `.Database.Models`, C#) | `ThunderbirdFolderScanner.fs`, `ThunderbirdAccountReader.fs`, `MailFolderEnumerator.fs`, `MailFolderReader.fs` (mbox/maildir discovery and reading — MimeKit, the only project that takes it as a dependency), `ThunderbirdStore.fs` (LiteDB, the integration's own facts), `ThunderbirdEntityMappers.fs`. `ThunderbirdFolderScanner`/`ThunderbirdAccountReader`/`MailFolderEnumerator`/`MailFolderReader` construct `MailAccountError` directly rather than going through `handleError` — see *Errors* below for why |
+| Composition | `MyDogsbody.Startup` | The composition root. `CredentialApiMappers.fs` / `SupplierApiMappers.fs` / `MailAccountApiMappers.fs` (domain ⇄ UI and the error translation, pure), `CredentialApiFactory.fs` / `SupplierApiFactory.fs` / `MailAccountApiFactory.fs` (`createCredentialApi` / `createSupplierApi` / `createMailAccountApi`, dependencies as parameters), `Startup.fs` (LiteDB contexts, the main SQLite context, migration run, shared `handleError`, `registerServices`). Plugs real adapters into workflows and maps between the two error types |
 | Host | `MyDogsbody` (C#) | WPF `MainWindow` + `BlazorWebView`, `Frame.razor` (MudBlazor providers + theme), the DI registration, `wwwroot/` |
 | UI | `MyDogsbody.UI.Portal` | `Shell.fs` (routes), `Pages/`, `Components/`, `ModuleCreators/`, `Layout/` |
 | UI | `MyDogsbody.UI.Types` | UI-facing records (`IntegrationCredentialUiType*`, `SupplierUiType*`, `SupplierApi`) and `Modules/` adaptive-state records |
@@ -63,7 +64,7 @@ dotnet build MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj   # fastest loop w
 dotnet run --project MyDogsbody\MyDogsbody.csproj   # launches the WPF app (Windows only, net9.0-windows)
 ```
 
-`Logging.db`, `Credentials.db` and `MyDogsbody.db` are created relative to the process working directory. Measured directly while closing `invoice-ledger-foundation`: running the command above from the repository root (as written) puts all three **at the repository root**, not under `bin\Debug\net9.0-windows\` — `dotnet run` does not change directory into the build output before launching the app. They are gitignore'd nowhere in particular, so delete them after a manual test rather than leaving them for `git status` to trip over.
+`Logging.db`, `Credentials.db`, `MyDogsbody.db` and `Thunderbird.db` are created relative to the process working directory. Measured directly while closing `invoice-ledger-foundation`: running the command above from the repository root (as written) puts all of them **at the repository root**, not under `bin\Debug\net9.0-windows\` — `dotnet run` does not change directory into the build output before launching the app. They are gitignore'd nowhere in particular, so delete them after a manual test rather than leaving them for `git status` to trip over. (`Thunderbird.db` joined the list with `thunderbird-account-selection`; a change that adds a per-integration store adds a file here too, so add it to this sentence in the same change.)
 
 ### Migrate (main database)
 
@@ -94,7 +95,7 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **399 tests — 162 Unit, 74 Integration, 146 Contract, 17 E2E**, zero skips. If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1061 tests — 564 Unit, 223 Integration, 246 Contract, 28 E2E**, zero skips (measured against `thunderbird-account-selection`'s actual head commit, via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
 
 If you see an intermittent failure, do not re-run until it passes. **There is one known flake**, in any test that constructs a LiteDB context: LiteDB's global `BsonMapper` still has a first-use race that the documented warm-up narrows but does not close — see *Per-integration databases*, which carries the captured stack trace. Anything else intermittent is yours.
 
@@ -151,7 +152,7 @@ Covers the outer ring against real storage: adapters/repositories, `*DatabaseCon
 **LiteDB stores (each integration's, and the log store):**
 
 - Fresh temp database per test — `Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")`, `connection=direct`, deleted in `try/finally`. `CredentialStoreTests.withStore` demonstrates the shape. Production uses `shared`; if a change touches concurrent access, pin that mode explicitly.
-- **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db`, `Credentials.db` and `MyDogsbody.db` (and run its migrations) in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways per API: test `CredentialApiMappers`/`SupplierApiMappers` and `CredentialApiFactory`/`SupplierApiFactory` — all four are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
+- **Never let a test reach `Startup.Startup`.** Its module-level `let` bindings open `Logging.db`, `Credentials.db`, `MyDogsbody.db` and `Thunderbird.db` (and run its migrations) in the process working directory the moment anything in the module is touched. That is why the composition root is split three ways per API: test `CredentialApiMappers`/`SupplierApiMappers` and `CredentialApiFactory`/`SupplierApiFactory` — all four are free of module-level I/O and take their dependencies as parameters — and leave `Startup.fs` alone. Keep any new composition the same shape.
 - **Both context records carry a `Dispose`**, so call it before deleting the temp file — Windows keeps a LiteDB file locked until the handle is released. `CredentialsDatabaseContextModuleTests` asserts the delete actually succeeds afterwards.
 - Required round-trips: insert → `getAll` returns the row with `ObjectId` surfaced as the `Id` string; update → re-read reflects the new values.
 - `MyDogsbody.Tests` **does** reference `MyDogsbody.Logging`, because the log store's repository and use cases are tested against a temp file like any other LiteDB store. Nothing reaches the `Logging.db` in the working directory; a test that wants to prove *whether something was logged* passes a recording `HandleErrorBuilder` instead.
@@ -207,10 +208,10 @@ The migration is **done**. The `architecture-compliance` change created `MyDogsb
 
 | | Specified | Built today |
 | --- | --- | --- |
-| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/`, `Documents/` and `Suppliers/` |
+| `MyDogsbody.Domain` | The centre of everything | ✅ exists, references nothing, holds `Credentials/`, `Documents/`, `Suppliers/`, `InvoiceTemplates/`, `Invoices/` and `MailAccounts/` |
 | `MyDogsbody.Spine` | Gone — pipeline moves to `Domain`, wiring to `Startup` | ✅ deleted |
-| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 per area — `CredentialEntityMappers`/`CredentialApiMappers`, `SupplierRecordMappers`/`SupplierApiMappers` |
-| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError`, `SupplierError` |
+| DTO hops per feature | 2 mappers, both at the edges | ✅ 2 per area — e.g. `CredentialEntityMappers`/`CredentialApiMappers`, `SupplierRecordMappers`/`SupplierApiMappers`, `ThunderbirdEntityMappers`/`MailAccountApiMappers` |
+| Domain error type | A DU per workflow area | ✅ `CredentialError`, `DocumentError`, `SupplierError`, `MailAccountError`, and the rest |
 | Store in a core signature | Never | ✅ never — the domain names no store type |
 
 What is **not** built, and is a status rather than a violation: only the error log type exists in the log database (see *Log database*). The main SQLite database's own "designed but not wired in" gap closed with `invoice-ledger-foundation` — see *Storage → Main database*.
@@ -386,6 +387,8 @@ let linkAccount (input: UnlinkedAccount) : Result<LinkedAccount, MyDogsbodyExcep
 **`Result` is not collapsed here.** `CredentialApi` returns `Result<_, MyDogsbodyException>` and the UI decides what a failure looks like (`CredentialsBrowserModule.ErrorAval` → `MudAlert`). Do not reintroduce `|> ignore` on writes or `failwith` on reads.
 
 Adding a feature: declare its types, dependency function types and workflows in `MyDogsbody.Domain`; write the adapters in the integration; declare the API record in `MyDogsbody.UI.Types`; bind it all in a `*ApiFactory.fs`; partially apply in `Startup.fs` and register in `registerServices`. `MainWindow.xaml.cs` should not change. The DI container there exists only to hand the UI an API record.
+
+**One sanctioned exception:** the WPF host now also supplies a `FolderPicker` (`unit -> string option`, `MyDogsbody.UI.Types`) — the domain never opens dialogs, so a folder-choosing capability cannot be built at the composition root the way an API record is. `MainWindow.xaml.cs` constructs one from `Microsoft.Win32.OpenFolderDialog` and registers it directly, alongside (not instead of) `Startup.registerServices`. This was the `thunderbird-account-selection` change's one change to the host, and it should stay that — one function, one registration. Two F#/C# interop traps worth knowing before touching this again: `FolderPicker` is a type *abbreviation*, erased at compile time, so C# has no `FolderPicker` type to reference — register under the erased CLR type instead (`FSharpFunc<Unit, FSharpOption<string>>`), which is what the F# side's `html.inject (fun (picker: FolderPicker) -> ...)` actually resolves against; and a function returning another function (`Func<string> -> FolderPicker`) compiles as a curry-flattened multi-argument CLR method unless built via `FSharpFunc<_,_>.FromConverter` — see `MyDogsbody.UI.Types/FolderPicker.fs`.
 
 ### UI (Fun.Blazor + MudBlazor + FSharp.Data.Adaptive)
 

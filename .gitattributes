@@ -1,0 +1,13 @@
+# The Thunderbird test fixtures (mbox files, prefs.js files, and the extensionless mbox-format
+# folder files under ThunderbirdProfiles/) must never have their line endings touched by git,
+# regardless of a checkout's core.autocrlf setting. A fixture is a byte-exact input: several
+# tests assert exact byte offsets and exact message counts, so a checkout that rewrites LF to
+# CRLF changes what is being asserted rather than merely reformatting it.
+#
+# This rule originally existed because MailFolderReader.fs's mbox parser recognised only a
+# literal "\n\n" header/body separator, so a CRLF checkout made every test that read one fail.
+# That was the parser's defect, not the fixtures' - it dropped real CRLF messages in production
+# too, and PR #17's round-2 review fixed it (headerBlockAndRest now accepts both separators).
+# The rule stays because byte-exact fixtures are still what the offset tests need.
+MyDogsbody.Tests/Fixtures/ThunderbirdProfiles/** -text
+MyDogsbody.Tests/Fixtures/Mbox/** -text
