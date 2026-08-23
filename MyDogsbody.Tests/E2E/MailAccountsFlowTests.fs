@@ -239,6 +239,53 @@ let ``the accounts table states each account's on-disk size and what a scan of i
         Assert.Contains($"{MailAccountsComponents.formatSizeBytes scannable} to scan", rendered.Markup))
 
 [<Fact; Trait("Level", "E2E")>]
+let ``a message count survives the next scan and keeps the time it was taken`` () =
+    // The two buttons sit on the same page and the cheap one silently undid the expensive one:
+    // "Count messages" is a header pass the measurement puts at *minutes* on the real profile
+    // (design.md -> Decisions taken #4), and pressing "Scan for accounts" afterwards - the ordinary
+    // way to pick up a folder added in Thunderbird - put the column back to "Not counted yet" with
+    // nothing on screen to say why.
+    withMailAccountsHarness (fun () -> None) (fun harness ->
+        let browserModule, rendered = renderBrowser harness (fun () -> None)
+        browserModule.SetProfileRoot measuredShapeProfile
+        browserModule.ScanForAccounts()
+
+        rendered.WaitForAssertion(fun () -> Assert.Contains("Alpha Mail", rendered.Markup))
+
+        let alphaId =
+            let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+            (accounts |> List.find (fun a -> a.DisplayName = "Alpha Mail")).Id
+
+        browserModule.CountMessages alphaId
+
+        // The figure the fixture's alpha account actually holds, rendered with its timestamp.
+        let counted =
+            let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+            accounts |> List.find (fun a -> a.Id = alphaId)
+
+        let takenAt =
+            match counted.CachedMessageCount with
+            | Some(4, takenAt) -> takenAt
+            | other -> failwith $"expected a cached count of 4 after Count messages, got {other}"
+
+        let rendersAs = $"4 (as of {takenAt:g})"
+        rendered.WaitForAssertion(fun () -> Assert.Contains(rendersAs, rendered.Markup))
+
+        browserModule.ScanForAccounts()
+
+        rendered.WaitForAssertion(fun () ->
+            // Still the same count, still the same timestamp - the scan neither dropped it nor
+            // silently re-timed a reading it did not take. (The other nine fixture accounts do
+            // still read "Not counted yet", correctly: nothing has counted them.)
+            Assert.Contains(rendersAs, rendered.Markup)
+
+            let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
+            let alphaAfter = accounts |> List.find (fun a -> a.Id = alphaId)
+            Assert.Equal(Some(4, takenAt), alphaAfter.CachedMessageCount))
+
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``a walk hitting an unreadable directory lists it and the other accounts still appear`` () =
     let root = Path.Combine(Path.GetTempPath(), $"mdb-e2e-{Guid.NewGuid()}")
     Directory.CreateDirectory root |> ignore

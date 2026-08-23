@@ -180,6 +180,48 @@ let ``CountMessages runs a headers-only pass and caches the result, visible on t
         | None -> Assert.Fail("Expected a cached message count after CountMessages"))
 
 [<Fact; Trait("Level", "Integration")>]
+let ``a rescan keeps the cached count of an account it finds again`` () =
+    // design.md -> Decisions taken #4 puts a header pass over the real profile at *minutes*, which
+    // is why the count is a user-triggered action cached with its timestamp rather than something
+    // the page computes. Scanning again is the cheap neighbouring button on the same page, and it
+    // discarded that minutes-long result for an account that is still there - the column went back
+    // to "Not counted yet" with nothing said. The timestamp exists precisely so a stale count is
+    // still worth showing (requirements.md: "state when it was taken, because the count is a
+    // snapshot and the mailbox keeps growing"); throwing the count away removes the thing the
+    // timestamp is for.
+    withApi (fun api ->
+        api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
+        api.ScanForAccounts() |> okOrFail "ScanForAccounts 1" |> ignore
+
+        Assert.Equal(4, api.CountMessages alphaAccountId |> okOrFail "CountMessages")
+
+        let accountsBefore, _ = api.GetAccounts() |> okOrFail "GetAccounts before"
+        let alphaBefore = accountsBefore |> List.find (fun a -> a.Id = alphaAccountId)
+
+        let takenAt =
+            match alphaBefore.CachedMessageCount with
+            | Some(_, takenAt) -> takenAt
+            | None -> failwith "Test setup: expected a cached count before the rescan"
+
+        api.ScanForAccounts() |> okOrFail "ScanForAccounts 2" |> ignore
+
+        let accountsAfter, _ = api.GetAccounts() |> okOrFail "GetAccounts after"
+        let alphaAfter = accountsAfter |> List.find (fun a -> a.Id = alphaAccountId)
+
+        match alphaAfter.CachedMessageCount with
+        | Some(count, stillTakenAt) ->
+            Assert.Equal(4, count)
+            // The same reading, not a fresh one - the rescan must not silently re-time a count it
+            // did not take.
+            Assert.Equal(takenAt, stillTakenAt)
+        | None -> Assert.Fail("The rescan discarded the cached message count of an account it found again")
+
+        // Everything else about the row still comes from the fresh scan.
+        Assert.Equal("Alpha Mail", alphaAfter.DisplayName)
+        Assert.Equal(measuredShapeProfile, alphaAfter.ProfilePath)
+        Assert.True alphaAfter.StoreDirectoryExists)
+
+[<Fact; Trait("Level", "Integration")>]
 let ``ClearWatermarks succeeds for a known account`` () =
     withApi (fun api ->
         api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"

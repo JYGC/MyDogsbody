@@ -385,12 +385,12 @@ written against the format documentation instead — which is what the measureme
 
 - [x] **11.1** `dotnet build MyDogsbody.sln` — zero errors.
 - [x] **11.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-      *Totals:* 561 Unit + 222 Integration + 244 Contract + 27 E2E = **1054**, zero failures, zero
+      *Totals:* 564 Unit + 223 Integration + 246 Contract + 28 E2E = **1061**, zero failures, zero
       skips (full-suite run confirmed clean after the known LiteDB `BsonMapper` warm-up race —
       see Phase 9.3's note — was hit and cleared on retry; re-measured during PR #17's round-1
       review-fix, which found the count first recorded here undercounted the committed suite, and
       raised again by PR #17's round-2 review-fix (+21), round-3 (+16), round-4 (+2), round-5
-      (+12), round-6 (+3), round-7 (+2), round-8 (+10) and round-9 (+4) — see `outcome.md`'s *Gate* section,
+      (+12), round-6 (+3), round-7 (+2), round-8 (+10), round-9 (+4) and round-10 (+7) — see `outcome.md`'s *Gate* section,
       which carries the per-round table. Round 4's finding was that this line had been left at
       round 2's figure while the same figure was corrected in `outcome.md` and
       `CLAUDE-project.md`, and round 8 found the same three-way drift again; keep all three in

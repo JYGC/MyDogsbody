@@ -8,20 +8,20 @@ Change **#3 of 7**. See [`requirements.md`](requirements.md), [`design.md`](desi
 - `dotnet build MyDogsbody.sln` — **0 errors**, 2 pre-existing warnings (both in
   `MyDogsbody.Tests`, neither touched by this change: `FS0760` in `PdfDocumentReaderTests.fs`,
   `FS0020` in `CredentialDependencyContractTests.fs`).
-- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1054 tests, 0 failures, 0 skips**, all
+- `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` — **1061 tests, 0 failures, 0 skips**, all
   four levels present (re-measured during PR #17's round-1 review-fix; the count recorded here at
   the time this change was first closed, 878, undercounted what the committed test project actually
   contains. PR #17's round-2 review-fix then added 21 tests with its five fixes, round 3 a further
-  16, round 4 two more, round 5 twelve, round 6 three, round 7 two, round 8 ten and round 9 four —
-  see per-level figures below, reproduced with `--filter "Level=..."`):
+  16, round 4 two more, round 5 twelve, round 6 three, round 7 two, round 8 ten, round 9 four and
+  round 10 seven — see per-level figures below, reproduced with `--filter "Level=..."`):
 
-  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 | Round 7 | Round 8 | Round 9 |
-  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-  | Unit | 532 | 544 | 554 | 556 | 559 | 559 | 560 | 560 | 561 |
-  | Integration | 198 | 205 | 209 | 209 | 216 | 219 | 219 | 222 | 222 |
-  | Contract | 232 | 233 | 235 | 235 | 236 | 236 | 236 | 242 | 244 |
-  | E2E | 22 | 23 | 23 | 23 | 24 | 24 | 25 | 26 | 27 |
-  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** | **1040** | **1050** | **1054** |
+  | Level | Round 1 | Round 2 | Round 3 | Round 4 | Round 5 | Round 6 | Round 7 | Round 8 | Round 9 | Round 10 |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Unit | 532 | 544 | 554 | 556 | 559 | 559 | 560 | 560 | 561 | 564 |
+  | Integration | 198 | 205 | 209 | 209 | 216 | 219 | 219 | 222 | 222 | 223 |
+  | Contract | 232 | 233 | 235 | 235 | 236 | 236 | 236 | 242 | 244 | 246 |
+  | E2E | 22 | 23 | 23 | 23 | 24 | 24 | 25 | 26 | 27 | 28 |
+  | **Total** | **984** | **1005** | **1021** | **1023** | **1035** | **1038** | **1040** | **1050** | **1054** | **1061** |
 
   Round 4 adds two Unit tests and changes four existing ones rather than adding to them — its
   finding was that two integration tests were aimed at the wrong boundary, so retargeting them was
@@ -645,6 +645,73 @@ only separable part (`lookupAccount` returning `None`) is a path that predates t
    how it read when a full-suite run of this round hit it once. Both copies of that setup (the
    scanner test and the E2E walk test) now assert `icacls` exited 0, naming the setup as the
    failure when it is. No behavioural change, so no red-first test.
+
+## One defect PR #17's round-10 review found and fixed
+
+Round 10 read `0071d5c` cold — nothing had reviewed it. It re-checked round 9's own work and then
+spent its attention on the areas nine rounds had touched least: `ThunderbirdAccountReader` and
+prefs.js parsing, `ThunderbirdStore`, the factory's error translation in both directions, and the
+four domain workflows.
+
+**Round 9's own work held up.** Both boundary mappers were re-checked field-for-field in both
+directions and are now complete: `ThunderbirdEntityMappers` maps all nine `DiscoveredMailAccount`
+fields (`Folders` deliberately excepted — it lives in its own collection and is supplied by
+`ThunderbirdStore`'s join), all four `MailFolder` fields, and all three `FolderWatermark` fields;
+`MailAccountApiMappers` maps all nine `MailAccountUiType` fields, all four `MailFolderUiType`
+fields, and all four `DiscoveryResultUiType` fields. The new Contract row does run against the real
+API *and* the fake. The `ProfilePath` caption renders safely for an empty or missing path (a
+`MudText` caption reading "Profile: ") and wraps for a long one.
+
+Two things that look like the same defect were checked and are **not**: `NoAccountSelected` is
+declared, mapped and unit-tested here with no production line constructing it — but
+`docs/changes/invoice-extraction/design.md` and its `tasks.md` construct it, the same deliberate
+forward declaration as `ReadMailFolder`, and requirements.md's "so a *later* scan can refuse" says
+so. And `CachedMessageCountTakenAt` is written as `DateTime.UtcNow` into a LiteDB `DateTime?`
+column, which round 3 established comes back as `DateTimeKind.Local`; the *instant* survives, so
+`$"{takenAt:g}"` renders the correct local wall-clock time, and `ThunderbirdStoreTests` already
+pins that with `Assert.Equal(takenAt, storedAt.ToUniversalTime())`.
+
+1. **A scan silently discarded a message count the user had waited minutes for.**
+   design.md → *Decisions taken #4* puts a header pass over the real profile at *minutes*, which is
+   the whole reason the count is a user-triggered action cached with its timestamp rather than
+   something the page computes. But a scan re-reads `prefs.js` and re-enumerates folders; it never
+   counts messages, so `ThunderbirdAccountReader` reports every account with
+   `CachedMessageCount = None` — and `ScanForMailAccountsWorkflow` handed that straight to
+   `saveMailAccounts`, which "replaces the previous set of accounts and folders rather than
+   accumulating". The figure was therefore thrown away for an account the scan had **just found
+   again**, and the column went back to "Not counted yet" with nothing on screen to say why.
+
+   The two buttons sit on the same page, so the cheap one silently undid the expensive one:
+   *Scan for accounts* is the ordinary way to pick up a folder added in Thunderbird, and pressing it
+   cost the user another minutes-long pass with no warning. requirements.md's "WHEN a cached message
+   count is displayed THE SYSTEM SHALL state when it was taken, because the count is a snapshot and
+   the mailbox keeps growing" only means anything if a stale count survives to be stated — the
+   timestamp exists precisely so an old reading is still worth showing, and discarding the reading
+   removes the thing the timestamp is for. The codebase already treats the count as independent of
+   the scan-replace cycle: `ThunderbirdStore.updateCachedMessageCount` exists solely to update it
+   *in place*, "leaving its folders untouched — unlike `saveMailAccounts`, which replaces the whole
+   set".
+
+   Fixed in the workflow, not the store: this is a decision about reconciling stored state against
+   fresh discovery, which is exactly what `reconcileSelection` beside it already is, and it is
+   unit-testable with lambdas. `scanForMailAccounts` takes `LoadMailAccounts` as a new leading
+   dependency and a private `carryCachedCounts` copies the count forward **by id, and only the
+   count** — every other field is the fresh scan's answer, an account the scan no longer finds is
+   not resurrected, and a discovery that somehow arrived with a count of its own keeps it. The
+   returned `DiscoveryResult.Accounts` carries the counts too, so what the page is handed agrees
+   with what was stored.
+
+   Red first at Integration (`a rescan keeps the cached count of an account it finds again` —
+   "The rescan discarded the cached message count of an account it found again"), plus three Unit
+   tests on the workflow (the count carried with every other field asserted as the *fresh* one; a
+   stored account the scan no longer finds not resurrected; the store's error returned with nothing
+   saved), a Contract row on `MailAccountApi`, and an E2E flow asserting the rendered
+   "4 (as of …)" survives the second scan with the same timestamp.
+
+   **The Contract row caught the fake drifting**, which is what the shared-suite rule is for: the
+   in-memory fake rebuilt its ten accounts on every `ScanForAccounts`, so it discarded the count the
+   same way the real API used to. It failed red (`Expected: Some((4, …))  Actual: null`) while the
+   real API passed, and now applies the same carry-forward rule.
 
 ## The intermittent failures, measured
 

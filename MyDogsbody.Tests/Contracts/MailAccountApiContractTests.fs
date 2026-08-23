@@ -78,8 +78,28 @@ let private withFakeApi (test: MailAccountApi -> unit) =
                     match profileRoot with
                     | None -> fail ActionNames.MyDogsbody.Startup.MailAccountApi.scanForAccounts "No Thunderbird profile folder has been chosen yet."
                     | Some path when path = measuredShapeProfile ->
+                        // The same rule ScanForMailAccountsWorkflow applies in the real API: a scan
+                        // re-discovers accounts and never counts messages, so a count already taken
+                        // for an account the scan finds again is carried forward rather than
+                        // rebuilt away. Without this the fake quietly disagrees with the real API
+                        // about what a second scan costs the user.
+                        let previousCounts =
+                            accounts
+                            |> Seq.choose (fun a -> a.CachedMessageCount |> Option.map (fun cached -> a.Id, cached))
+                            |> Map.ofSeq
+
                         accounts.Clear()
-                        accounts.AddRange [ for i in 1..10 -> fakeAccount $"fake-account-{i}" ]
+
+                        accounts.AddRange
+                            [
+                                for i in 1..10 ->
+                                    let fresh = fakeAccount $"fake-account-{i}"
+
+                                    match Map.tryFind fresh.Id previousCounts with
+                                    | Some cached -> { fresh with CachedMessageCount = Some cached }
+                                    | None -> fresh
+                            ]
+
                         Ok
                             {
                                 Accounts = List.ofSeq accounts
@@ -217,6 +237,39 @@ let ``every account GetAccounts returns names the profile it was discovered in``
         let accounts, _ = api.GetAccounts() |> okOrFail "GetAccounts"
         Assert.NotEmpty accounts
         Assert.All(accounts, (fun a -> Assert.Equal(measuredShapeProfile, a.ProfilePath))))
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``a rescan keeps a cached message count for an account it finds again`` (implementation: string) =
+    // A count is a user-triggered header pass the measurement puts at *minutes* on the real profile
+    // (design.md -> Decisions taken #4). A scan never takes one, so discovery reports every account
+    // with none - and storing that over the previous set discarded the figure for an account the
+    // scan had just found again. This is on the shared suite rather than only against the real API
+    // because a fake that rebuilds its account list on every scan drifts into exactly that
+    // behaviour, which is what a UI or E2E suite over the fake would then be green about.
+    withImplementation implementation (fun api ->
+        api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
+        let discovery = api.ScanForAccounts() |> okOrFail "ScanForAccounts first"
+        let firstId = discovery.Accounts.Head.Id
+
+        api.CountMessages firstId |> okOrFail "CountMessages" |> ignore
+
+        let accountsBefore, _ = api.GetAccounts() |> okOrFail "GetAccounts before"
+        let before = accountsBefore |> List.find (fun a -> a.Id = firstId)
+
+        let cached =
+            match before.CachedMessageCount with
+            | Some cached -> cached
+            | None -> failwith "expected a cached count after CountMessages"
+
+        api.ScanForAccounts() |> okOrFail "ScanForAccounts second" |> ignore
+
+        let accountsAfter, _ = api.GetAccounts() |> okOrFail "GetAccounts after"
+        let after = accountsAfter |> List.find (fun a -> a.Id = firstId)
+
+        // Both the count and the time it was taken - a rescan must not silently re-time a reading
+        // it did not take.
+        Assert.Equal(Some cached, after.CachedMessageCount))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]

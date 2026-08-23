@@ -163,6 +163,7 @@ let createMailAccountApi (handleError: HandleErrorBuilder) (thunderbirdContext: 
                 ScanForMailAccountsWorkflow.scanForMailAccounts
                     loadProfileRoot
                     discoverMailAccounts
+                    loadMailAccounts
                     saveMailAccounts
                     loadSelectedMailAccount
                     saveSelectedMailAccount
