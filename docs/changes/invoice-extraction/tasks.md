@@ -89,18 +89,18 @@ one file.
 
 ## Phase 2 — Invoice types (required)
 
-- [ ] **2.1** *(test-first)* `InvoiceReference`, `Money`, `IssueDate`, `DueDate`, `InvoiceId` in
+- [x] **2.1** *(test-first)* `InvoiceReference`, `Money`, `IssueDate`, `DueDate`, `InvoiceId` in
       `Domain/Invoices/InvoicesTypes.fs` (**extending** the file change #2 created).
       Tests: one accepted and one rejected value per rule with the reason; and
       **`InvoiceReference.create` folds internal whitespace** so `"1234 5678 90"` and `"1234567890"`
       are one value — reusing change #2's fold, not a second implementation.
-- [ ] **2.2** *(test-first)* `ScanWindowDays`, `ScanWindowId`, `StoredScanWindow`.
+- [x] **2.2** *(test-first)* `ScanWindowDays`, `ScanWindowId`, `StoredScanWindow`.
       Tests: 0 rejected; 3651 rejected with the bound named; 1 and 3650 accepted; `seeded` is exactly
       `[7; 14; 30; 90; 180]`; `fallback` is 14.
-- [ ] **2.3** `ValidInvoice`, `StoredInvoice`, `ScanProblemCause`, `ScanProblem`, `InvoiceTombstone`,
+- [x] **2.3** `ValidInvoice`, `StoredInvoice`, `ScanProblemCause`, `ScanProblem`, `InvoiceTombstone`,
       `ScanResult`, the extra `InvoiceError` cases, and the sixteen new dependency function types.
       *Depends on:* 2.1, 2.2.
-- [ ] **2.4** *(test-first)* `GetCurrentTime` declared, and **its contract-suite rationale written
+- [x] **2.4** *(test-first)* `GetCurrentTime` declared, and **its contract-suite rationale written
       into the test file as a comment** (friction #15).
       Tests: two successive calls non-decreasing; `Kind` as promised; the real clock within tolerance
       of `DateTime.Now`. *The arithmetic with actual logic is tested in 3.1.*

@@ -3,6 +3,7 @@ namespace MyDogsbody.Domain.Invoices
 open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
+open MyDogsbody.Domain.MailAccounts
 
 /// The identifier of the message a scan read. Opaque to the domain, the same way SupplierId is.
 /// This file is created in change #2 and extended in change #4 - do not duplicate it.
@@ -109,3 +110,256 @@ type InvoiceError =
     | DateUnparseable of field: TargetField * raw: string * format: string
     | DueDateOutOfRange of template: TemplateId * issueDate: System.DateTime * paymentTermDays: int
     | RuleTimedOut of template: TemplateId * field: TargetField
+    // --- change #4 ---
+    /// A field ExtractedInvoice carried could not become its constrained type. Each carries the
+    /// raw value the message is written from (task 3.3).
+    | InvoiceReferenceInvalid of raw: string
+    | AmountInvalid of raw: string
+    | CurrencyInvalid of raw: string
+    /// A scan produced an invoice for a supplier that has since been deleted - reported as a
+    /// problem rather than stored as a row with no supplier (edge case).
+    | SupplierGone of SupplierId
+    /// A scan-window day count outside ScanWindowDays' bounds. Expected, rendered in the alert.
+    | ScanWindowInvalid of reason: string
+    /// Adding a window whose day count already exists. Carries the days for the message.
+    | ScanWindowAlreadyExists of days: int
+    /// Deleting the only remaining window. A domain rule, not a UI guard: the picker must always
+    /// have something to offer.
+    | CannotDeleteLastScanWindow
+    /// A window was selected that is not one of the stored rows.
+    | ScanWindowNotFound of days: int
+    /// A delete or undelete named an invoice the ledger does not hold.
+    | InvoiceNotFound
+    /// The scan ran with no mail account selected (change #3). Expected, not logged.
+    | NoAccountSelected
+    /// The store, the mail reader, or a sibling area failed outright. Wraps the real message and
+    /// is the one case here that is logged once.
+    | InvoiceStoreFailed of message: string
+
+// --- constrained primitives (task 2.1) ---
+
+/// The supplier's own invoice number.
+///
+/// create FOLDS INTERNAL WHITESPACE via InvoiceText.foldReferenceWhitespace (change #2's fold,
+/// not a second implementation): one measured utility prints its reference in three
+/// space-separated groups and names the attachment with the same digits unspaced. Under the
+/// Q5.8 natural key those would be two keys for one invoice - two ledger rows, two calendar
+/// events.
+type InvoiceReference = private InvoiceReference of string
+
+module InvoiceReference =
+
+    let create (value: string) : Result<InvoiceReference, string> =
+        match InvoiceText.foldReferenceWhitespace value with
+        | "" -> Error "Invoice reference must not be empty."
+        | folded -> Ok(InvoiceReference folded)
+
+    let value (InvoiceReference reference) = reference
+
+/// An amount and its currency code. Q1.2 makes currency part of what an invoice is; Q7.6.8 makes
+/// it a per-template FixedValue, overridable by a rule. 96% of measured documents carry `$` and
+/// every one sampled is AUD.
+type Money = private Money of amount: decimal * currency: string
+
+module Money =
+
+    /// A typo guard, not a policy - the same shape as ScanWindowDays' bound. No lower bound: an
+    /// amount parsed as zero or negative is stored as found (requirements.md edge case).
+    /// (Not [<Literal>] - F# literal bindings cannot be decimal.)
+    let MaxAbsAmount = 1_000_000_000_000m
+
+    let create (amount: decimal) (currency: string) : Result<Money, string> =
+        let trimmed = if isNull currency then "" else currency.Trim()
+
+        if trimmed = "" then
+            Error "Currency must not be empty."
+        elif abs amount > MaxAbsAmount then
+            Error $"Amount {amount} is implausibly large."
+        else
+            Ok(Money(amount, trimmed.ToUpperInvariant()))
+
+    let amount (Money(a, _)) = a
+    let currency (Money(_, c)) = c
+
+/// The date a document states it was issued. A year guard keeps a date read as 31 Dec 9999 -
+/// which DateFromField arithmetic would overflow on - out of the ledger.
+///
+/// Named InvoiceIssueDate, not IssueDate: TargetField (the template DSL) already has union cases
+/// IssueDate and DueDate, and a type of the same name shadows them wherever both namespaces are
+/// open (the composition root's TemplateApiMappers). The record fields below stay IssueDate /
+/// DueDate - a field and a union case coexist, as ExtractedInvoice already shows.
+type InvoiceIssueDate = private InvoiceIssueDate of System.DateTime
+
+module InvoiceIssueDate =
+
+    [<Literal>]
+    let EarliestYear = 1900
+
+    [<Literal>]
+    let LatestYear = 3000
+
+    let create (value: System.DateTime) : Result<InvoiceIssueDate, string> =
+        if value.Year < EarliestYear || value.Year > LatestYear then
+            Error $"Issue date year must be between {EarliestYear} and {LatestYear}."
+        else
+            Ok(InvoiceIssueDate value.Date)
+
+    let value (InvoiceIssueDate date) = date
+
+/// The date payment is due - the field the calendar event lands on (Q2.1), and the binding
+/// constraint the measurement found: only ~1 invoice in 8 states one. Named InvoiceDueDate for
+/// the same reason as InvoiceIssueDate.
+type InvoiceDueDate = private InvoiceDueDate of System.DateTime
+
+module InvoiceDueDate =
+
+    let create (value: System.DateTime) : Result<InvoiceDueDate, string> =
+        if value.Year < InvoiceIssueDate.EarliestYear || value.Year > InvoiceIssueDate.LatestYear then
+            Error
+                $"Due date year must be between {InvoiceIssueDate.EarliestYear} and {InvoiceIssueDate.LatestYear}."
+        else
+            Ok(InvoiceDueDate value.Date)
+
+    let value (InvoiceDueDate date) = date
+
+/// The identifier the store assigned. Opaque to the domain, the same way SupplierId is.
+type InvoiceId = private InvoiceId of string
+
+module InvoiceId =
+
+    let create (value: string) : Result<InvoiceId, string> =
+        if System.String.IsNullOrWhiteSpace value then
+            Error "Invoice id must not be empty."
+        else
+            Ok(InvoiceId value)
+
+    let value (InvoiceId id) = id
+
+// --- scan window (task 2.2) ---
+
+/// A window is a ROW, not a case. The seeded five are a starting set, not the whole set, so the
+/// guarantee a closed union would have given moves into this create - the same move a
+/// user-authored template already forces.
+type ScanWindowDays = private ScanWindowDays of int
+
+module ScanWindowDays =
+
+    [<Literal>]
+    let Minimum = 1
+
+    [<Literal>]
+    let Maximum = 3650 // a typo guard, not a policy (Q1.16)
+
+    let create (days: int) : Result<ScanWindowDays, string> =
+        if days < Minimum then
+            Error "A scan window must be at least one day."
+        elif days > Maximum then
+            Error $"A scan window must be {Maximum} days or fewer."
+        else
+            Ok(ScanWindowDays days)
+
+    let value (ScanWindowDays days) = days
+
+    /// Seeded by migration, never hard-coded in a component.
+    let seeded = [ 7; 14; 30; 90; 180 ]
+
+    /// Used when nothing has been chosen yet, or the remembered choice no longer exists.
+    let fallback = 14
+
+type ScanWindowId = private ScanWindowId of string
+
+module ScanWindowId =
+
+    let create (value: string) : Result<ScanWindowId, string> =
+        if System.String.IsNullOrWhiteSpace value then
+            Error "Scan window id must not be empty."
+        else
+            Ok(ScanWindowId value)
+
+    let value (ScanWindowId id) = id
+
+type StoredScanWindow = { Id: ScanWindowId; Days: ScanWindowDays }
+
+// --- stage types and persisted shapes (task 2.3) ---
+
+/// An ExtractedInvoice whose every field has become its constrained type. Produced only by
+/// ValidateInvoiceWorkflow. DueDate is an option - Q1.10: an invoice with no due date is stored
+/// and listed, greyed out, and is simply not uploadable.
+type ValidInvoice =
+    { SupplierId: SupplierId
+      TemplateId: TemplateId
+      SourceMessageId: SourceMessageId
+      Reference: InvoiceReference
+      Amount: Money
+      IssueDate: InvoiceIssueDate option
+      DueDate: InvoiceDueDate option }
+
+/// A ValidInvoice that has been through the store: it has an id and a scan timestamp.
+type StoredInvoice =
+    { Id: InvoiceId
+      Invoice: ValidInvoice
+      ScannedAt: System.DateTime }
+
+/// Why a message yielded no invoice. Persisted (Q1.19) so incremental scanning does not empty
+/// the diagnostic list before it is looked at. The eight causes requirements.md enumerates.
+type ScanProblemCause =
+    | NoSupplierMatched
+    | SeveralSuppliersMatched of SupplierId list
+    | NoTemplateMatched of SupplierId
+    | RuleFoundNothing of supplier: SupplierId * template: TemplateId * field: string
+    | AttachmentUnreadable of fileName: string * reason: string
+    | FormatUnsupported of fileName: string * format: string
+    | ValueUnparseable of field: string * raw: string
+    | RuleTimedOutCause of supplier: SupplierId * template: TemplateId * field: string
+
+/// A problem row, keyed by source message id, carrying enough to act on it - a message id alone
+/// is not actionable, so the sender, subject and received date travel with it.
+type ScanProblem =
+    { SourceMessageId: SourceMessageId
+      Sender: string
+      Subject: string
+      ReceivedAt: System.DateTime
+      Cause: ScanProblemCause
+      RecordedAt: System.DateTime }
+
+/// The Q5.14 record that keeps a hand-deleted invoice deleted. Keyed on the NATURAL key, not the
+/// database id, so rebuilding the ledger does not resurrect what you removed.
+type InvoiceTombstone =
+    { SupplierId: SupplierId
+      Reference: InvoiceReference
+      DeletedAt: System.DateTime }
+
+/// What a scan returns: the invoices it found and the problems it recorded, as two lists
+/// (requirements.md - "return both ... as two lists").
+type ScanResult =
+    { Invoices: StoredInvoice list
+      Problems: ScanProblem list }
+
+// --- dependency function types (task 2.3) ---
+//
+// Not interfaces, not classes, not a collection getter. A workflow receives a function value, so
+// a test supplies a lambda and the composition root supplies the real adapter. Errors are this
+// area's InvoiceError; the scan maps sibling-area errors (SupplierError, TemplateError,
+// MailAccountError, DocumentError) onto it at the point it calls those dependencies.
+
+/// CLAUDE.md forbids the domain reading a clock, and "N days back from the start of today" needs
+/// one. A published interface (friction #15) - its contract-suite rationale is in the test file.
+type GetCurrentTime = unit -> System.DateTime
+
+type LoadInvoices = ScanCutoff option -> Result<StoredInvoice list, InvoiceError>
+type UpsertInvoices = ValidInvoice list -> Result<StoredInvoice list, InvoiceError>
+type DeleteInvoice = InvoiceId -> Result<StoredInvoice option, InvoiceError>
+
+type LoadTombstones = unit -> Result<InvoiceTombstone list, InvoiceError>
+type SaveTombstone = InvoiceTombstone -> Result<unit, InvoiceError>
+type RemoveTombstone = SupplierId -> InvoiceReference -> Result<bool, InvoiceError>
+
+type LoadScanProblems = unit -> Result<ScanProblem list, InvoiceError>
+type SaveScanProblems = ScanProblem list -> Result<unit, InvoiceError>
+type ClearScanProblems = SourceMessageId list -> Result<unit, InvoiceError>
+
+type LoadScanWindows = unit -> Result<StoredScanWindow list, InvoiceError>
+type SaveScanWindow = ScanWindowDays -> Result<StoredScanWindow, InvoiceError>
+type DeleteScanWindow = ScanWindowId -> Result<bool, InvoiceError>
+type LoadSelectedScanWindow = unit -> Result<ScanWindowDays option, InvoiceError>
+type SaveSelectedScanWindow = ScanWindowDays -> Result<unit, InvoiceError>

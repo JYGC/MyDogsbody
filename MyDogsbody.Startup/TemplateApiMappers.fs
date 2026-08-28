@@ -295,6 +295,20 @@ let toFailingField (error: InvoiceError) : TargetField option =
     | DateUnparseable(field, _, _) -> Some field
     | DueDateOutOfRange _ -> Some DueDate
     | RuleTimedOut(_, field) -> Some field
+    // change #4: the validation cases DO name a field.
+    | InvoiceReferenceInvalid _ -> Some Reference
+    | AmountInvalid _ -> Some Amount
+    | CurrencyInvalid _ -> Some Currency
+    // change #4: the scan-, store- and window-level cases cannot arise from a test-panel run
+    // (it applies one named template to pasted text) and name no field.
+    | SupplierGone _
+    | ScanWindowInvalid _
+    | ScanWindowAlreadyExists _
+    | CannotDeleteLastScanWindow
+    | ScanWindowNotFound _
+    | InvoiceNotFound
+    | NoAccountSelected
+    | InvoiceStoreFailed _ -> None
 
 /// The sentence for "the rule yielded nothing", naming the input that rule actually reads.
 ///
@@ -343,3 +357,18 @@ let toFieldFailureReason (rule: FieldRule option) (error: InvoiceError) : string
         let issued = issueDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
         $"Adding {paymentTermDays} days to the issue date {issued} runs past the last date a calendar can hold."
     | RuleTimedOut(_, field) -> $"The rule for {toTargetFieldUiString field} took too long and was stopped."
+    // change #4 cases. Reference/Amount/Currency validation can follow a rule that matched but
+    // produced something the constrained type refuses; the rest are scan/store/window failures
+    // that never reach a panel run but still carry a sentence rather than a hole.
+    | InvoiceReferenceInvalid raw -> $"The rule for Reference produced '{raw}', which is not a usable invoice reference."
+    | AmountInvalid raw -> $"The rule for Amount produced '{raw}', which is not a usable amount."
+    | CurrencyInvalid raw -> $"The rule for Currency produced '{raw}', which is not a usable currency."
+    | SupplierGone supplierId ->
+        $"The supplier '{SupplierId.value supplierId}' no longer exists."
+    | ScanWindowInvalid reason -> reason
+    | ScanWindowAlreadyExists days -> $"A {days}-day scan window already exists."
+    | CannotDeleteLastScanWindow -> "The last remaining scan window cannot be deleted."
+    | ScanWindowNotFound days -> $"There is no {days}-day scan window."
+    | InvoiceNotFound -> "That invoice is no longer in the ledger."
+    | NoAccountSelected -> "No mail account is selected."
+    | InvoiceStoreFailed message -> message
