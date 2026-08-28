@@ -512,8 +512,17 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    setting, so whatever it does becomes the habit.**
 8. **The scan reads the account the user selected in change #3, and refuses with a named error when
    none is selected.** Not a silent empty result.
-9. **`EmailBodyReader` prefers HTML** — the correction *Finding 5* makes to Q1.13. Multipart
-   selection is the reader's job, so a template never has to know which alternative it got.
+9. **`EmailBodyReader` prefers HTML** — the correction *Finding 5* makes to Q1.13. A template
+   never has to know which alternative it got. *Mechanism, decided in implementation:* change #3's
+   `MailFolderReader` already did the MIME work and hands over `BodyText` and `BodyHtml`
+   separately. `ScanMessageWorkflow` picks — HTML if present (`DocumentSource` with
+   `Format = EmailBody`, routed to `EmailBodyReader`), otherwise the plain text (`Format = PlainText`,
+   routed to `PlainTextDocumentReader`). This keeps the single `ReadDocumentText` dependency the
+   workflow table shows: `EmailBodyReader` only ever parses HTML — deriving block boundaries from
+   `<tr>`/`<td>`/`<p>` structure and stripping markup where there is none — and the trivial
+   "which alternative exists" choice is a one-line `Option.orElse` in the workflow, not multipart
+   parsing. `EmailBodyReader` takes `HtmlAgilityPack` (offline-cached 1.11.39); it is the only
+   project that does.
 
 ---
 
