@@ -26,7 +26,10 @@ let private optionalDueDate (value: System.DateTime option) : InvoiceDueDate opt
 /// requirements.md: a supplier, an invoice reference, an amount and a currency are required; a
 /// missing due date is fine. A value that fails validation returns its own InvoiceError case
 /// carrying the raw value the message is written from (task 3.3).
-let validateInvoice (extracted: ExtractedInvoice) : Result<ValidInvoice, InvoiceError> =
+let validateInvoice
+    (messageReceivedAt: System.DateTime)
+    (extracted: ExtractedInvoice)
+    : Result<ValidInvoice, InvoiceError> =
     result {
         let! reference =
             InvoiceReference.create extracted.Reference
@@ -47,5 +50,6 @@ let validateInvoice (extracted: ExtractedInvoice) : Result<ValidInvoice, Invoice
               Reference = reference
               Amount = amount
               IssueDate = optionalIssueDate extracted.IssueDate
-              DueDate = optionalDueDate extracted.DueDate }
+              DueDate = optionalDueDate extracted.DueDate
+              MessageReceivedAt = messageReceivedAt }
     }

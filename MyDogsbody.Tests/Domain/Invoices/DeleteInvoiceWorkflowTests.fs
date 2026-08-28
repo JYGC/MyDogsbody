@@ -21,7 +21,8 @@ let private storedInvoice: StoredInvoice =
           Reference = InvoiceReference.create "INV-1042" |> orFail
           Amount = Money.create 10m "AUD" |> orFail
           IssueDate = None
-          DueDate = None } }
+          DueDate = None
+          MessageReceivedAt = DateTime(2026, 6, 1) } }
 
 let private clock: GetCurrentTime = fun () -> DateTime(2026, 7, 1, 9, 0, 0)
 

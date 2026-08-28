@@ -26,9 +26,11 @@ let private extracted =
       IssueDate = Some(DateTime(2026, 2, 1))
       DueDate = Some(DateTime(2026, 3, 3)) }
 
+let private received = DateTime(2026, 1, 20, 8, 30, 0)
+
 [<Fact; Trait("Level", "Unit")>]
 let ``validateInvoice returns Ok with every field converted`` () =
-    match validateInvoice extracted with
+    match validateInvoice received extracted with
     | Ok invoice ->
         Assert.Equal(supplierId, invoice.SupplierId)
         Assert.Equal(templateId, invoice.TemplateId)
@@ -38,17 +40,18 @@ let ``validateInvoice returns Ok with every field converted`` () =
         Assert.Equal("AUD", Money.currency invoice.Amount) // upper-cased
         Assert.Equal(Some(DateTime(2026, 2, 1)), invoice.IssueDate |> Option.map InvoiceIssueDate.value)
         Assert.Equal(Some(DateTime(2026, 3, 3)), invoice.DueDate |> Option.map InvoiceDueDate.value)
+        Assert.Equal(received, invoice.MessageReceivedAt)
     | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``validateInvoice accepts a missing due date - it is not an error`` () =
-    match validateInvoice { extracted with DueDate = None } with
+    match validateInvoice received { extracted with DueDate = None } with
     | Ok invoice -> Assert.Equal(None, invoice.DueDate)
     | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``validateInvoice accepts a missing issue date`` () =
-    match validateInvoice { extracted with IssueDate = None } with
+    match validateInvoice received { extracted with IssueDate = None } with
     | Ok invoice -> Assert.Equal(None, invoice.IssueDate)
     | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
 
@@ -56,7 +59,7 @@ let ``validateInvoice accepts a missing issue date`` () =
 [<InlineData("")>]
 [<InlineData("   ")>]
 let ``validateInvoice returns InvoiceReferenceInvalid carrying the raw value`` (raw: string) =
-    match validateInvoice { extracted with Reference = raw } with
+    match validateInvoice received { extracted with Reference = raw } with
     | Error(InvoiceReferenceInvalid carried) -> Assert.Equal(raw, carried)
     | other -> Assert.Fail($"Expected InvoiceReferenceInvalid, got {other}")
 
@@ -64,7 +67,7 @@ let ``validateInvoice returns InvoiceReferenceInvalid carrying the raw value`` (
 let ``validateInvoice returns AmountInvalid carrying the raw value`` () =
     let tooBig = Money.MaxAbsAmount + 1m
 
-    match validateInvoice { extracted with Amount = tooBig } with
+    match validateInvoice received { extracted with Amount = tooBig } with
     | Error(AmountInvalid carried) -> Assert.Equal(string tooBig, carried)
     | other -> Assert.Fail($"Expected AmountInvalid, got {other}")
 
@@ -72,12 +75,12 @@ let ``validateInvoice returns AmountInvalid carrying the raw value`` () =
 [<InlineData("")>]
 [<InlineData("   ")>]
 let ``validateInvoice returns CurrencyInvalid carrying the raw value`` (raw: string) =
-    match validateInvoice { extracted with Currency = raw } with
+    match validateInvoice received { extracted with Currency = raw } with
     | Error(CurrencyInvalid carried) -> Assert.Equal(raw, carried)
     | other -> Assert.Fail($"Expected CurrencyInvalid, got {other}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``validateInvoice drops an implausible due date rather than failing the invoice`` () =
-    match validateInvoice { extracted with DueDate = Some(DateTime(9999, 12, 31)) } with
+    match validateInvoice received { extracted with DueDate = Some(DateTime(9999, 12, 31)) } with
     | Ok invoice -> Assert.Equal(None, invoice.DueDate)
     | Error err -> Assert.Fail($"Expected Ok with no due date, got Error {err}")

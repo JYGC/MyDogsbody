@@ -310,7 +310,12 @@ type ValidInvoice =
       Reference: InvoiceReference
       Amount: Money
       IssueDate: InvoiceIssueDate option
-      DueDate: InvoiceDueDate option }
+      DueDate: InvoiceDueDate option
+      /// The date the mail that carried this invoice ARRIVED (Q1.6). Carried so the scan window -
+      /// which is measured on mail-received date, not due date - can hide invoices outside it
+      /// without deleting them (LoadInvoices filters on this). Not a constrained type: it comes
+      /// from the mail store and is a fact, not a user value.
+      MessageReceivedAt: System.DateTime }
 
 /// A ValidInvoice that has been through the store: it has an id and a scan timestamp.
 type StoredInvoice =

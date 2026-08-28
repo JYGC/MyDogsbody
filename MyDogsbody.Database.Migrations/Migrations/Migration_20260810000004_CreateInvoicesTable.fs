@@ -14,6 +14,10 @@ open FluentMigrator
 /// The store writes decimal.ToString(InvariantCulture) and parses it back. Dates are TEXT ISO
 /// 8601; IssueDate / DueDate are date-only (yyyy-MM-dd) and nullable - Q1.10, an invoice with no
 /// due date is stored and listed anyway.
+///
+/// MessageReceivedAt is the date the mail arrived (Q1.6). LoadInvoices filters on it so a
+/// narrowed scan window hides invoices outside it without deleting them - the window is measured
+/// on mail-received date, not on the due date.
 [<Migration(20260810000004L)>]
 type CreateInvoicesTable() =
     inherit Migration()
@@ -30,6 +34,7 @@ type CreateInvoicesTable() =
                 IssueDate TEXT(10) NULL,
                 DueDate TEXT(10) NULL,
                 SourceMessageId TEXT(998) NOT NULL,
+                MessageReceivedAt TEXT(33) NOT NULL,
                 ScannedAt TEXT(33) NOT NULL,
                 FOREIGN KEY (SupplierId) REFERENCES Suppliers (Id) ON DELETE CASCADE,
                 FOREIGN KEY (TemplateId) REFERENCES InvoiceTemplates (Id) ON DELETE CASCADE

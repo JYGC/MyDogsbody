@@ -95,7 +95,7 @@ let private processMessage
             match SelectTemplateWorkflow.selectTemplate supplier.PaymentTermDays supplierId templates scanned with
             | Error selectError -> return Recorded(toProblemCause supplierId selectError)
             | Ok extracted ->
-                match ValidateInvoiceWorkflow.validateInvoice extracted with
+                match ValidateInvoiceWorkflow.validateInvoice scanned.ReceivedAt extracted with
                 | Error validationError -> return Recorded(toProblemCause supplierId validationError)
                 | Ok invoice ->
                     let key = SupplierId.value invoice.SupplierId, InvoiceReference.value invoice.Reference

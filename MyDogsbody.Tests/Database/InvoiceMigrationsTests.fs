@@ -29,8 +29,8 @@ let private insertTemplate (connectionString: string) (supplierId: int64) : int6
 let private insertInvoice (connectionString: string) (supplierId: int64) (templateId: int64) (reference: string) =
     execParams
         connectionString
-        "INSERT INTO Invoices (SupplierId, TemplateId, Reference, Amount, Currency, IssueDate, DueDate, SourceMessageId, ScannedAt)
-         VALUES (@s, @t, @r, '10.00', 'AUD', NULL, NULL, 'msg', '2026-06-01T00:00:00.0000000')"
+        "INSERT INTO Invoices (SupplierId, TemplateId, Reference, Amount, Currency, IssueDate, DueDate, SourceMessageId, MessageReceivedAt, ScannedAt)
+         VALUES (@s, @t, @r, '10.00', 'AUD', NULL, NULL, 'msg', '2026-05-20T00:00:00.0000000', '2026-06-01T00:00:00.0000000')"
         [ "@s", box supplierId; "@t", box templateId; "@r", box reference ]
 
 // ============================ 6.1 Invoices ============================
@@ -42,7 +42,7 @@ let ``MigrateUp creates Invoices with its expected columns`` () =
         Assert.Contains("Invoices", tableNames cs)
 
         Assert.Equal<string list>(
-            [ "Id"; "SupplierId"; "TemplateId"; "Reference"; "Amount"; "Currency"; "IssueDate"; "DueDate"; "SourceMessageId"; "ScannedAt" ],
+            [ "Id"; "SupplierId"; "TemplateId"; "Reference"; "Amount"; "Currency"; "IssueDate"; "DueDate"; "SourceMessageId"; "MessageReceivedAt"; "ScannedAt" ],
             columnNames cs "Invoices"
         ))
 
