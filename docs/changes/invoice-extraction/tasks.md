@@ -153,13 +153,13 @@ one file.
 
 ## Phase 5 — Scan windows *(the designated split point)*
 
-- [ ] **5.1** *(test-first)* `AddScanWindowWorkflow`. Tests: Ok; a duplicate refused with
+- [x] **5.1** *(test-first)* `AddScanWindowWorkflow`. Tests: Ok; a duplicate refused with
       `ScanWindowAlreadyExists` carrying the days; out-of-bounds refused; the store **never called**
       on either refusal.
-- [ ] **5.2** *(test-first)* `DeleteScanWindowWorkflow`. Tests: Ok; **deleting the last one refused
+- [x] **5.2** *(test-first)* `DeleteScanWindowWorkflow`. Tests: Ok; **deleting the last one refused
       with `CannotDeleteLastScanWindow`** — a domain rule, not a UI guard; deleting a seeded window
       is allowed like any other.
-- [ ] **5.3** *(test-first)* `ListScanWindowsWorkflow` (ascending) and `SelectScanWindowWorkflow`
+- [x] **5.3** *(test-first)* `ListScanWindowsWorkflow` (ascending) and `SelectScanWindowWorkflow`
       (refuses a window not in the list, with the store never called).
 
 ## Phase 6 — Migrations (required)
