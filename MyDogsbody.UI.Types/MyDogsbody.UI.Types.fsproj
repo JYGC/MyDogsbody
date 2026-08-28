@@ -22,6 +22,7 @@
     <Compile Include="Modules\MailAccountsBrowserModule.fs" />
     <Compile Include="InvoiceUiType.fs" />
     <Compile Include="InvoiceApi.fs" />
+    <Compile Include="Modules\InvoicesModule.fs" />
   </ItemGroup>
 
   <ItemGroup>

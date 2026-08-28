@@ -211,24 +211,24 @@ one file.
 
 ## Phase 9 — UI (required)
 
-- [ ] **9.1** `MyDogsbody.UI.Types`: `InvoiceUiType`, `ScanProblemUiType`, `TombstoneUiType`,
+- [x] **9.1** `MyDogsbody.UI.Types`: `InvoiceUiType`, `ScanProblemUiType`, `TombstoneUiType`,
       `ScanWindowUiType` (`{ Id; Days; Label }`), `InvoiceApi`, `ScanWindowApi`,
       `Modules/InvoicesModule.fs`, `Modules/ScanWindowsBrowserModule.fs`.
-- [ ] **9.2** *(split point)* `/settings/scan-windows` page: list, add, delete, the remembered one
+- [x] **9.2** *(split point)* `/settings/scan-windows` page: list, add, delete, the remembered one
       marked, **the last one's delete unavailable with its reason**.
-- [ ] **9.3** *(test-first)* `ModuleCreators/InvoicesModuleCreators.fs`.
+- [x] **9.3** *(test-first)* `ModuleCreators/InvoicesModuleCreators.fs`.
       Tests: selecting a window **persists then rescans** (write-then-reload); the initial value comes
       from `ResolveScanWindowWorkflow` through the API, **never from a literal 14 in a component**;
       a failure sets `ErrorAval` and a success clears it; no `Async.Start` in the file.
-- [ ] **9.4** `Components/InvoicesComponents.fs`: the table, the **`MudSelect`** window picker bound
+- [x] **9.4** `Components/InvoicesComponents.fs`: the table, the **`MudSelect`** window picker bound
       to whatever the store holds, and the count and window stated above the table.
       *Note:* it cannot be a fixed `MudToggleGroup` — the number of windows is unknown at build time.
       The label says **what it measures**: "mail received in the last 90 days", not "90 days" (Q1.6).
-- [ ] **9.5** Per-row delete with confirmation; an invoice with no due date shown **greyed with the
+- [x] **9.5** Per-row delete with confirmation; an invoice with no due date shown **greyed with the
       reason it cannot go on a calendar**.
-- [ ] **9.6** The problems view: sender, subject, date and cause per row.
-- [ ] **9.7** The tombstones view with un-delete.
-- [ ] **9.8** `Pages/InvoicesPage.fs` at `routeCi "/invoices"` — **top-level, not under settings** —
+- [x] **9.6** The problems view: sender, subject, date and cause per row.
+- [x] **9.7** The tombstones view with un-delete.
+- [x] **9.8** `Pages/InvoicesPage.fs` at `routeCi "/invoices"` — **top-level, not under settings** —
       registered in `Shell.fs`.
 
 ## Phase 10 — Contract suites (required)

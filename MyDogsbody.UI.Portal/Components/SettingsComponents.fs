@@ -34,6 +34,11 @@ let settingsNavMenu(body: NodeRenderFragment) =
                         Icon Icons.Material.TwoTone.Email
                         "Mail accounts"
                     }
+                    MudNavLink'' {
+                        Href "/settings/scan-windows"
+                        Icon Icons.Material.TwoTone.DateRange
+                        "Scan windows"
+                    }
                     MudNavGroup'' {
                         Title "Logs"
                         Icon Icons.Material.TwoTone.MonitorHeart
