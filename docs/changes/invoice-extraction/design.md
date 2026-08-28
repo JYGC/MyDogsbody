@@ -61,12 +61,15 @@ reading and rescans are incremental.
         ▲
  Database   InvoiceStore.fs · ScanWindowStore.fs · their record mappers
         ▲
- Migrations 20260809000005 Invoices          …0006 ScanProblems
-            …0007 InvoiceTombstones          …0008 ScanWindows (+ seed)
-            …0009 InvoiceSettings
+ Migrations 20260810000004 Invoices          …0005 ScanProblems
+            …0006 InvoiceTombstones          …0007 ScanWindows (+ seed)
+            …0008 InvoiceSettings
 ```
 
-**Reserved migration timestamps for this change: `20260809000005`–`20260809000009`.**
+**Reserved migration timestamps for this change: `20260810000004`–`20260810000008`.**
+*(Renumbered from the originally reserved `20260809000005`–`…0009` per
+[background → *Migration timestamps, reserved across the series*](../invoice-to-calendar/background.md#migration-timestamps-reserved-across-the-series)
+— change #1's `20260810000001` and change #2's `…0002`–`…0003` sort above the old block.)*
 
 ### `Integrations.Pdf` becomes `Integrations.Documents`
 
@@ -258,13 +261,13 @@ is a unit test with a fixed clock and no mail store anywhere near it.
 
 | Timestamp | Name | Creates |
 | --- | --- | --- |
-| `…0005` | `CreateInvoicesTable` | `Invoices(Id, SupplierId FK, TemplateId FK, Reference, Amount, Currency, IssueDate NULL, DueDate NULL, SourceMessageId, ScannedAt)` + **unique index on `(SupplierId, Reference)`** |
-| `…0006` | `CreateScanProblemsTable` | `ScanProblems(Id, SourceMessageId, SupplierId NULL, Sender, Subject, ReceivedAt, Cause, Detail, RecordedAt)` + index on `SourceMessageId` |
-| `…0007` | `CreateInvoiceTombstonesTable` | `InvoiceTombstones(Id, SupplierId FK, Reference, DeletedAt)` + unique index on `(SupplierId, Reference)` |
-| `…0008` | `CreateScanWindowsTable` | `ScanWindows(Id, Days)` + unique index on `Days`, **and `Insert.IntoTable` for 7, 14, 30, 90, 180** |
-| `…0009` | `CreateInvoiceSettingsTable` | `InvoiceSettings(Id INTEGER PK CHECK(Id = 1), SelectedScanWindowDays INTEGER NULL)` |
+| `…0004` | `CreateInvoicesTable` | `Invoices(Id, SupplierId FK, TemplateId FK, Reference, Amount, Currency, IssueDate NULL, DueDate NULL, SourceMessageId, ScannedAt)` + **unique index on `(SupplierId, Reference)`** |
+| `…0005` | `CreateScanProblemsTable` | `ScanProblems(Id, SourceMessageId, SupplierId NULL, Sender, Subject, ReceivedAt, Cause, Detail, RecordedAt)` + index on `SourceMessageId` |
+| `…0006` | `CreateInvoiceTombstonesTable` | `InvoiceTombstones(Id, SupplierId FK, Reference, DeletedAt)` + unique index on `(SupplierId, Reference)` |
+| `…0007` | `CreateScanWindowsTable` | `ScanWindows(Id, Days)` + unique index on `Days`, **and `Insert.IntoTable` for 7, 14, 30, 90, 180** |
+| `…0008` | `CreateInvoiceSettingsTable` | `InvoiceSettings(Id INTEGER PK CHECK(Id = 1), SelectedScanWindowDays INTEGER NULL)` |
 
-**`…0008` is a new precedent in this repository** (friction #17): every migration so far creates
+**`…0007` is a new precedent in this repository** (friction #17): every migration so far creates
 schema and nothing else. The alternatives are worse — `Startup.fs` checking on each launch whether it
 ought to write five rows is runtime schema management by another name, and hard-coding them in a
 component is the thing this whole change is undoing. `Insert.IntoTable` in `Up`, matching

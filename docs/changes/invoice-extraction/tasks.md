@@ -14,14 +14,20 @@ See [background → *One branch per change*](../invoice-to-calendar/background.m
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
 
-**Reserved migration timestamps for this change: `20260809000005`–`20260809000009`.**
+**Reserved migration timestamps for this change: `20260810000004`–`20260810000008`.**
+*(Renumbered from the originally reserved `20260809000005`–`…0009` per
+[background → *Migration timestamps, reserved across the series*](../invoice-to-calendar/background.md#migration-timestamps-reserved-across-the-series):
+change #1's after-the-fact `20260810000001` index migration and change #2's `…0002`–`…0003` both
+sort above the old `20260809` block, so #4 is renumbered to stay monotonic. Table→timestamp map:
+Invoices `…0004`, ScanProblems `…0005`, InvoiceTombstones `…0006`, ScanWindows `…0007`,
+InvoiceSettings `…0008`.)*
 
 ---
 
 ## If this change gets too large
 
 §4 named this the largest change after #2 and the first to split. **The designated split is the
-scan-window apparatus: Phases 5 and 9.2, plus migrations `…0008` and `…0009`.** Those are two small
+scan-window apparatus: Phases 5 and 9.2, plus migrations `…0007` and `…0008`.** Those are two small
 tables, a store, four small workflows and a settings page — all main-database machinery of the kind
 change #1 already proved. Lifted out, they become `invoice-scan-windows`, and this change keeps a
 fixed 14-day window until it lands.
@@ -158,13 +164,13 @@ one file.
 
 ## Phase 6 — Migrations (required)
 
-- [ ] **6.1** *(test-first)* `…0005_CreateInvoicesTable`. Tests: columns; **the unique index on
+- [ ] **6.1** *(test-first)* `…0004_CreateInvoicesTable`. Tests: columns; **the unique index on
       `(SupplierId, Reference)` refuses a duplicate**; both foreign keys; `Down()` reverses it.
-- [ ] **6.2** *(test-first)* `…0006_CreateScanProblemsTable`. Tests: columns; index on
+- [ ] **6.2** *(test-first)* `…0005_CreateScanProblemsTable`. Tests: columns; index on
       `SourceMessageId`; `Down()`.
-- [ ] **6.3** *(test-first)* `…0007_CreateInvoiceTombstonesTable`. Tests: columns; unique index on
+- [ ] **6.3** *(test-first)* `…0006_CreateInvoiceTombstonesTable`. Tests: columns; unique index on
       `(SupplierId, Reference)`; `Down()`.
-- [ ] **6.4** *(test-first)* `…0008_CreateScanWindowsTable` — **with `Insert.IntoTable` seeding 7,
+- [ ] **6.4** *(test-first)* `…0007_CreateScanWindowsTable` — **with `Insert.IntoTable` seeding 7,
       14, 30, 90, 180** and a matching `Delete.FromTable` in `Down`.
       Tests: `Up` inserts exactly five rows; the unique index on `Days` refuses a sixth `14`;
       **`Down` removes the seeded rows**; **re-running migrations after a user deletes one does not
@@ -172,7 +178,7 @@ one file.
       *Outcome:* **the first migration in this repository that carries data as well as structure
       (friction #17). Say so in the change description — the next person will copy whichever
       migration they open first.**
-- [ ] **6.5** *(test-first)* `…0009_CreateInvoiceSettingsTable`. Tests: the primary key is fixed at a
+- [ ] **6.5** *(test-first)* `…0008_CreateInvoiceSettingsTable`. Tests: the primary key is fixed at a
       single row and a second insert is refused; the setting column is nullable; `Down()`.
 
 ## Phase 7 — Stores (required)
