@@ -379,16 +379,28 @@ rescan and the diagnostic is gone before you look.
 ### Action names
 
 ```
-ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent / readText
-                                             .WordDocumentReader.readText
-                                             .PlainTextDocumentReader.readText
-                                             .EmailBodyReader.readText
+ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent
 ActionNames.MyDogsbody.Database.InvoiceStore.*  /  .ScanWindowStore.*
 ActionNames.MyDogsbody.Startup.InvoiceApi.*     /  .ScanWindowApi.*
 ```
 
-`ActionNames.MyDogsbody.Integrations.Pdf.*` is **renamed** to `.Documents.*`. The structural suite
-will catch any entry left behind.
+`ActionNames.MyDogsbody.Integrations.Pdf.*` is **renamed** to `.Documents.*` (only the existing
+`PdfDocumentReader.readContent` entry). The structural suite will catch any entry left behind.
+
+**The four `readText` readers carry no `ActionName` and return `Result<TextLine list, DocumentError>`
+directly** — the `MailFolderReader` precedent this section's own error table leans on. Every outcome
+a reader can produce is a domain fact a person could name: a scanned-image PDF
+(`DocumentHasNoTextLayer`), a file that will not open (`DocumentUnreadable`), a format with no
+reader (`DocumentFormatUnsupported`). A `handleError`/`MyDogsbodyException` shape would flatten
+those three into one wrapped exception the composition root could not tell apart, and none of them
+is the "infrastructure collapsed" case that shape exists for. An unexpected library crash is caught
+by a catch-all and mapped to `DocumentUnreadable ex.Message`. `readContent` keeps its existing
+outer-ring shape untouched (task 1.3) — it predates this convention and feeds a workflow this change
+does not wire.
+
+*(This is a departure from the design's original Action-names block, which speculatively listed a
+`readText` entry per reader. Recorded here per background.md's instruction to state disagreements
+with the decision record in the change's own `design.md`.)*
 
 ---
 

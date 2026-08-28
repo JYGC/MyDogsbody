@@ -39,7 +39,7 @@ let tableBodyHtml = path "table-body.html"
 
 /// Bytes of a real one-page PDF containing the given lines of text, top-down.
 let pdfWithText (lines: string list) : byte[] =
-    let builder = PdfDocumentBuilder()
+    use builder = new PdfDocumentBuilder()
     let page = builder.AddPage(595.0, 842.0)
     let font = builder.AddStandard14Font(Standard14Font.Helvetica)
 
@@ -52,7 +52,7 @@ let pdfWithText (lines: string list) : byte[] =
 /// Bytes of a one-page PDF with no text layer at all - a page and nothing on it, standing in for
 /// a scanned image. The reader must report DocumentHasNoTextLayer, not attempt OCR.
 let pdfWithNoTextLayer () : byte[] =
-    let builder = PdfDocumentBuilder()
+    use builder = new PdfDocumentBuilder()
     builder.AddPage(595.0, 842.0) |> ignore
     builder.Build()
 
