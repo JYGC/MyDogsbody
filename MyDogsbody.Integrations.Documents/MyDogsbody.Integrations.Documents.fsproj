@@ -11,6 +11,7 @@
       ReadDocumentContent; the line grouping it used to wrap is now a domain workflow.
     -->
     <Compile Include="PdfDocumentReader.fs" />
+    <Compile Include="WordDocumentReader.fs" />
   </ItemGroup>
 
     <ItemGroup>

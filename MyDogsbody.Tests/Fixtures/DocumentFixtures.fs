@@ -70,11 +70,13 @@ let docxWithParagraphs (paragraphs: string list) : byte[] =
             WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document)
 
         let main = doc.AddMainDocumentPart()
-        main.Document <- Document(Body())
-        let body = main.Document.Body
+        main.Document <- Document()
+        let body = main.Document.AppendChild(Body())
 
         for text in paragraphs do
-            body.AppendChild(Paragraph(Run(Text(text)))) |> ignore
+            let paragraph = body.AppendChild(Paragraph())
+            let run = paragraph.AppendChild(Run())
+            run.AppendChild(Text(text, Space = SpaceProcessingModeValues.Preserve)) |> ignore
 
         main.Document.Save()
     )
