@@ -116,6 +116,8 @@
     <Compile Include="E2E\SuppliersFlowTests.fs" />
     <Compile Include="E2E\MailAccountsTestHarness.fs" />
     <Compile Include="E2E\MailAccountsFlowTests.fs" />
+    <Compile Include="E2E\InvoicesTestHarness.fs" />
+    <Compile Include="E2E\InvoicesFlowTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

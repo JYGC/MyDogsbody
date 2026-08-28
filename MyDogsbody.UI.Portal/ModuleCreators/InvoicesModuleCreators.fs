@@ -28,27 +28,41 @@ let getInvoicesModule
         | Ok _ -> errorCval.Value <- None
         | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
 
-    /// Scan the given window and put its result on screen. Also refreshes the window list.
+    /// Show the ledger for the given window and then try to refresh it with a scan. The scan may
+    /// fail (no mail account, an unreachable store) - the ledger stays on screen with the alert,
+    /// so "narrowing hides, it does not forget" holds even when a rescan cannot run.
     let scan (days: int) =
         transact (fun _ -> isScanningCval.Value <- true)
 
         startWork (fun () ->
             let windows = scanWindowApi.GetScanWindows()
-            let result = invoiceApi.Scan days
+            let ledger = invoiceApi.GetInvoices days
+            let problems = invoiceApi.GetProblems()
+            let scanResult = invoiceApi.Scan days
 
             transact (fun _ ->
                 match windows with
                 | Ok ws -> windowsCval.Value <- ws
                 | Error _ -> ()
 
-                match result with
-                | Ok scanResult ->
-                    invoicesCval.Value <- scanResult.Invoices
-                    problemsCval.Value <- scanResult.Problems
-                    selectedDaysCval.Value <- days
-                    errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
+                match ledger with
+                | Ok invoices -> invoicesCval.Value <- invoices
+                | Error _ -> ()
 
+                match problems with
+                | Ok ps -> problemsCval.Value <- ps
+                | Error _ -> ()
+
+                match scanResult with
+                | Ok result ->
+                    invoicesCval.Value <- result.Invoices
+                    problemsCval.Value <- result.Problems
+                    errorCval.Value <- None
+                | Error(ex: MyDogsbodyException) ->
+                    // the ledger (from GetInvoices above) is still shown; only the refresh failed
+                    errorCval.Value <- Some ex.Message
+
+                selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
 
     /// The initial load: resolve the remembered window through the API, then scan it.

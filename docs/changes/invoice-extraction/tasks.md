@@ -242,12 +242,12 @@ one file.
 
 ## Phase 11 — End to end (required)
 
-- [ ] **11.1** `E2E/InvoicesFlowTests.fs` against a real temp SQLite file and the Phase 1 fixtures:
+- [x] **11.1** `E2E/InvoicesFlowTests.fs` against a real temp SQLite file and the Phase 1 fixtures:
       a scan produces invoices; a window change persists and rescans; an invoice with no due date is
       greyed with its reason; a delete produces a tombstone and the row disappears; an un-delete
       restores it on the next scan; a problem row appears with sender and subject; a scan failure
       shows an alert with **exactly one entry logged**.
-- [ ] **11.2** Confirm no test reaches `Startup.Startup`.
+- [x] **11.2** Confirm no test reaches `Startup.Startup`.
 
 ## Phase 12 — Gate (required)
 
