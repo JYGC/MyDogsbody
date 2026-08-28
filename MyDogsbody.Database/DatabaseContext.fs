@@ -14,6 +14,11 @@ type DatabaseContext =
         GetSupplierMatchers: unit -> QuerySource<SupplierMatcherRecord>
         GetInvoiceTemplates: unit -> QuerySource<InvoiceTemplateRecord>
         GetTemplateFieldRules: unit -> QuerySource<TemplateFieldRuleRecord>
+        GetInvoices: unit -> QuerySource<InvoiceRecord>
+        GetScanProblems: unit -> QuerySource<ScanProblemRecord>
+        GetInvoiceTombstones: unit -> QuerySource<InvoiceTombstoneRecord>
+        GetScanWindows: unit -> QuerySource<ScanWindowRecord>
+        GetInvoiceSettings: unit -> QuerySource<InvoiceSettingsRecord>
 
         /// Closes the underlying SqliteConnection.
         ///

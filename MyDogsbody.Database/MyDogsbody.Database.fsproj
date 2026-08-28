@@ -12,6 +12,9 @@
     <Compile Include="SupplierStore.fs" />
     <Compile Include="TemplateRecordMappers.fs" />
     <Compile Include="TemplateStore.fs" />
+    <Compile Include="InvoiceRecordMappers.fs" />
+    <Compile Include="InvoiceStore.fs" />
+    <Compile Include="ScanWindowStore.fs" />
   </ItemGroup>
 
   <ItemGroup>

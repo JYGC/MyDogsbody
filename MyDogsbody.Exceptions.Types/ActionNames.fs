@@ -73,6 +73,26 @@ module MyDogsbody =
             let deleteOne = $"{templateStore}.deleteOne"
             let reorder = $"{templateStore}.reorder"
 
+        module InvoiceStore =
+            let private invoiceStore = $"{database}.InvoiceStore"
+            let getInvoices = $"{invoiceStore}.getInvoices"
+            let upsertInvoice = $"{invoiceStore}.upsertInvoice"
+            let deleteInvoice = $"{invoiceStore}.deleteInvoice"
+            let getTombstones = $"{invoiceStore}.getTombstones"
+            let saveTombstone = $"{invoiceStore}.saveTombstone"
+            let removeTombstone = $"{invoiceStore}.removeTombstone"
+            let getScanProblems = $"{invoiceStore}.getScanProblems"
+            let saveScanProblems = $"{invoiceStore}.saveScanProblems"
+            let clearScanProblems = $"{invoiceStore}.clearScanProblems"
+
+        module ScanWindowStore =
+            let private scanWindowStore = $"{database}.ScanWindowStore"
+            let getScanWindows = $"{scanWindowStore}.getScanWindows"
+            let saveScanWindow = $"{scanWindowStore}.saveScanWindow"
+            let deleteScanWindow = $"{scanWindowStore}.deleteScanWindow"
+            let getSelectedScanWindow = $"{scanWindowStore}.getSelectedScanWindow"
+            let saveSelectedScanWindow = $"{scanWindowStore}.saveSelectedScanWindow"
+
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
 
