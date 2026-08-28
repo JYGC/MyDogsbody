@@ -164,13 +164,13 @@ one file.
 
 ## Phase 6 — Migrations (required)
 
-- [ ] **6.1** *(test-first)* `…0004_CreateInvoicesTable`. Tests: columns; **the unique index on
+- [x] **6.1** *(test-first)* `…0004_CreateInvoicesTable`. Tests: columns; **the unique index on
       `(SupplierId, Reference)` refuses a duplicate**; both foreign keys; `Down()` reverses it.
-- [ ] **6.2** *(test-first)* `…0005_CreateScanProblemsTable`. Tests: columns; index on
+- [x] **6.2** *(test-first)* `…0005_CreateScanProblemsTable`. Tests: columns; index on
       `SourceMessageId`; `Down()`.
-- [ ] **6.3** *(test-first)* `…0006_CreateInvoiceTombstonesTable`. Tests: columns; unique index on
+- [x] **6.3** *(test-first)* `…0006_CreateInvoiceTombstonesTable`. Tests: columns; unique index on
       `(SupplierId, Reference)`; `Down()`.
-- [ ] **6.4** *(test-first)* `…0007_CreateScanWindowsTable` — **with `Insert.IntoTable` seeding 7,
+- [x] **6.4** *(test-first)* `…0007_CreateScanWindowsTable` — **with `Insert.IntoTable` seeding 7,
       14, 30, 90, 180** and a matching `Delete.FromTable` in `Down`.
       Tests: `Up` inserts exactly five rows; the unique index on `Days` refuses a sixth `14`;
       **`Down` removes the seeded rows**; **re-running migrations after a user deletes one does not
@@ -178,7 +178,7 @@ one file.
       *Outcome:* **the first migration in this repository that carries data as well as structure
       (friction #17). Say so in the change description — the next person will copy whichever
       migration they open first.**
-- [ ] **6.5** *(test-first)* `…0008_CreateInvoiceSettingsTable`. Tests: the primary key is fixed at a
+- [x] **6.5** *(test-first)* `…0008_CreateInvoiceSettingsTable`. Tests: the primary key is fixed at a
       single row and a second insert is refused; the setting column is nullable; `Down()`.
 
 ## Phase 7 — Stores (required)
