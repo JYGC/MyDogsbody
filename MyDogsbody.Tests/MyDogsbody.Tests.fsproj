@@ -102,6 +102,7 @@
     <Compile Include="Contracts\MessageNormalizationContractTests.fs" />
     <Compile Include="Contracts\GetCurrentTimeContractTests.fs" />
     <Compile Include="Contracts\DocumentReaderContractTests.fs" />
+    <Compile Include="Contracts\InvoiceDependencyContractTests.fs" />
     <Compile Include="Contracts\InvoicePersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />

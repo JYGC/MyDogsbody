@@ -233,11 +233,11 @@ one file.
 
 ## Phase 10 — Contract suites (required)
 
-- [ ] **10.1** One shared suite per new dependency function type — real adapter and every fake.
+- [x] **10.1** One shared suite per new dependency function type — real adapter and every fake.
       **`ReadDocumentText` and `ReadDocumentContent` get separate suites** (friction #7).
-- [ ] **10.2** `InvoiceApi` and `ScanWindowApi` contract suites: real records and every fake.
-- [ ] **10.3** Persisted-shape tests for all five new tables.
-- [ ] **10.4** Confirm no `ActionNames` entry remains under `Integrations.Pdf`, and the structural
+- [x] **10.2** `InvoiceApi` and `ScanWindowApi` contract suites: real records and every fake.
+- [x] **10.3** Persisted-shape tests for all five new tables.
+- [x] **10.4** Confirm no `ActionNames` entry remains under `Integrations.Pdf`, and the structural
       suite passes.
 
 ## Phase 11 — End to end (required)
