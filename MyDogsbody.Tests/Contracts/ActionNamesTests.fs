@@ -227,3 +227,16 @@ let ``no two bindings declare the same action`` () =
         + String.Join("; ", duplicates |> List.map describe)
 
     Assert.True(List.isEmpty duplicates, message)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``no action is still declared under the old Integrations.Pdf module`` () =
+    // Phase 0 of change #4 renamed Integrations.Pdf -> Integrations.Documents. The structural
+    // suite would not notice a leftover .Pdf. entry, so it is asserted directly (task 10.4).
+    for name, value in allDeclaredActions () do
+        Assert.DoesNotContain(".Integrations.Pdf.", value)
+        Assert.False(name.Contains "+Pdf+", $"{name} is still nested under a Pdf module")
+
+    Assert.Contains(
+        "MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent",
+        allDeclaredActions () |> List.map snd
+    )

@@ -101,6 +101,8 @@
     <Compile Include="Contracts\ThunderbirdPersistedShapeTests.fs" />
     <Compile Include="Contracts\MessageNormalizationContractTests.fs" />
     <Compile Include="Contracts\GetCurrentTimeContractTests.fs" />
+    <Compile Include="Contracts\DocumentReaderContractTests.fs" />
+    <Compile Include="Contracts\InvoicePersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
