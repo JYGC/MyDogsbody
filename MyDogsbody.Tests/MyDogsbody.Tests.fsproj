@@ -54,6 +54,7 @@
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
     <Compile Include="Integrations\Documents\PdfDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\WordDocumentReaderTests.fs" />
+    <Compile Include="Integrations\Documents\PlainTextDocumentReaderTests.fs" />
     <Compile Include="Logging\ExceptionStoreTests.fs" />
     <Compile Include="Database\MigrationTestHelpers.fs" />
     <Compile Include="Database\MigrationsTests.fs" />

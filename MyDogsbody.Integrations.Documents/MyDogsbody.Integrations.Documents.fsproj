@@ -12,6 +12,7 @@
     -->
     <Compile Include="PdfDocumentReader.fs" />
     <Compile Include="WordDocumentReader.fs" />
+    <Compile Include="PlainTextDocumentReader.fs" />
   </ItemGroup>
 
     <ItemGroup>
