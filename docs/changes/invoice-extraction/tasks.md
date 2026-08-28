@@ -56,31 +56,31 @@ one file.
 
 ## Phase 1 — The reading capability (required)
 
-- [ ] **1.1** *(test-first)* `DocumentSource` and `ReadDocumentText` added to
+- [x] **1.1** *(test-first)* `DocumentSource` and `ReadDocumentText` added to
       `Domain/Documents/DocumentsTypes.fs`; `DocumentError` gains `DocumentFormatUnsupported` and
       `DocumentHasNoTextLayer`.
       *Outcome:* declared **beside** `ReadDocumentContent`, which is untouched (friction #7).
-- [ ] **1.2** Fixture documents in `Fixtures/Documents/`: a normal PDF; **a PDF with no text layer**;
+- [x] **1.2** Fixture documents in `Fixtures/Documents/`: a normal PDF; **a PDF with no text layer**;
       **a PDF that cannot be opened**; a `.docx`; a legacy binary `.doc`; an `.xlsx`; a plain-text
       attachment; a message with both `text/plain` and `text/html`; an HTML body whose values sit in
       table cells. **Synthetic, no real invoice content.**
-- [ ] **1.3** *(test-first)* `PdfDocumentReader.readText` — the same adapter now satisfying **both**
+- [x] **1.3** *(test-first)* `PdfDocumentReader.readText` — the same adapter now satisfying **both**
       capabilities.
       Tests: text extracted with block indices; **no text layer → `DocumentHasNoTextLayer`**; a
       corrupt file → `DocumentUnreadable`; `readContent` still behaves exactly as before.
       *Note:* 94.7% of measured PDFs have a text layer and only 1.6% do not — **no OCR**.
       *Depends on:* 1.1, 1.2, 0.5.
-- [ ] **1.4** *(test-first)* `WordDocumentReader.readText` — `.docx` only, via DocumentFormat.OpenXml.
+- [x] **1.4** *(test-first)* `WordDocumentReader.readText` — `.docx` only, via DocumentFormat.OpenXml.
       Tests: text extracted with paragraph block indices; **a legacy `.doc` returns
       `DocumentFormatUnsupported "doc"`, naming the format** (friction #8 — silence looks identical
       to "this supplier sends nothing").
-- [ ] **1.5** *(test-first)* `PlainTextDocumentReader.readText`. Tests: decoding; lines split; blank
+- [x] **1.5** *(test-first)* `PlainTextDocumentReader.readText`. Tests: decoding; lines split; blank
       lines become block boundaries.
-- [ ] **1.6** *(test-first)* `EmailBodyReader.readText`.
+- [x] **1.6** *(test-first)* `EmailBodyReader.readText`.
       Tests: with both alternatives present, **the HTML is used** (*Finding 5*); block boundaries come
       from table cells and paragraphs, **not** from line breaks; with only plain text present, that
       is used; markup is stripped only when there is no structured alternative.
-- [ ] **1.7** *(test-first)* Format dispatch at the composition root — **by filename extension, never
+- [x] **1.7** *(test-first)* Format dispatch at the composition root — **by filename extension, never
       by declared content type**.
       Tests: a PDF declared `application/octet-stream` routes to the PDF reader; one declared
       `application/.pdf` does too; an `.xlsx` routes to no reader and yields

@@ -49,6 +49,31 @@ type ReadDocumentContent = DocumentPath -> Result<DocumentContent, DocumentError
 /// because F# keeps types and union-case values in separate namespaces.
 type DocumentFormat = Pdf | Word | PlainText | EmailBody
 
+module DocumentFormat =
+
+    /// The reader for an attachment is chosen by its FILENAME EXTENSION, never by the declared
+    /// content type - 155 of 644 measured PDFs declare application/octet-stream and 4 declare
+    /// application/.pdf, so dispatching on the declared type misroutes a quarter of them. This
+    /// function does not take a content type at all.
+    ///
+    /// EmailBody has no filename, so it is never returned here - ScanMessageWorkflow sets it
+    /// directly for a message body. On an unknown or absent extension the lower-cased extension
+    /// (or "none") comes back as the Error, so the scan problem can name the format.
+    let ofFileName (fileName: string) : Result<DocumentFormat, string> =
+        let extension =
+            match fileName with
+            | null -> ""
+            | name -> System.IO.Path.GetExtension(name).TrimStart('.').ToLowerInvariant()
+
+        match extension with
+        | "pdf" -> Ok Pdf
+        | "docx"
+        | "doc" -> Ok Word
+        | "txt"
+        | "text" -> Ok PlainText
+        | "" -> Error "none"
+        | other -> Error other
+
 /// A line of extracted text and the block it came from.
 ///
 /// BlockIndex is what makes Finding 4's join rule expressible: a wrapped continuation may be
