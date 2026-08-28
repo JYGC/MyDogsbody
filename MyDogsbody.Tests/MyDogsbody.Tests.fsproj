@@ -74,6 +74,9 @@
     <Compile Include="Database\TemplateRecordMappersTests.fs" />
     <Compile Include="Database\TemplateStoreTests.fs" />
     <Compile Include="Database\SupplierStoreTests.fs" />
+    <Compile Include="Database\InvoiceRecordMappersTests.fs" />
+    <Compile Include="Database\InvoiceStoreTests.fs" />
+    <Compile Include="Database\ScanWindowStoreTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />

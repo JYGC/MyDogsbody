@@ -183,17 +183,17 @@ one file.
 
 ## Phase 7 — Stores (required)
 
-- [ ] **7.1** *(test-first)* Records and mappers for invoices, problems and tombstones.
+- [x] **7.1** *(test-first)* Records and mappers for invoices, problems and tombstones.
       Tests: field-for-field both directions; **`ScanProblemCause` round-trips exhaustively** — one
       test per case, plus a reflection-driven test that fails if a case has no encoding.
-- [ ] **7.2** *(test-first)* `InvoiceStore.fs` — load, upsert, delete, tombstones, problems.
+- [x] **7.2** *(test-first)* `InvoiceStore.fs` — load, upsert, delete, tombstones, problems.
       Tests *(Integration)*: real temp SQLite; upsert on the natural key; the unique index as a
       backstop; problems written and cleared; tombstones round-trip.
       Tests *(Unit)*: each error path asserts its `ActionNames` string, message and inner exception.
-- [ ] **7.3** *(test-first)* `ScanWindowStore.fs` — windows and the remembered selection.
+- [x] **7.3** *(test-first)* `ScanWindowStore.fs` — windows and the remembered selection.
       Tests *(Integration)*: the seeded five are present after migration; add, delete; the selection
       persists as a **number**; a fresh database returns `None` for the selection.
-- [ ] **7.4** `ActionNames.MyDogsbody.Database.InvoiceStore.*` and `.ScanWindowStore.*`.
+- [x] **7.4** `ActionNames.MyDogsbody.Database.InvoiceStore.*` and `.ScanWindowStore.*`.
 
 ## Phase 8 — Composition root (required)
 
