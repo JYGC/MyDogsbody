@@ -2,7 +2,7 @@
 ///
 /// PdfPig lives here and nowhere else. The workflow that groups words into lines sees a function
 /// value, so it needs no file and no library to be tested.
-module MyDogsbody.Integrations.Pdf.PdfDocumentReader
+module MyDogsbody.Integrations.Documents.PdfDocumentReader
 
 open System
 open System.IO
@@ -15,7 +15,7 @@ let readContent
     (handleError: HandleErrorBuilder)
     (path: DocumentPath)
     : Result<DocumentContent, MyDogsbodyException> =
-    let action = ActionNames.MyDogsbody.Integrations.Pdf.PdfDocumentReader.readContent
+    let action = ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent
     let pdfPath = DocumentPath.value path
 
     handleError {

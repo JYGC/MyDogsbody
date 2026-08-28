@@ -51,7 +51,7 @@
     <Compile Include="Integrations\Thunderbird\ThunderbirdStoreTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialsDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
-    <Compile Include="Integrations\Pdf\PdfDocumentReaderTests.fs" />
+    <Compile Include="Integrations\Documents\PdfDocumentReaderTests.fs" />
     <Compile Include="Logging\ExceptionStoreTests.fs" />
     <Compile Include="Database\MigrationTestHelpers.fs" />
     <Compile Include="Database\MigrationsTests.fs" />
@@ -111,7 +111,7 @@
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Documents\MyDogsbody.Integrations.Documents.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Startup\MyDogsbody.Startup.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />

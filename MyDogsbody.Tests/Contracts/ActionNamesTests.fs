@@ -10,7 +10,7 @@ open MyDogsbody.Exceptions.Types
 open MyDogsbody.Domain.Credentials
 open MyDogsbody.Domain.Documents
 open MyDogsbody.Integrations.Credentials
-open MyDogsbody.Integrations.Pdf
+open MyDogsbody.Integrations.Documents
 open MyDogsbody.Logging.Repositories
 open MyDogsbody.Logging.Types
 open MyDogsbody.Startup
@@ -86,7 +86,7 @@ let ``PdfDocumentReader.readContent reports its declared action`` () =
 
     // Assert
     Assert.Equal(
-        ActionNames.MyDogsbody.Integrations.Pdf.PdfDocumentReader.readContent,
+        ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent,
         PdfDocumentReader.readContent handleError missing |> actionOf
     )
 

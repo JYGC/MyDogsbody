@@ -1,4 +1,4 @@
-module MyDogsbody.Tests.Integrations.Pdf.PdfDocumentReaderTests
+module MyDogsbody.Tests.Integrations.Documents.PdfDocumentReaderTests
 
 open System
 open System.IO
@@ -9,7 +9,7 @@ open UglyToad.PdfPig.Core
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Domain.Documents
-open MyDogsbody.Integrations.Pdf
+open MyDogsbody.Integrations.Documents
 
 /// Records what the builder was asked to log, so the unlogged-failure idiom can be asserted.
 let private recordingHandleError () =
@@ -55,7 +55,7 @@ let ``readContent returns Error without logging when the file does not exist`` (
     // Assert
     match actual with
     | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Pdf.PdfDocumentReader.readContent, ex.ActionName)
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, ex.ActionName)
         Assert.Equal($"PDF file does not exist: {missingPath}", ex.Message)
         Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
         Assert.Empty logged
@@ -74,7 +74,7 @@ let ``readContent returns Error and logs when the file is not a readable PDF`` (
         // Assert
         match actual with
         | Error ex ->
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Pdf.PdfDocumentReader.readContent, ex.ActionName)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, ex.ActionName)
             Assert.Equal("Failed to extract content from PDF.", ex.Message)
             Assert.NotNull ex.InnerException
             // Unexpected failure: this one is logged.

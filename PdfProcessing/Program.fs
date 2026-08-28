@@ -12,7 +12,7 @@ open MyDogsbody.Logging.Database
 open MyDogsbody.Logging.Types
 open MyDogsbody.Logging.UseCases
 open MyDogsbody.Domain.Documents
-open MyDogsbody.Integrations.Pdf
+open MyDogsbody.Integrations.Documents
 
 let private describe (error: DocumentError) =
     match error with

@@ -85,11 +85,11 @@ module MyDogsbody =
                 let insertOne = $"{credentialStore}.insertOne"
                 let updateOne = $"{credentialStore}.updateOne"
 
-        module Pdf =
-            let private pdf = $"{integrations}.Pdf"
+        module Documents =
+            let private documents = $"{integrations}.Documents"
 
             module PdfDocumentReader =
-                let private pdfDocumentReader = $"{pdf}.PdfDocumentReader"
+                let private pdfDocumentReader = $"{documents}.PdfDocumentReader"
                 let readContent = $"{pdfDocumentReader}.readContent"
 
         /// Only ThunderbirdStore's functions appear here - ThunderbirdFolderScanner,
