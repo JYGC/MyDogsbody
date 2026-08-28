@@ -49,6 +49,10 @@
     <Compile Include="Invoices\MatchSupplierWorkflow.fs" />
     <Compile Include="Invoices\ApplyTemplateWorkflow.fs" />
     <Compile Include="Invoices\SelectTemplateWorkflow.fs" />
+    <Compile Include="Invoices\ResolveScanWindowWorkflow.fs" />
+    <Compile Include="Invoices\ValidateInvoiceWorkflow.fs" />
+    <Compile Include="Invoices\ScanMessageWorkflow.fs" />
+    <Compile Include="Invoices\ScanForInvoicesWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">

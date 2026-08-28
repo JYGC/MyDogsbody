@@ -107,19 +107,19 @@ one file.
 
 ## Phase 3 — Pure workflows (required)
 
-- [ ] **3.1** *(test-first)* Cutoff arithmetic — a private pure function in
+- [x] **3.1** *(test-first)* Cutoff arithmetic — a private pure function in
       `ScanForInvoicesWorkflow.fs`.
       Tests, with a **fixed clock**: 14 days back from a fixed date gives an exact date; **09:00 and
       17:00 on the same day give the same cutoff** (Q1.18); 180 days back across a year boundary;
       1 day and 3650 days.
-- [ ] **3.2** *(test-first)* `ResolveScanWindowWorkflow` — pure, total.
+- [x] **3.2** *(test-first)* `ResolveScanWindowWorkflow` — pure, total.
       Tests, all four rows of the table in `design.md`: nothing remembered → 14; remembered and
       present → that one; **remembered but since deleted → 14**; remembered deleted *and* 14 deleted
       → the shortest remaining. **The third and fourth are the cases nobody tries by hand.**
-- [ ] **3.3** *(test-first)* `ValidateInvoiceWorkflow` — pure.
+- [x] **3.3** *(test-first)* `ValidateInvoiceWorkflow` — pure.
       Tests: Ok with every field asserted; **a missing due date is Ok, not an error** (Q1.10); an
       invalid reference, amount or currency each returns its own case with the raw value carried.
-- [ ] **3.4** *(test-first)* `ScanMessageWorkflow` — flatten a mail message to a `ScannedMessage`.
+- [x] **3.4** *(test-first)* `ScanMessageWorkflow` — flatten a mail message to a `ScannedMessage`.
       Tests: body and every attachment become parts with block indices; the subject is carried;
       **one unreadable attachment yields a problem cause and the other parts still arrive** (design
       decision 3); an attachment with no reader yields `FormatUnsupported` naming the format.

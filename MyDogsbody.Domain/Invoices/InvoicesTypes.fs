@@ -19,6 +19,19 @@ module SourceMessageId =
 
     let value (SourceMessageId id) = id
 
+    /// Never fails: a blank id is replaced by the fallback text (itself never blank). A message
+    /// with no Message-ID already gets a synthesized one in the mail reader, so this only guards
+    /// against a torn read - and a problem keyed by nothing is worse than one keyed by a
+    /// stand-in.
+    let createOrDefault (fallback: string) (value: string) : SourceMessageId =
+        match create value with
+        | Ok id -> id
+        | Error _ ->
+            if System.String.IsNullOrWhiteSpace fallback then
+                SourceMessageId "unidentified-message"
+            else
+                SourceMessageId fallback
+
 /// Which part of a message some text came from.
 type MessagePart =
     | SubjectPart
@@ -159,7 +172,7 @@ module InvoiceReference =
 /// An amount and its currency code. Q1.2 makes currency part of what an invoice is; Q7.6.8 makes
 /// it a per-template FixedValue, overridable by a rule. 96% of measured documents carry `$` and
 /// every one sampled is AUD.
-type Money = private Money of amount: decimal * currency: string
+type Money = private Money of decimal * string // amount, currency code
 
 module Money =
 
@@ -265,6 +278,11 @@ module ScanWindowDays =
 
     /// Used when nothing has been chosen yet, or the remembered choice no longer exists.
     let fallback = 14
+
+    /// The same value as a ScanWindowDays. Built with the private constructor because `fallback`
+    /// is inside the bounds by construction - ResolveScanWindowWorkflow needs it without a
+    /// Result to unwrap.
+    let fallbackWindow = ScanWindowDays fallback
 
 type ScanWindowId = private ScanWindowId of string
 

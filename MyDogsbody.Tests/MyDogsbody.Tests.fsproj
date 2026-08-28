@@ -38,6 +38,10 @@
     <Compile Include="Domain\Invoices\MatchSupplierWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ApplyTemplateWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\SelectTemplateWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ResolveScanWindowWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ValidateInvoiceWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ScanMessageWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ScanForInvoicesWorkflowTests.fs" />
     <Compile Include="Fixtures\ThunderbirdFixturePaths.fs" />
     <Compile Include="Fixtures\DocumentFixtures.fs" />
     <Compile Include="Fixtures\MeasuredTemplates.fs" />
