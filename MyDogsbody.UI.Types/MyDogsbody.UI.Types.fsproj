@@ -20,6 +20,8 @@
     <Compile Include="MailAccountApi.fs" />
     <Compile Include="FolderPicker.fs" />
     <Compile Include="Modules\MailAccountsBrowserModule.fs" />
+    <Compile Include="InvoiceUiType.fs" />
+    <Compile Include="InvoiceApi.fs" />
   </ItemGroup>
 
   <ItemGroup>

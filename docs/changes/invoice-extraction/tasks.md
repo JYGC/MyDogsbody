@@ -197,15 +197,15 @@ one file.
 
 ## Phase 8 — Composition root (required)
 
-- [ ] **8.1** *(test-first)* `InvoiceApiMappers.fs` and `ScanWindowApiMappers.fs`.
+- [x] **8.1** *(test-first)* `InvoiceApiMappers.fs` and `ScanWindowApiMappers.fs`.
       Tests: field-for-field both directions; **`ScanWindowUiType.Label` is composed by the mapper**,
       not by the component; each `InvoiceError` case → its intended action and message with the
       expected/unexpected split asserted.
-- [ ] **8.2** *(test-first)* `InvoiceApiFactory` and `ScanWindowApiFactory`.
+- [x] **8.2** *(test-first)* `InvoiceApiFactory` and `ScanWindowApiFactory`.
       Tests *(Integration)*: every member against a real temp database and the Phase 1 fixtures.
       No module-level I/O.
-- [ ] **8.3** `ActionNames.MyDogsbody.Startup.InvoiceApi.*` and `.ScanWindowApi.*`.
-- [ ] **8.4** `Startup.fs`: bind `GetCurrentTime` to `fun () -> DateTime.Now`, bind the four readers
+- [x] **8.3** `ActionNames.MyDogsbody.Startup.InvoiceApi.*` and `.ScanWindowApi.*`.
+- [x] **8.4** `Startup.fs`: bind `GetCurrentTime` to `fun () -> DateTime.Now`, bind the four readers
       behind one `ReadDocumentText` dispatching on format, register both APIs.
       *Outcome:* `MainWindow.xaml.cs` unchanged.
 

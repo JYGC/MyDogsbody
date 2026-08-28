@@ -42,6 +42,23 @@ module MyDogsbody =
             let reorderTemplates = $"{templateApi}.reorderTemplates"
             let testTemplate = $"{templateApi}.testTemplate"
 
+        module InvoiceApi =
+            let private invoiceApi = $"{startup}.InvoiceApi"
+            let scan = $"{invoiceApi}.scan"
+            let getInvoices = $"{invoiceApi}.getInvoices"
+            let deleteInvoice = $"{invoiceApi}.deleteInvoice"
+            let getProblems = $"{invoiceApi}.getProblems"
+            let getTombstones = $"{invoiceApi}.getTombstones"
+            let undeleteInvoice = $"{invoiceApi}.undeleteInvoice"
+
+        module ScanWindowApi =
+            let private scanWindowApi = $"{startup}.ScanWindowApi"
+            let getScanWindows = $"{scanWindowApi}.getScanWindows"
+            let addScanWindow = $"{scanWindowApi}.addScanWindow"
+            let deleteScanWindow = $"{scanWindowApi}.deleteScanWindow"
+            let getSelectedScanWindow = $"{scanWindowApi}.getSelectedScanWindow"
+            let selectScanWindow = $"{scanWindowApi}.selectScanWindow"
+
         module MailAccountApi =
             let private mailAccountApi = $"{startup}.MailAccountApi"
             let getProfileRoot = $"{mailAccountApi}.getProfileRoot"
