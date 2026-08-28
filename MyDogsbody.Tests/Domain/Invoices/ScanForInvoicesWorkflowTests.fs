@@ -2,6 +2,9 @@ module MyDogsbody.Tests.Domain.Invoices.ScanForInvoicesWorkflowTests
 
 open System
 open Xunit
+open MyDogsbody.Domain.Documents
+open MyDogsbody.Domain.Suppliers
+open MyDogsbody.Domain.InvoiceTemplates
 open MyDogsbody.Domain.MailAccounts
 open MyDogsbody.Domain.Invoices
 open MyDogsbody.Domain.Invoices.ScanForInvoicesWorkflow
@@ -13,6 +16,128 @@ let private orFail =
 
 let private window (d: int) = ScanWindowDays.create d |> orFail
 let private clock (instant: DateTime) : GetCurrentTime = fun () -> instant
+
+// ============================ shared scan test kit ============================
+
+let private accountId = MailAccountId.create "acct-1" |> orFail
+
+let private matcher kind value = SupplierMatcher.create kind value |> orFail
+
+/// A supplier that matches anything from acme.test, net 0.
+let private acme =
+    { Id = SupplierId.create "acme" |> orFail
+      Name = SupplierName.create "Acme Pty Ltd" |> orFail
+      PaymentTermDays = PaymentTermDays.create 0 |> orFail
+      Matchers = [ matcher Domain "acme.test" ] }
+
+/// A template: Reference from "Invoice:", Amount from "Total:", Currency fixed AUD.
+let private acmeTemplate =
+    let unvalidated: UnvalidatedTemplate =
+        { SupplierId = "acme"
+          Name = "Acme default"
+          Part = AnyPart
+          Position = 0
+          Rules =
+            [ { Field = Reference; Rule = AfterLabel "Invoice:"; Hint = AsText }
+              { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+              { Field = Currency; Rule = FixedValue "AUD"; Hint = AsText } ] }
+
+    { Id = TemplateId.create "acme-t1" |> orFail
+      Template = ValidateTemplateWorkflow.validateTemplate unvalidated |> orFail }
+
+/// A mail message from Acme whose plain-text body carries the two labels.
+let private acmeMessage (id: string) (reference: string) : MailMessage =
+    { SourceMessageId = id
+      Sender = "billing@acme.test"
+      Subject = $"Invoice {reference}"
+      ReceivedAt = DateTime(2026, 6, 1, 10, 0, 0)
+      BodyText = Some $"Invoice: {reference}\nTotal: 100.00"
+      BodyHtml = None
+      Attachments = [] }
+
+/// A reader that decodes bytes and splits on newlines - format-agnostic, enough for body text.
+let private textReader: ReadDocumentText =
+    fun source ->
+        Text.Encoding.UTF8.GetString source.Content
+        |> fun s -> s.Replace("\r\n", "\n").Split('\n')
+        |> Array.toList
+        |> List.mapi (fun i t -> { Text = t; BlockIndex = i })
+        |> Ok
+
+/// Records every ValidInvoice upserted and assigns it a StoredInvoice id, upserting on the
+/// natural key so a rescan updates rather than adds.
+type private FakeLedger() =
+    let mutable rows: (string * string * ValidInvoice) list = []
+    member _.Rows = rows
+
+    member _.Upsert: UpsertInvoice =
+        fun invoice ->
+            let key = SupplierId.value invoice.SupplierId, InvoiceReference.value invoice.Reference
+
+            rows <-
+                (rows |> List.filter (fun (s, r, _) -> (s, r) <> key))
+                @ [ fst key, snd key, invoice ]
+
+            let index = rows |> List.findIndex (fun (s, r, _) -> (s, r) = key)
+
+            Ok
+                { Id = InvoiceId.create $"row-{index}" |> orFail
+                  Invoice = invoice
+                  ScannedAt = DateTime(2026, 6, 1) }
+
+/// Records problem batches saved and message-id batches cleared.
+type private FakeProblemLog() =
+    member val Saved: ScanProblem list list = [] with get, set
+    member val Cleared: SourceMessageId list list = [] with get, set
+
+    member this.Save: SaveScanProblems =
+        fun problems ->
+            this.Saved <- this.Saved @ [ problems ]
+            Ok()
+
+    member this.Clear: ClearScanProblems =
+        fun ids ->
+            this.Cleared <- this.Cleared @ [ ids ]
+            Ok()
+
+/// The default happy-path wiring; individual tests override one dependency.
+type private Deps =
+    { GetCurrentTime: GetCurrentTime
+      LoadSelectedMailAccount: LoadSelectedMailAccount
+      ReadMailFolder: ReadMailFolder
+      ReadDocumentText: ReadDocumentText
+      LoadSuppliers: LoadSuppliers
+      LoadTemplatesForSupplier: LoadTemplatesForSupplier
+      LoadTombstones: LoadTombstones
+      UpsertInvoice: UpsertInvoice
+      SaveScanProblems: SaveScanProblems
+      ClearScanProblems: ClearScanProblems }
+
+let private run (deps: Deps) (windowDays: int) =
+    scanForInvoices
+        deps.GetCurrentTime
+        deps.LoadSelectedMailAccount
+        deps.ReadMailFolder
+        deps.ReadDocumentText
+        deps.LoadSuppliers
+        deps.LoadTemplatesForSupplier
+        deps.LoadTombstones
+        deps.UpsertInvoice
+        deps.SaveScanProblems
+        deps.ClearScanProblems
+        (window windowDays)
+
+let private baseDeps (messages: MailMessage list) (ledger: FakeLedger) (log: FakeProblemLog) : Deps =
+    { GetCurrentTime = clock (DateTime(2026, 6, 15, 12, 0, 0))
+      LoadSelectedMailAccount = fun () -> Ok(Some accountId)
+      ReadMailFolder = fun _ _ -> Ok messages
+      ReadDocumentText = textReader
+      LoadSuppliers = fun () -> Ok [ acme ]
+      LoadTemplatesForSupplier = fun _ -> Ok [ acmeTemplate ]
+      LoadTombstones = fun () -> Ok []
+      UpsertInvoice = ledger.Upsert
+      SaveScanProblems = log.Save
+      ClearScanProblems = log.Clear }
 
 // ---- task 3.1: cutoff arithmetic, fixed clock, exact dates ----
 
@@ -43,3 +168,229 @@ let ``a one-day and a ten-year window both land on the start of the day that man
     let cutoff = computeCutoff (clock now) (window d)
     Assert.Equal(now.Date.AddDays(float -d), ScanCutoff.value cutoff)
     Assert.Equal(TimeSpan.Zero, (ScanCutoff.value cutoff).TimeOfDay)
+
+// ============================ task 4.1: the scan ============================
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a message matching a supplier and template becomes a stored invoice, every field asserted`` () =
+    let ledger = FakeLedger()
+    let log = FakeProblemLog()
+
+    match run (baseDeps [ acmeMessage "m1" "INV-900" ] ledger log) 30 with
+    | Ok result ->
+        Assert.Empty result.Problems
+        let stored = Assert.Single result.Invoices
+        Assert.Equal("row-0", InvoiceId.value stored.Id)
+        let invoice = stored.Invoice
+        Assert.Equal("acme", SupplierId.value invoice.SupplierId)
+        Assert.Equal("acme-t1", TemplateId.value invoice.TemplateId)
+        Assert.Equal("m1", SourceMessageId.value invoice.SourceMessageId)
+        Assert.Equal("INV-900", InvoiceReference.value invoice.Reference)
+        Assert.Equal(100.00m, Money.amount invoice.Amount)
+        Assert.Equal("AUD", Money.currency invoice.Amount)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``no account selected short-circuits with the mail reader never called`` () =
+    let mutable readCalled = false
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            LoadSelectedMailAccount = fun () -> Ok None
+            ReadMailFolder =
+                fun _ _ ->
+                    readCalled <- true
+                    Ok [] }
+
+    match run deps 14 with
+    | Error NoAccountSelected -> Assert.False(readCalled, "readMailFolder must not be called")
+    | other -> Assert.Fail($"Expected Error NoAccountSelected, got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the cutoff handed to the mail reader is the one computeCutoff produces`` () =
+    let mutable seen: ScanCutoff option = None
+    let now = DateTime(2026, 6, 15, 12, 0, 0)
+
+    let deps =
+        { baseDeps [] (FakeLedger()) (FakeProblemLog()) with
+            GetCurrentTime = clock now
+            ReadMailFolder =
+                fun _ cutoff ->
+                    seen <- Some cutoff
+                    Ok [] }
+
+    run deps 90 |> ignore
+
+    Assert.Equal(
+        Some(ScanCutoff.value (computeCutoff (clock now) (window 90))),
+        seen |> Option.map ScanCutoff.value
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a message that yields nothing produces a problem and the scan continues`` () =
+    let ledger = FakeLedger()
+    let log = FakeProblemLog()
+    let stranger = { acmeMessage "m-stranger" "X" with Sender = "noreply@unknown.test" }
+    let deps = baseDeps [ stranger; acmeMessage "m-good" "INV-2" ] ledger log
+
+    match run deps 30 with
+    | Ok result ->
+        Assert.Single result.Invoices |> ignore
+        let problem = Assert.Single result.Problems
+        Assert.Equal("m-stranger", SourceMessageId.value problem.SourceMessageId)
+        Assert.Equal("noreply@unknown.test", problem.Sender)
+        Assert.Equal(NoSupplierMatched, problem.Cause)
+        Assert.Equal<ScanProblem list list>([ result.Problems ], log.Saved)
+        Assert.Equal<SourceMessageId list list>([ [ SourceMessageId.create "m-good" |> orFail ] ], log.Cleared)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``two suppliers matching one message is a problem naming all of them`` () =
+    let acme2 = { acme with Id = SupplierId.create "acme-2" |> orFail }
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            LoadSuppliers = fun () -> Ok [ acme; acme2 ] }
+
+    match run deps 30 with
+    | Ok result ->
+        Assert.Empty result.Invoices
+
+        match (Assert.Single result.Problems).Cause with
+        | SeveralSuppliersMatched ids ->
+            Assert.Equal<string list>([ "acme"; "acme-2" ], ids |> List.map SupplierId.value |> List.sort)
+        | other -> Assert.Fail($"Expected SeveralSuppliersMatched, got {other}")
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``no template for the matched supplier is a NoTemplateMatched problem`` () =
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            LoadTemplatesForSupplier = fun _ -> Ok [] }
+
+    match run deps 30 with
+    | Ok result ->
+        match (Assert.Single result.Problems).Cause with
+        | NoTemplateMatched sid -> Assert.Equal("acme", SupplierId.value sid)
+        | other -> Assert.Fail($"Expected NoTemplateMatched, got {other}")
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a rule that finds nothing is RuleFoundNothing naming supplier, template and field`` () =
+    let missingRef = { acmeMessage "m1" "X" with BodyText = Some "Total: 100.00" }
+
+    match run (baseDeps [ missingRef ] (FakeLedger()) (FakeProblemLog())) 30 with
+    | Ok result ->
+        match (Assert.Single result.Problems).Cause with
+        | RuleFoundNothing(sid, tid, field) ->
+            Assert.Equal("acme", SupplierId.value sid)
+            Assert.Equal("acme-t1", TemplateId.value tid)
+            Assert.Equal("Reference", field)
+        | other -> Assert.Fail($"Expected RuleFoundNothing, got {other}")
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an unreadable attachment on an unmatched message is an AttachmentUnreadable problem`` () =
+    let brokenReader: ReadDocumentText =
+        fun source ->
+            if source.Name.EndsWith ".pdf" then Error(DocumentUnreadable "corrupt") else textReader source
+
+    let stranger =
+        { acmeMessage "m1" "X" with
+            Sender = "noreply@unknown.test"
+            Attachments = [ { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] } ] }
+
+    let deps =
+        { baseDeps [ stranger ] (FakeLedger()) (FakeProblemLog()) with ReadDocumentText = brokenReader }
+
+    match run deps 30 with
+    | Ok result ->
+        match (Assert.Single result.Problems).Cause with
+        | AttachmentUnreadable("invoice.pdf", reason) -> Assert.Equal("corrupt", reason)
+        | other -> Assert.Fail($"Expected AttachmentUnreadable, got {other}")
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+// ============================ task 4.2: upsert and the natural key ============================
+
+[<Fact; Trait("Level", "Unit")>]
+let ``rescanning an overlapping window updates rather than duplicates`` () =
+    let ledger = FakeLedger()
+
+    run (baseDeps [ acmeMessage "m1" "INV-5" ] ledger (FakeProblemLog())) 30 |> ignore
+
+    let updated = { acmeMessage "m1" "INV-5" with BodyText = Some "Invoice: INV-5\nTotal: 250.00" }
+    let result = run (baseDeps [ updated ] ledger (FakeProblemLog())) 30 |> orFail
+
+    Assert.Equal(1, List.length result.Invoices)
+    Assert.Equal(1, List.length ledger.Rows)
+    let _, _, stored = List.head ledger.Rows
+    Assert.Equal(250.00m, Money.amount stored.Amount)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a supplier deleted at upsert time becomes a problem, not a stored row`` () =
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            UpsertInvoice = fun invoice -> Error(SupplierGone invoice.SupplierId) }
+
+    match run deps 30 with
+    | Ok result ->
+        Assert.Empty result.Invoices
+        Assert.Equal(NoSupplierMatched, (Assert.Single result.Problems).Cause)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a store failure at upsert aborts the scan with that error`` () =
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            UpsertInvoice = fun _ -> Error(InvoiceStoreFailed "disk full") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed "disk full") -> ()
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed), got {other}")
+
+// ============================ task 4.3: tombstones ============================
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a tombstoned key is skipped - no invoice, no problem`` () =
+    let ledger = FakeLedger()
+
+    let tombstone: InvoiceTombstone =
+        { SupplierId = SupplierId.create "acme" |> orFail
+          Reference = InvoiceReference.create "INV-7" |> orFail
+          DeletedAt = DateTime(2026, 5, 1) }
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-7" ] ledger (FakeProblemLog()) with
+            LoadTombstones = fun () -> Ok [ tombstone ] }
+
+    let result = run deps 30 |> orFail
+    Assert.Empty result.Invoices
+    Assert.Empty result.Problems
+    Assert.Empty ledger.Rows
+
+[<Fact; Trait("Level", "Unit")>]
+let ``removing the tombstone lets the next scan store the invoice again`` () =
+    let ledger = FakeLedger()
+    let result = run (baseDeps [ acmeMessage "m1" "INV-7" ] ledger (FakeProblemLog())) 30 |> orFail
+    Assert.Equal(1, List.length result.Invoices)
+
+// ============================ task 4.4: problem lifecycle ============================
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a scan clears problems only for the messages it processed and which now succeed`` () =
+    let log = FakeProblemLog()
+    run (baseDeps [ acmeMessage "only-this-one" "INV-1" ] (FakeLedger()) log) 30 |> ignore
+
+    Assert.Equal<SourceMessageId list list>(
+        [ [ SourceMessageId.create "only-this-one" |> orFail ] ],
+        log.Cleared
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a scan with only failures saves problems and clears nothing`` () =
+    let log = FakeProblemLog()
+    let stranger = { acmeMessage "m1" "X" with Sender = "noreply@unknown.test" }
+    run (baseDeps [ stranger ] (FakeLedger()) log) 30 |> ignore
+
+    Assert.Equal(1, List.length log.Saved)
+    Assert.Empty log.Cleared

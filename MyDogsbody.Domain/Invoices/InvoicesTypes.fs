@@ -365,7 +365,14 @@ type ScanResult =
 type GetCurrentTime = unit -> System.DateTime
 
 type LoadInvoices = ScanCutoff option -> Result<StoredInvoice list, InvoiceError>
-type UpsertInvoices = ValidInvoice list -> Result<StoredInvoice list, InvoiceError>
+
+/// Upsert on the NATURAL key (supplier + reference), one invoice at a time: a rescan of an
+/// overlapping window updates rather than duplicates, and a single row that violates a
+/// constraint (a supplier deleted mid-scan) becomes one message's problem rather than failing
+/// the whole scan. (Design's UpsertInvoices was plural; per-row is what "continue past a failure
+/// and report per row" needs - noted in the change's design.md.)
+type UpsertInvoice = ValidInvoice -> Result<StoredInvoice, InvoiceError>
+
 type DeleteInvoice = InvoiceId -> Result<StoredInvoice option, InvoiceError>
 
 type LoadTombstones = unit -> Result<InvoiceTombstone list, InvoiceError>

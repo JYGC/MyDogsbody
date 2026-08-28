@@ -127,7 +127,7 @@ one file.
 
 ## Phase 4 — The scan (required) — the orchestration
 
-- [ ] **4.1** *(test-first)* `ScanForInvoicesWorkflow`, **every dependency a lambda** — no mail
+- [x] **4.1** *(test-first)* `ScanForInvoicesWorkflow`, **every dependency a lambda** — no mail
       store, no database, no files.
       Tests: a message yielding an invoice, every field asserted; `NoAccountSelected` short-circuits
       **with `readMailFolder` never called**; a message that yields nothing produces a problem **and
@@ -135,18 +135,18 @@ one file.
       suppliers matching produces a problem naming **all** of them; the cutoff handed to
       `readMailFolder` is the one computed in 3.1.
       *Depends on:* 3.1, 3.3, 3.4.
-- [ ] **4.2** *(test-first)* Upsert and the natural key.
+- [x] **4.2** *(test-first)* Upsert and the natural key.
       Tests: rescanning an overlapping window **updates rather than duplicates**; two invoices from
       one message are both stored (the source message id is traceability, not the key); an invoice
       whose supplier has since been deleted becomes a problem rather than a row with no supplier.
-- [ ] **4.3** *(test-first)* Tombstones in the scan.
+- [x] **4.3** *(test-first)* Tombstones in the scan.
       Tests: a tombstoned key is **skipped**; removing the tombstone lets the next scan store it
       again.
-- [ ] **4.4** *(test-first)* Problem lifecycle.
+- [x] **4.4** *(test-first)* Problem lifecycle.
       Tests: problems persist across scans; a message that later yields an invoice has its problem
       row **cleared**; a scan clears only the rows for messages it processed — **a narrower window
       does not erase diagnostics for messages outside it** (design decision 4).
-- [ ] **4.5** *(test-first)* `DeleteInvoiceWorkflow` and `UndeleteInvoiceWorkflow`.
+- [x] **4.5** *(test-first)* `DeleteInvoiceWorkflow` and `UndeleteInvoiceWorkflow`.
       Tests: delete removes the row **and** writes a tombstone; `InvoiceNotFound` when it is already
       gone, **with no tombstone written**; undelete removes the tombstone; undeleting one that does
       not exist is reported, not silently ignored.

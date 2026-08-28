@@ -523,6 +523,22 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    "which alternative exists" choice is a one-line `Option.orElse` in the workflow, not multipart
    parsing. `EmailBodyReader` takes `HtmlAgilityPack` (offline-cached 1.11.39); it is the only
    project that does.
+10. **`UpsertInvoice` is per-invoice, not `UpsertInvoices` batch** (implementation). "Continue past
+   a failure and report per row" needs each row's constraint failure to become one message's
+   problem; a batch that fails atomically cannot say which row. A rescan of an overlapping window
+   still updates rather than duplicates — each per-row upsert is upsert-on-natural-key.
+11. **`ScanResult` carries what *this scan* did**, not a reload: `Invoices` = the rows upserted
+   this run (which, since a scan of window N reads every message in window N, is every in-window
+   invoice), `Problems` = the problems recorded this run. The page's full view comes from
+   `InvoiceApi.GetInvoices` / `GetProblems` separately.
+12. **"Two invoices from one message" is a store-layer property, verified in Phase 7.** The
+   engine (`selectTemplate`) produces one `ExtractedInvoice` per message; the `Invoices` table's
+   key is `(SupplierId, Reference)`, not `SourceMessageId`, so two rows *can* share a source
+   message id — 7.2 asserts that against the real store.
+13. **`SupplierGone` maps to the `NoSupplierMatched` problem cause.** It is unreachable in a
+   single scan (`matchSupplier` only matches a loaded supplier and the upsert is in the same
+   scan); the guard exists for a supplier deleted mid-scan by another process, and reuses an
+   existing cause rather than adding a ninth requirements.md did not enumerate.
 
 ---
 

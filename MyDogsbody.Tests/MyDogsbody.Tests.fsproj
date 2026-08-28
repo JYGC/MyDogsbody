@@ -42,6 +42,7 @@
     <Compile Include="Domain\Invoices\ValidateInvoiceWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ScanMessageWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ScanForInvoicesWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\DeleteInvoiceWorkflowTests.fs" />
     <Compile Include="Fixtures\ThunderbirdFixturePaths.fs" />
     <Compile Include="Fixtures\DocumentFixtures.fs" />
     <Compile Include="Fixtures\MeasuredTemplates.fs" />

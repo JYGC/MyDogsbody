@@ -53,6 +53,8 @@
     <Compile Include="Invoices\ValidateInvoiceWorkflow.fs" />
     <Compile Include="Invoices\ScanMessageWorkflow.fs" />
     <Compile Include="Invoices\ScanForInvoicesWorkflow.fs" />
+    <Compile Include="Invoices\DeleteInvoiceWorkflow.fs" />
+    <Compile Include="Invoices\UndeleteInvoiceWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">
