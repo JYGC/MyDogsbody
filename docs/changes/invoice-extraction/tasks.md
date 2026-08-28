@@ -42,16 +42,16 @@ nothing. Phases are ordered so the split can be taken cleanly at any point befor
 Q1.14: one project per **capability**, not per library. Do this first, while the project still holds
 one file.
 
-- [ ] **0.1** Delete `bin/` and `obj/` under `MyDogsbody.Integrations.Pdf` **before** attempting the
+- [x] **0.1** Delete `bin/` and `obj/` under `MyDogsbody.Integrations.Pdf` **before** attempting the
       move. *(The `logging-not-an-integration` change recorded that Windows refuses the directory
       rename while an IDE language server holds handles on the build output.)*
-- [ ] **0.2** `git mv` the project directory and rename the `.fsproj`. If the directory rename is
+- [x] **0.2** `git mv` the project directory and rename the `.fsproj`. If the directory rename is
       refused, create the target and `git mv` file by file — history is preserved either way.
-- [ ] **0.3** Namespaces, `open`s, the `ProjectReference` in `MyDogsbody.Startup` and
+- [x] **0.3** Namespaces, `open`s, the `ProjectReference` in `MyDogsbody.Startup` and
       `MyDogsbody.Tests`, and the two `Project(...)` lines in `MyDogsbody.sln`.
       *Outcome:* the `.sln` diff is exactly two changed lines. If an IDE rewrites more, restore it.
-- [ ] **0.4** Rename `ActionNames.MyDogsbody.Integrations.Pdf.*` → `.Documents.*`.
-- [ ] **0.5** Gate: `dotnet build` clean, `dotnet test` green, **no test file edited**. The existing
+- [x] **0.4** Rename `ActionNames.MyDogsbody.Integrations.Pdf.*` → `.Documents.*`.
+- [x] **0.5** Gate: `dotnet build` clean, `dotnet test` green, **no test file edited**. The existing
       `PdfDocumentReader` contract suite must pass untouched.
 
 ## Phase 1 — The reading capability (required)
