@@ -251,9 +251,9 @@ one file.
 
 ## Phase 12 — Gate (required)
 
-- [ ] **12.1** `dotnet build MyDogsbody.sln` — zero errors.
-- [ ] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-- [ ] **12.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass;
+- [x] **12.1** `dotnet build MyDogsbody.sln` — zero errors.
+- [x] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
+- [x] **12.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass;
       `MyDogsbody.Domain` still names no Thunderbird, LiteDB, SQLite, MIME or PDF type.
 - [ ] **12.4** **Measure a real scan** (friction #14, Q1.9). Record in `outcome.md`: the first cold
       full scan; a second scan with watermarks in place; a window change from 14 to 180 days.
@@ -262,14 +262,14 @@ one file.
 - [ ] **12.5** **Record the real due-date coverage.** How many scanned invoices have a due date, with
       and without `DateFromField`. The measurement predicted 12% → 39%; friction #19 says change #7's
       value depends on it more than on anything in its own scope.
-- [ ] **12.6** Confirm `MainWindow.xaml.cs` is untouched.
+- [x] **12.6** Confirm `MainWindow.xaml.cs` is untouched.
 
 ## Phase 13 — Documentation (required)
 
-- [ ] **13.1** `CLAUDE-project.md`: `Integrations.Pdf` → `Integrations.Documents` in the structure
+- [x] **13.1** `CLAUDE-project.md`: `Integrations.Pdf` → `Integrations.Documents` in the structure
       table and the reference-direction notes; the five new migrations; the new domain workflows;
       **a sentence recording that migrations may now carry seed data**; the *Build state* totals.
-- [ ] **13.2** `outcome.md`: totals per level, the scan timings from 12.4, the due-date coverage from
+- [x] **13.2** `outcome.md`: totals per level, the scan timings from 12.4, the due-date coverage from
       12.5, and whether the immediate rescan survived.
 - [ ] **13.3** Open `change/invoice-extraction` for review, with this file's checkboxes ticked and
       `outcome.md` on the branch. **Merge only after Phase 12 passed in full.**
