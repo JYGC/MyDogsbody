@@ -255,16 +255,16 @@ one file.
 - [x] **12.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
 - [x] **12.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass;
       `MyDogsbody.Domain` still names no Thunderbird, LiteDB, SQLite, MIME or PDF type.
-- [ ] **12.4** **Measure a real scan** (friction #14, Q1.9). Record in `outcome.md`: the first cold
-      full scan; a second scan with watermarks in place; a window change from 14 to 180 days.
-      **If a window change costs seconds, replace the immediate rescan with an explicit Refresh
-      button** — that is the condition Q1.9 was accepted under, and this is where it is settled.
-      *(First run, 2026-08-29: blocked — the invoice mail is in a 2.0 GB INBOX the reader dropped
-      silently. See Phase 14; re-run after it lands.)*
+- [x] **12.4** **Measure a real scan** (friction #14, Q1.9). Recorded in `outcome.md` (re-run
+      2026-08-29, Phase 14 reader, 10 accounts, 180 d): cold **58.3 s**, warm **5.3 s**, full
+      re-read (= a 14→180 widen) **59.6 s**. **~60 s is far past Q1.9's "~2 s", so the immediate
+      rescan is dropped for an explicit Refresh — Phase 15.**
 - [ ] **12.5** **Record the real due-date coverage.** How many scanned invoices have a due date, with
       and without `DateFromField`. The measurement predicted 12% → 39%; friction #19 says change #7's
       value depends on it more than on anything in its own scope.
-      *(Blocked by the same folder — see Phase 14.)*
+      *(Still open: discovery mode yields 0 invoices. Needs `MeasureScan/Program.fs` supplier config
+      from the sender-domain table, then a measurement-mode re-run — task 14.8. Early friction-#19
+      read: biller volume over 180 d is ~a dozen emails, not ~558 PDFs.)*
 - [x] **12.6** Confirm `MainWindow.xaml.cs` is untouched.
 
 ## Phase 13 — Documentation (required)
@@ -317,10 +317,39 @@ the scan") that blocks 12.4 and 12.5 and defeats the feature's purpose. This is 
 - [x] **14.7** Gate: `dotnet build MyDogsbody.sln` clean; `dotnet test` green (**1290**, +7 vs 13.2's
       1283); `ThunderbirdDependencyContractTests` (`ReadMailFolder` / `CountMessages` shared suites)
       still pass.
-- [ ] **14.8** Re-run `MeasureScan` and complete 12.4 / 12.5 with real numbers.
-- [x] **14.9** `CLAUDE-project.md`: the `MailFolderReader` bullet in the structure table and the
-      *Per-integration databases* note no longer claim a whole-folder buffer ceiling; the streaming
-      reader and its `StreamChunkBytes` / `MaxMessageBytes` constants are named.
+- [x] **14.8a** Re-run `MeasureScan` — 12.4 timing done (see `outcome.md` / 12.4). The 2.0 GB INBOX
+      now reads (89,992 messages, was 0). No exceptions logged.
+- [ ] **14.8b** 12.5 needs `MeasureScan/Program.fs` → `suppliers` filled from the sender-domain
+      table (Yarra Valley Water `online.yvw.com.au`, Alinta Energy, IKEA, ahm, OnePass…), then a
+      measurement-mode re-run for the due-date coverage.
+- [x] **14.9** `CLAUDE-project.md`: the `MailFolderReader` structure-table bullet names the streaming
+      reader and its `StreamChunkBytes` constant; the *Run* note records the `*.db` gitignore.
+
+## Phase 15 — Q1.9 fallback: window change reloads, scan is explicit (required — settled by 12.4)
+
+12.4 measured a full re-read at ~60 s. Q1.9 was accepted on the condition that if a window change
+cost seconds, the immediate rescan would be replaced by an explicit Refresh. `InvoicesModule`
+already carries `Rescan` (stubbed for exactly this) and its comment says so; `selectWindow` still
+calls `scan` (which runs `InvoiceApi.Scan`).
+
+- [ ] **15.1** *(test-first)* `InvoicesModuleCreators.selectWindow` persists the choice and reloads
+      the **ledger view only** — `GetInvoices days` + `GetProblems` for the new window — and does
+      **not** call `InvoiceApi.Scan`. Module-creator test with a recording fake `InvoiceApi`:
+      `selectWindow` invokes `GetInvoices` / `GetProblems`, never `Scan`; the previously-scanned
+      rows outside the new window disappear from the view and reappear when it widens back
+      ("narrowing hides, it does not forget" — the ledger is the store, the view is the window).
+- [ ] **15.2** *(test-first)* `Rescan` calls `InvoiceApi.Scan selectedDays` and refreshes from the
+      result. (Already wired to `scan`; the test pins it now that it is the only `Scan` caller.)
+- [ ] **15.3** *(test-first)* `InvoicesComponents` renders a visible **Refresh** control bound to
+      `m.Rescan`, disabled while `IsScanningAval`. A `MudButton` beside the window picker.
+- [ ] **15.4** `start ()` still scans on first load (the ledger must be populated once); only a
+      *window change* stops scanning. Confirm the initial-load test still asserts a scan.
+- [ ] **15.5** `E2E/InvoicesFlowTests`: changing the window does not hit the scan path (assert via
+      the harness's recording API); clicking Refresh does. Update the existing "a window change
+      persists and rescans" flow — it now persists and *reloads*, and a separate step Refreshes.
+- [ ] **15.6** `requirements.md` / `design.md` / `outcome.md`: record that the Q1.9 fallback was
+      taken, with the 60 s measurement as the reason. `design.md` → *Decisions taken* #15.
+- [ ] **15.7** Gate: build clean, full suite green, zero skips.
 
 ---
 

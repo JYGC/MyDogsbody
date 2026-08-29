@@ -6,12 +6,16 @@ Branch `change/invoice-extraction`, cut from `main` at `9b0d4ce`.
 
 **Code complete. Build clean. Suite green at all four levels, zero skips.**
 
-The first attempt at the Phase 12 measurement (2026-08-29) **found a blocking defect in change #3's
-`MailFolderReader`**: it drops any folder file over ~1 GiB silently, and the maintainer's invoice
-mail is in a 2.0 GB Gmail INBOX. **Phase 14** (added to `tasks.md`, forced by this finding) replaced
-the whole-folder buffer with a streaming reader; that is done and green. **12.4 and 12.5 still need a
-measurement re-run** against the real profile now that the folder is readable — task 14.8, pending
-the maintainer. The immediate-rescan decision (Q1.9) stays provisional until then.
+The Phase 12 measurement (2026-08-29) **found a blocking defect in change #3's `MailFolderReader`**:
+it dropped any folder file over ~1 GiB silently, and the maintainer's invoice mail is in a 2.0 GB
+Gmail INBOX. **Phase 14** replaced the whole-folder buffer with a streaming reader — done, green,
+and the re-run confirms the 2.0 GB INBOX now reads (89,992 messages, was 0).
+
+**12.4 is measured and settled:** a full re-read is ~60 s, so the Q1.9 immediate-rescan is
+**dropped** for an explicit Refresh — **Phase 15**. **12.5 is still open:** discovery mode yields no
+invoices, so the due-date number needs `MeasureScan/Program.fs` supplier config and a
+measurement-mode re-run (task 14.8). First read on friction #19: real biller volume over 180 days
+is ~a dozen emails, not the ~558-PDF scale the 12→39% prediction assumed.
 
 ## Test totals
 
@@ -129,29 +133,41 @@ the alternative if you want the numbers from the real UI path.)*
 Cleanup: `Remove-Item measure.db, Thunderbird.db, Logging.db -ErrorAction SilentlyContinue` and
 `Remove-Item -Recurse MeasureScan`.
 
-### First run (2026-08-29) — surfaced the Phase 14 defect, numbers not usable
+### First run (2026-08-29) — surfaced the Phase 14 defect
 
-`MeasureScan` in discovery mode over **all 10 discovered accounts**: 879 header-passing messages,
-**0 invoices**, 46–879 problem rows (all `NoSupplierMatched` — the sender-domain table showed only
-research newsletters, `smartbrief.com` ×477, `physorg.com` ×115, `arxiv.org` ×95…). The invoice
-mail was **not in the scan** — it lives in `imap.googlemail-1.com/INBOX` (`outpost597100@gmail.com`,
-2.0 GB), which `MailFolderReader.read` skipped via `| Error _ -> []` because the folder exceeds
-`MaxBufferableBytes`. Phase 14 fixes that.
+`MeasureScan` in discovery mode found the invoice mail was **not in the scan at all** — the reader
+dropped `outpost597100@gmail.com`'s 2.0 GB INBOX silently. Phase 14 fixed that; the re-run below is
+against the streaming reader.
 
-Scan *timing* from that run (10 accounts, invoice folder **not** included, so a lower bound for the
-real workload): cold full scan **≈ 20 s**, warm second scan **≈ 5 s**. The 14→180 widen measured
-**≈ 20 s** but is **not meaningful** — watermarks had already advanced, so it re-read almost
-nothing; a real widen needs `ClearWatermarks` first and is then a full re-read. **This already
-points at replacing the immediate rescan with an explicit Refresh** (Q1.9 fallback), but 14.8 must
-confirm it with the invoice folder in the set.
+### 12.4 — scan timing (re-run 2026-08-29, Phase 14 reader, all 10 accounts, 180-day window)
 
-### Timings — re-run required (task 14.8)
+The 2.0 GB INBOX is now read: `outpost597100@gmail.com` reports **89,992 header-passing messages**
+across 9 folders (was 0). In-window (180 days) it contributed 623 of the 1,506 messages the scan
+processed.
 
 | Measurement | Result |
 | --- | --- |
-| First cold full scan | _pending 14.8_ (first run, no invoice folder: ≈ 20 s / 10 accts) |
-| Second scan (watermarks) | _pending 14.8_ (first run: ≈ 5 s) |
-| Window change 14 → 180 | _pending 14.8_ — first run ≈ 20 s but watermarks already advanced; needs `ClearWatermarks` first |
-| Due-date coverage, no `DateFromField` | _pending 14.8_ |
-| Due-date coverage, with `DateFromField` | _pending 14.8_ |
-| Immediate rescan kept? | _leaning no_ — a true widen is a full re-read of GBs; confirm in 14.8 then wire the Refresh button |
+| First cold full scan (watermarks empty) | **58.3 s** — 10 accounts, 1,506 messages processed |
+| Second scan (watermarks in place, no re-read) | **5.3 s** |
+| Full re-read (watermarks cleared — what a 14→180 widen costs) | **59.6 s** |
+| Immediate rescan kept? | **No** — a widen forcing a full re-read is ~60 s, far past Q1.9's "~2 s". The Q1.9 fallback applies: window change reloads the **ledger view** only; a scan is an **explicit Refresh**. See Phase 15. |
+
+Exceptions logged during the run: **0**. Cause breakdown of the 1,506 processed: `NoSupplierMatched`
+1,493 (discovery mode — no suppliers configured), `FormatUnsupported` 12, `AttachmentUnreadable` 1.
+
+### 12.5 — due-date coverage (pending supplier config)
+
+Discovery mode produces **0 invoices** by construction (no suppliers → no templates → no
+extraction), so the coverage number needs `MeasureScan/Program.fs` → `suppliers` filled from the
+sender-domain table and a measurement-mode re-run. **First observation for friction #19:** the
+sender-domain table is dominated by newsletters/research (`smartbrief.com` ×477, `physorg.com`
+×115, `arxiv.org` ×95, `nature.com` ×44); the actual biller domains in a 180-day window are
+low-count — `news.email.ikea.com.au` ×10, OnePass ×13, `ahm.com.au` ×4, `alintaenergy.com.au` ×2,
+`online.yvw.com.au` ×1 (Yarra Valley Water — one of the four target suppliers). Real invoice
+*volume* over 180 days looks like a dozen-ish biller emails, not the ~558-PDF scale the 12% → 39%
+prediction was made at.
+
+| Measurement | Result |
+| --- | --- |
+| Due-date coverage, no `DateFromField` | _pending — needs supplier config + measurement-mode re-run_ |
+| Due-date coverage, with `DateFromField` | _pending — same_ |
