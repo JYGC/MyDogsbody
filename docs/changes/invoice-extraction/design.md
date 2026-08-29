@@ -241,21 +241,25 @@ offer, so emptying the list is refused in the domain rather than handled downstr
 let scanForInvoices
     (getCurrentTime: GetCurrentTime)
     (loadSelectedMailAccount: LoadSelectedMailAccount)
+    (clearWatermarks: ClearWatermarks)          // Phase 16/17 — FullRescan pre-clear, fatal reset
     (readMailFolder: ReadMailFolder)
     (readDocumentText: ReadDocumentText)
     (loadSuppliers: LoadSuppliers)
     (loadTemplatesForSupplier: LoadTemplatesForSupplier)
     (loadTombstones: LoadTombstones)
-    (upsertInvoices: UpsertInvoices)
+    (upsertInvoice: UpsertInvoice)               // per-invoice, not the batch this block first drew (decision 10)
     (saveScanProblems: SaveScanProblems)
     (clearScanProblems: ClearScanProblems)
+    (mode: ScanMode)                             // Phase 16 — IncrementalScan | FullRescan
     (window: ScanWindowDays)
     : Result<ScanResult, InvoiceError>
 ```
 
 Note how much of it is calls to the pure workflows from change #2 — that is the shape to aim for.
 The cutoff arithmetic is a **private pure function in this file**, so "180 days back from 5 January"
-is a unit test with a fixed clock and no mail store anywhere near it.
+is a unit test with a fixed clock and no mail store anywhere near it. `clearWatermarks` and `mode`
+are decisions 16 and 17 — a `FullRescan` clears the account's watermarks before reading, and any
+scan that aborts on a fatal error clears them on the way out so the next scan re-reads.
 
 ### Migrations
 
@@ -301,11 +305,12 @@ exists rather than the code assuming 14 is present.
 InvoicesPage          InvoiceApi           ScanForInvoicesWorkflow          adapters
   │ window changed        │                        │
   ├─ SelectScanWindow ───►│ persist                │
-  ├─ Scan days ──────────►├───────────────────────►│
+  ├─ Scan days ──────────►├───────────────────────►│   (RescanEverything ⇒ mode = FullRescan)
   │                       │                        ├─ getCurrentTime() .Date .AddDays(-days)
   │                       │                        │     → ScanCutoff        ← pure, fixed-clock tested
   │                       │                        ├─ loadSelectedMailAccount
   │                       │                        │     None → NoAccountSelected, STOP
+  │                       │                        ├─ mode = FullRescan? → clearWatermarks account  (Phase 16)
   │                       │                        ├─ readMailFolder account cutoff ──────► mbox
   │                       │                        │     (cutoff applied on HEADERS; 6.2 GB in scope)
   │                       │                        ├─ loadSuppliers · loadTombstones
@@ -323,7 +328,8 @@ InvoicesPage          InvoiceApi           ScanForInvoicesWorkflow          adap
   │                       │                        │   ├ ValidateInvoiceWorkflow
   │                       │                        │   └ tombstoned key? → SKIP silently
   │                       │                        │
-  │                       │                        ├─ upsertInvoices  (natural key → update, not add)
+  │                       │                        ├─ upsertInvoice   (natural key → update, not add)
+  │                       │                        │     any fatal store error ⇒ clearWatermarks account, return that error  (Phase 17)
   │                       │                        ├─ saveScanProblems
   │                       │                        └─ clearScanProblems for messages that now succeeded
   │◄─ ScanResult { Invoices; Problems } ───────────┤
@@ -606,6 +612,40 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    so). `InvoicesModule` already carried a stubbed `Rescan` for exactly this. "Narrowing hides, it
    does not forget" now holds by construction: the store keeps every invoice, the window is a
    read filter.
+16. **`scanForInvoices` takes a `ScanMode` and a `clearWatermarks` dependency — Phase 16, PR #18
+   review.** A folder's watermark records how far it was read; `MailFolderReader.resumeOffset`
+   skips a message older than the cutoff *before parsing its body*, so a folder scanned once — even
+   with no supplier configured — advances to EOF having extracted nothing, and every later scan
+   answers "nothing new" for that mail. A reviewer opening `/invoices` before configuring a
+   supplier, then adding one, never sees that supplier's invoices: the exact class round 2 fixed
+   for a *widened window*, here for a *changed configuration*. The recovery already existed —
+   `MailAccountApi.ClearWatermarks` per account, on the mail-accounts page — but the invoices page
+   never surfaced it. Rather than a second workflow wrapping `scanForInvoices`, the workflow gains
+   `mode: ScanMode` (`IncrementalScan | FullRescan` — a choice type, not a bool: CLAUDE.md's
+   coding style) and `clearWatermarks: ClearWatermarks` (borrowed from the MailAccounts area, the
+   same way `loadSelectedMailAccount` already is). `FullRescan` calls `clearWatermarks accountId`
+   after the account is resolved and before `readMailFolder`; `IncrementalScan` does not.
+   `InvoiceApi` gains `RescanEverything`, wired to `FullRescan`; `Scan` stays `IncrementalScan`.
+   The UI adds a "Rescan everything" button beside "Scan now". `ScanMode` never crosses the
+   `InvoiceApi` boundary (it is `UI.Types`, which cannot see the domain) — the factory picks the
+   mode, the UI picks the API member.
+17. **A fatal scan resets the selected account's watermarks — Phase 17, PR #18 review round 6.**
+   `MailFolderReader.readFolder` saves each folder's watermark as part of `read`, which
+   `scanForInvoices` calls *before* it processes a single message. A fatal error part-way through
+   processing (`loadTemplatesForSupplier` or `upsertInvoice` returning a store failure sets
+   `ScanAcc.Fatal` and short-circuits) would otherwise leave every folder's watermark at EOF, so
+   the unprocessed messages are never read again — `resumeOffset` resumes from `OffsetReached`
+   whenever the file has only grown. No invoice, no problem, nothing on screen. On the `Fatal`
+   branch the workflow now calls `clearWatermarks accountId` — the same dependency Phase 16 added
+   — and returns the original fatal error regardless of whether the clear succeeded (`Result.mapError
+   (fun _ -> error)`), so a broken store, the usual cause of a fatal error, does not mask itself.
+   **Chosen over deferred-commit** (recording a "last processed" offset separately from "last
+   read" and promoting one to the other on success): that needs two offset/cutoff pairs on the
+   persisted `ScanWatermarkEntity` and careful "which is authoritative" logic in `resumeOffset`,
+   which is materially more surface — and more persisted-shape churn in the same PR that already
+   added `CutoffTicks` — for a rare path. The cost of the reset is one full re-read (~60 s) on the
+   next scan after a fatal error; since a fatal error means the store was unreachable, no scan
+   succeeds until it is fixed, and one full re-read then is the same cost as the first scan ever.
 
 ---
 

@@ -358,6 +358,19 @@ type ScanResult =
     { Invoices: StoredInvoice list
       Problems: ScanProblem list }
 
+/// Whether a scan resumes each folder from its watermark or reads every folder in full.
+///
+/// A choice type rather than a `bool` (CLAUDE.md coding style). A folder's watermark records how
+/// far it was read, and `MailFolderReader.resumeOffset` skips a message older than the cutoff
+/// BEFORE parsing its body - so a folder scanned once with no supplier configured advances to the
+/// end having extracted nothing, and every `IncrementalScan` after that sees none of that mail.
+/// `FullRescan` is the escape hatch: it clears the selected account's watermarks before reading,
+/// so a supplier or template configured after the first scan can still be reached. The invoices
+/// page's "Rescan everything" button; `Scan` and the initial load stay `IncrementalScan`.
+type ScanMode =
+    | IncrementalScan
+    | FullRescan
+
 // --- dependency function types (task 2.3) ---
 //
 // Not interfaces, not classes, not a collection getter. A workflow receives a function value, so

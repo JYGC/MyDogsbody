@@ -65,6 +65,32 @@ let ``Scan with no mail account selected is refused with a readable alert, nothi
         try File.Delete tbPath with _ -> ()
 
 [<Fact; Trait("Level", "Integration")>]
+let ``RescanEverything with no mail account selected is the same readable alert as Scan, nothing logged`` () =
+    let logged = ResizeArray<MyDogsbodyException>()
+    let recordingHandleError = HandleErrorBuilder logged.Add
+
+    let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    MigrationSetup.setupMigrations $"Data Source={mainPath}"
+    let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
+    let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
+
+    try
+        let api = InvoiceApiFactory.createInvoiceApi recordingHandleError clock mainContext tbContext
+
+        match api.RescanEverything 14 with
+        | Error ex ->
+            Assert.Contains("mail account", ex.Message)
+            Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+            Assert.Empty logged
+        | Ok _ -> Assert.Fail("expected NoAccountSelected")
+    finally
+        mainContext.Dispose()
+        tbContext.Dispose()
+        try File.Delete mainPath with _ -> ()
+        try File.Delete tbPath with _ -> ()
+
+[<Fact; Trait("Level", "Integration")>]
 let ``the getters return empty lists against a fresh ledger`` () =
     withApi (fun api ->
         Assert.Empty(api.GetInvoices 90 |> ok "GetInvoices")

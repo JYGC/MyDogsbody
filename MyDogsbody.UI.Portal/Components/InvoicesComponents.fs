@@ -30,8 +30,10 @@ let private windowSelect (windows: ScanWindowUiType list) (selectedDays: int) (o
         }
     }
 
-/// The window picker and an explicit "Scan now". Changing the window filters the stored ledger
-/// (instant); "Scan now" reads the mailbox (task 12.4 measured ~60 s, so it is never automatic).
+/// The window picker, "Scan now", and "Rescan everything". Changing the window filters the stored
+/// ledger (instant); "Scan now" reads the mailbox resuming from watermarks (task 12.4 measured
+/// ~60 s, so it is never automatic); "Rescan everything" discards the watermarks first, for mail
+/// a plain scan resumes straight past (a folder read before its supplier existed).
 let private windowPicker (m: InvoicesModule) =
     adapt {
         let! windows = m.ScanWindowsAval
@@ -49,6 +51,15 @@ let private windowPicker (m: InvoicesModule) =
                 Disabled isScanning
                 OnClick(fun _ -> m.Rescan())
                 "Scan now"
+            }
+
+            MudButton'' {
+                Variant Variant.Outlined
+                Color Color.Primary
+                StartIcon Icons.Material.Filled.RestartAlt
+                Disabled isScanning
+                OnClick(fun _ -> m.RescanEverything())
+                "Rescan everything"
             }
         }
     }

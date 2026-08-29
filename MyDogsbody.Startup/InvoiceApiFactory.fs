@@ -132,6 +132,13 @@ let createInvoiceApi
                 watermark
             |> Result.mapError MailAccountApiMappers.toMailAccountError
 
+    /// Deletes every watermark for one account - the "Rescan everything" pre-clear (decision 16)
+    /// and the fatal-scan reset (decision 17). Same wiring as MailAccountApiFactory.
+    let clearWatermarksForAccount: ClearWatermarks =
+        fun accountId ->
+            ThunderbirdStore.clearWatermarksFor handleError thunderbirdContext.GetWatermarksCollection accountId
+            |> Result.mapError MailAccountApiMappers.toMailAccountError
+
     let readMailFolder: ReadMailFolder =
         fun accountId cutoff -> MailFolderReader.read lookupAccount loadWatermark saveWatermark accountId cutoff
 
@@ -149,30 +156,37 @@ let createInvoiceApi
         |> Result.mapError (fun err ->
             SupplierApiMappers.toMyDogsbodyException ActionNames.MyDogsbody.Startup.InvoiceApi.getInvoices err)
 
-    { Scan =
-        fun rawDays ->
-            match ScanWindowDays.create rawDays with
-            | Error reason ->
-                Error(toException ActionNames.MyDogsbody.Startup.InvoiceApi.scan (ScanWindowInvalid reason))
-            | Ok window ->
-                ScanForInvoicesWorkflow.scanForInvoices
-                    getCurrentTime
-                    loadSelectedMailAccount
-                    readMailFolder
-                    readDocumentText
-                    loadSuppliers
-                    loadTemplatesForSupplier
-                    loadTombstones
-                    upsertInvoice
-                    saveScanProblems
-                    clearScanProblems
-                    window
-                |> Result.mapError (toException ActionNames.MyDogsbody.Startup.InvoiceApi.scan)
-                |> Result.bind (fun result ->
-                    supplierNames ()
-                    |> Result.map (fun names ->
-                        { Invoices = result.Invoices |> List.map (InvoiceApiMappers.toInvoiceUiType names)
-                          Problems = result.Problems |> List.map (InvoiceApiMappers.toProblemUiType names) }))
+    /// Scan / RescanEverything differ only by ScanMode: FullRescan clears the account's
+    /// watermarks first (decision 16). ScanMode is a domain type and never crosses the InvoiceApi
+    /// boundary - the factory picks the mode, the UI picks the member.
+    let runScan (mode: ScanMode) (action: string) (rawDays: int) : Result<ScanResultUiType, MyDogsbodyException> =
+        match ScanWindowDays.create rawDays with
+        | Error reason -> Error(toException action (ScanWindowInvalid reason))
+        | Ok window ->
+            ScanForInvoicesWorkflow.scanForInvoices
+                getCurrentTime
+                loadSelectedMailAccount
+                clearWatermarksForAccount
+                readMailFolder
+                readDocumentText
+                loadSuppliers
+                loadTemplatesForSupplier
+                loadTombstones
+                upsertInvoice
+                saveScanProblems
+                clearScanProblems
+                mode
+                window
+            |> Result.mapError (toException action)
+            |> Result.bind (fun result ->
+                supplierNames ()
+                |> Result.map (fun names ->
+                    { Invoices = result.Invoices |> List.map (InvoiceApiMappers.toInvoiceUiType names)
+                      Problems = result.Problems |> List.map (InvoiceApiMappers.toProblemUiType names) }))
+
+    { Scan = runScan IncrementalScan ActionNames.MyDogsbody.Startup.InvoiceApi.scan
+
+      RescanEverything = runScan FullRescan ActionNames.MyDogsbody.Startup.InvoiceApi.rescanEverything
 
       GetInvoices =
         fun rawDays ->

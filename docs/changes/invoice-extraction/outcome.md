@@ -4,8 +4,15 @@ Branch `change/invoice-extraction`, cut from `main` at `9b0d4ce`.
 
 ## Status
 
-**Code complete. Build clean. Suite green at all four levels, zero skips. Phases 0–15 done;
-12.4 and 12.5 measured. Ready for review (13.3).**
+**Code complete. Build clean. Suite green at all four levels, zero skips. Phases 0–17 done;
+12.4 and 12.5 measured. In review — PR #18, six review rounds so far.**
+
+**Phases 16–17** were added during PR #18's review (rounds 3 and 6): a folder's watermark advances
+past mail its scan never turned into an invoice, so an ordinary re-scan sees none of it.
+**Phase 16** adds `ScanMode` and a "Rescan everything" action that clears the selected account's
+watermarks first; **Phase 17** resets them when a scan aborts on a fatal error rather than leaving
+them at EOF over unprocessed mail. Both are `ScanForInvoicesWorkflow` changes — see `design.md` →
+*Decisions taken* #16 and #17.
 
 The Phase 12 measurement (2026-08-29) **found a blocking defect in change #3's `MailFolderReader`**:
 it dropped any folder file over ~1 GiB silently, and the maintainer's invoice mail is in a 2.0 GB
@@ -29,15 +36,16 @@ Measured with `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and `--filt
 
 | Level | Count |
 | --- | --- |
-| Unit | 698 |
-| Integration | 264 |
+| Unit | 727 |
+| Integration | 271 |
 | Contract | 297 |
-| E2E | 35 |
-| **Total** | **1294** |
+| E2E | 37 |
+| **Total** | **1332** |
 
-Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+233**.
-Phase 14 (streaming reader) is **+7** over the 1283 the rest of the change reached; Phase 15
-(window change reloads, "Scan now" scans) is a further **+4**.
+Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+271**.
+Phases 0–15 reached **1294**; PR #18's six review rounds added **+29** (see the round notes below);
+Phases 16–17 (watermark control — "Rescan everything", fatal-abort reset) add a further **+9**
+(6 workflow unit, 1 module-creator unit, 1 factory integration, 1 E2E).
 
 ### Known flakes (pre-existing category, not introduced here)
 
@@ -131,18 +139,36 @@ Six failing-first unit tests, four of them red for the predicted reason (`ErrorA
 where a message was expected). Two of the six cover `getScanWindowsBrowserModule`, which had **no
 test of any level** before this round.
 
-### Deferred out of round 6 — a fatal scan advances the watermark past mail it never processed
+### Round 6's deferral, and round 3's — the watermark can advance past mail nothing extracted (fixed: Phases 16–17)
 
-`MailFolderReader.readFolder` saves each folder's watermark as part of `readMailFolder`, which
-`ScanForInvoicesWorkflow.scanForInvoices` calls *before* it processes a single message. If the
-scan then hits a fatal error (a `loadTemplatesForSupplier` or `upsertInvoice` store failure sets
-`ScanAcc.Fatal` and short-circuits), the watermarks for every folder are already at EOF, so the
-unprocessed messages are never read again — `resumeOffset` resumes from `OffsetReached` whenever
-the file has only grown. No invoice, no scan problem, nothing on screen.
+Two review findings, one root cause. `MailFolderReader.readFolder` saves each folder's watermark
+as part of `read`, and `resumeOffset` skips a message older than the cutoff *before parsing its
+body*, so a folder can advance to EOF having produced no invoice:
 
-Not fixed here: the remedy is that the watermark commit has to follow successful *processing*,
-not successful *reading*, which moves the commit point across the reader/workflow boundary and
-wants its own change folder.
+- **Round 3, finding 2.** A user opens `/invoices` before configuring any supplier: every folder
+  is read, matched against nothing, and its watermark advanced to the end. They then add a
+  supplier and template — and an ordinary scan resumes from EOF and sees none of that supplier's
+  mail. The recovery (`MailAccountApi.ClearWatermarks`, per account) existed on the mail-accounts
+  page but the invoices page never surfaced it.
+- **Round 6.** `scanForInvoices` calls `read` — which commits the watermarks — *before* it
+  processes a single message. A fatal error part-way through (`loadTemplatesForSupplier` /
+  `upsertInvoice` store failure → `ScanAcc.Fatal`) leaves every watermark at EOF over unprocessed
+  mail. No invoice, no problem, nothing on screen.
+
+**Fixed** — folded into this change rather than a follow-up (the user's call). `scanForInvoices`
+gains `clearWatermarks: ClearWatermarks` (borrowed from the MailAccounts area) and `mode: ScanMode`:
+
+- **Phase 16** — `FullRescan` clears the selected account's watermarks before reading.
+  `InvoiceApi.RescanEverything`, a "Rescan everything" button beside "Scan now". `Scan` and the
+  initial load stay `IncrementalScan`.
+- **Phase 17** — the `ScanAcc.Fatal` branch calls `clearWatermarks accountId` and returns the
+  original fatal error regardless (`Result.mapError (fun _ -> error)`), so the next scan re-reads
+  the account rather than skipping past the unprocessed mail. Chosen over recording a separate
+  "last processed" offset (two offset/cutoff pairs on the persisted `ScanWatermarkEntity` and
+  "which is authoritative" logic in `resumeOffset` — materially more surface, more persisted-shape
+  churn, for a rare path). Cost: one ~60 s full re-read on the next scan after a fatal error,
+  which is the same cost as the first scan ever and only after the store is fixed. `design.md` →
+  *Decisions taken* #16 and #17.
 
 ## What landed
 

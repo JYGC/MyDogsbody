@@ -11,6 +11,10 @@ type InvoiceApi =
     { /// Read the mailbox for the given window (days) and return what this scan produced. Called on
       /// the initial load and by the explicit "Scan now" - not on a window change (Q1.9 fallback).
       Scan: int -> Result<ScanResultUiType, MyDogsbodyException>
+      /// Discard the selected account's scan watermarks, then read every folder in full for the
+      /// given window - "Rescan everything". The escape hatch for when watermarks advanced past
+      /// mail that was never turned into an invoice (a folder scanned before a supplier existed).
+      RescanEverything: int -> Result<ScanResultUiType, MyDogsbodyException>
       /// The invoices inside the given window (days), for the table.
       GetInvoices: int -> Result<InvoiceUiType list, MyDogsbodyException>
       /// Delete one invoice by id and write its tombstone.

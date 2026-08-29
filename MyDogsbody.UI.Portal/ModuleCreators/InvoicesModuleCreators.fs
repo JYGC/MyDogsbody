@@ -81,8 +81,9 @@ let getInvoicesModule
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
 
-    /// Read the mailbox for `days`, then show the stored ledger for it. The scan may fail (no
-    /// mail account, an unreachable store) - the stored ledger stays on screen with the alert.
+    /// Read the mailbox for `days` (via `scanOp` - `Scan` or the watermark-clearing
+    /// `RescanEverything`), then show the stored ledger for it. The scan may fail (no mail
+    /// account, an unreachable store) - the stored ledger stays on screen with the alert.
     ///
     /// The page's view comes from `GetInvoices` / `GetProblems`, never from `ScanResult`: that
     /// carries only what THIS scan did (design decision 6), and watermarks mean a scan of an
@@ -91,12 +92,12 @@ let getInvoicesModule
     /// so a returning user opened on an empty table. Q1.19 says the same of problems: they are
     /// persisted precisely "so incremental scanning does not empty the diagnostic list before it
     /// is looked at". Read AFTER the scan, so whatever it just stored is included.
-    let scan (days: int) =
+    let scanUsing (scanOp: int -> Result<ScanResultUiType, MyDogsbodyException>) (days: int) =
         transact (fun _ -> isScanningCval.Value <- true)
 
         startWork (fun () ->
             let windows = scanWindowApi.GetScanWindows()
-            let scanResult = invoiceApi.Scan days
+            let scanResult = scanOp days
             let ledger = invoiceApi.GetInvoices days
             let problems = invoiceApi.GetProblems()
 
@@ -125,6 +126,14 @@ let getInvoicesModule
 
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
+
+    /// "Scan now": read the mailbox, resuming each folder from its watermark.
+    let scan = scanUsing invoiceApi.Scan
+
+    /// "Rescan everything": discard the selected account's watermarks, then read every folder in
+    /// full. For mail a plain `scan` resumes straight past because its folder was read before the
+    /// supplier or template existed.
+    let rescanEverything = scanUsing invoiceApi.RescanEverything
 
     /// The initial load: resolve the remembered window through the API, then scan it once so the
     /// ledger is populated. Only a *window change* after this stops scanning.
@@ -205,6 +214,7 @@ let getInvoicesModule
       ErrorAval = errorCval
       SelectWindow = selectWindow
       Rescan = fun () -> scan selectedDaysCval.Value
+      RescanEverything = fun () -> rescanEverything selectedDaysCval.Value
       DeleteInvoice = deleteInvoice
       UndeleteInvoice = undeleteInvoice
       LoadProblems = loadProblems

@@ -21,6 +21,10 @@ type InvoicesModule =
       /// Read the mailbox for the current window and refresh the ledger - the explicit "Scan now",
       /// the only path that reads mail after the initial load (Q1.9 fallback, settled by 12.4).
       Rescan: unit -> unit
+      /// Discard the selected account's watermarks and read every folder in full for the current
+      /// window - "Rescan everything". For mail that an ordinary scan resumes straight past
+      /// because the folder was read before its supplier or template existed.
+      RescanEverything: unit -> unit
       DeleteInvoice: string -> unit
       /// supplierId, reference - the natural key the tombstone row carries.
       UndeleteInvoice: string -> string -> unit

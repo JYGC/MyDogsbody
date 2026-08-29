@@ -46,6 +46,7 @@ type private ScanWindowApiSpy() =
 
 type private InvoiceApiSpy() =
     member val ScanCalls: int list = [] with get, set
+    member val RescanEverythingCalls: int list = [] with get, set
     member val GetInvoicesCalls: int list = [] with get, set
     member val GetProblemsCalls: int = 0 with get, set
     member val ScanResult: Result<ScanResultUiType, MyDogsbodyException> = Ok { Invoices = []; Problems = [] } with get, set
@@ -62,6 +63,10 @@ type private InvoiceApiSpy() =
         { Scan =
             fun days ->
                 this.ScanCalls <- this.ScanCalls @ [ days ]
+                this.ScanResult
+          RescanEverything =
+            fun days ->
+                this.RescanEverythingCalls <- this.RescanEverythingCalls @ [ days ]
                 this.ScanResult
           GetInvoices =
             fun days ->
@@ -141,6 +146,23 @@ let ``Rescan reads the mailbox for the current window`` () =
 
     // the initial load's scan (30) then the explicit Rescan (30)
     Assert.Equal<int list>([ 30; 30 ], invoiceApi.ScanCalls)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``Rescan everything reads the mailbox via RescanEverything for the current window, not Scan`` () =
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
+    let invoiceApi = InvoiceApiSpy(GetInvoicesFor = (fun _ -> [ anInvoice "INV-1" ]))
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    m.RescanEverything()
+
+    // the watermark-clearing scan ran for the current window...
+    Assert.Equal<int list>([ 30 ], invoiceApi.RescanEverythingCalls)
+    // ...and the ordinary Scan ran only on the initial load
+    Assert.Equal<int list>([ 30 ], invoiceApi.ScanCalls)
+    // the table is read back from the store afterward, same as Rescan
+    Assert.Equal<string list>([ "INV-1" ], AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference))
 
 let private aProblem messageId : ScanProblemUiType =
     { SourceMessageId = messageId

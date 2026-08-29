@@ -45,6 +45,7 @@ module MyDogsbody =
         module InvoiceApi =
             let private invoiceApi = $"{startup}.InvoiceApi"
             let scan = $"{invoiceApi}.scan"
+            let rescanEverything = $"{invoiceApi}.rescanEverything"
             let getInvoices = $"{invoiceApi}.getInvoices"
             let deleteInvoice = $"{invoiceApi}.deleteInvoice"
             let getProblems = $"{invoiceApi}.getProblems"

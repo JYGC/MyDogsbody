@@ -217,6 +217,28 @@ let ``a scan with no mail account selected shows an alert and logs nothing`` () 
         Assert.Empty harness.Logged)
 
 [<Fact; Trait("Level", "E2E")>]
+let ``the "Rescan everything" button renders, and pressing it with no mail account raises the same alert`` () =
+    withInvoicesHarness (fun harness ->
+        seedInvoice harness "INV-KEEP" "NULL"
+        let m, rendered = renderInvoices harness
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("INV-KEEP", rendered.Markup)
+            // the button is on screen next to "Scan now"
+            Assert.Contains("Rescan everything", rendered.Markup))
+
+        m.RescanEverything()
+
+        rendered.WaitForAssertion(fun () ->
+            // no mail account: the watermark-clearing scan reports it, same as "Scan now"
+            Assert.Contains("mail account", rendered.Markup)
+            // the stored ledger is still on screen behind the alert
+            Assert.Contains("INV-KEEP", rendered.Markup))
+
+        // an expected failure, nothing logged
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``an unreachable store shows an alert and logs exactly one entry`` () =
     withUnreachableInvoiceStoreHarness (fun harness ->
         let m, rendered = renderInvoices harness

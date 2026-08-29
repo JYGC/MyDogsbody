@@ -104,6 +104,7 @@ type private FakeProblemLog() =
 type private Deps =
     { GetCurrentTime: GetCurrentTime
       LoadSelectedMailAccount: LoadSelectedMailAccount
+      ClearWatermarks: ClearWatermarks
       ReadMailFolder: ReadMailFolder
       ReadDocumentText: ReadDocumentText
       LoadSuppliers: LoadSuppliers
@@ -113,10 +114,11 @@ type private Deps =
       SaveScanProblems: SaveScanProblems
       ClearScanProblems: ClearScanProblems }
 
-let private run (deps: Deps) (windowDays: int) =
+let private runWith (mode: ScanMode) (deps: Deps) (windowDays: int) =
     scanForInvoices
         deps.GetCurrentTime
         deps.LoadSelectedMailAccount
+        deps.ClearWatermarks
         deps.ReadMailFolder
         deps.ReadDocumentText
         deps.LoadSuppliers
@@ -125,11 +127,27 @@ let private run (deps: Deps) (windowDays: int) =
         deps.UpsertInvoice
         deps.SaveScanProblems
         deps.ClearScanProblems
+        mode
         (window windowDays)
+
+/// The ordinary path: resume each folder from its watermark.
+let private run (deps: Deps) (windowDays: int) = runWith IncrementalScan deps windowDays
+
+/// Records every MailAccountId handed to clearWatermarks, so a test can prove FullRescan clears
+/// and IncrementalScan does not, and that a fatal scan resets on the way out.
+type private ClearWatermarksSpy() =
+    member val Calls: MailAccountId list = [] with get, set
+    member val Result: Result<unit, MailAccountError> = Ok() with get, set
+
+    member this.Dependency: ClearWatermarks =
+        fun id ->
+            this.Calls <- this.Calls @ [ id ]
+            this.Result
 
 let private baseDeps (messages: MailMessage list) (ledger: FakeLedger) (log: FakeProblemLog) : Deps =
     { GetCurrentTime = clock (DateTime(2026, 6, 15, 12, 0, 0))
       LoadSelectedMailAccount = fun () -> Ok(Some accountId)
+      ClearWatermarks = fun _ -> Ok()
       ReadMailFolder = fun _ _ -> Ok messages
       ReadDocumentText = textReader
       LoadSuppliers = fun () -> Ok [ acme ]
@@ -551,3 +569,107 @@ let ``a scan with only failures saves problems and clears nothing`` () =
 
     Assert.Equal(1, List.length log.Saved)
     Assert.Empty log.Cleared
+
+// ============================ Phase 16: FullRescan clears the watermarks ============================
+//
+// A folder's watermark records how far it was read, and resumeOffset skips a message older than the
+// cutoff before its body is parsed - so a folder scanned once with no supplier configured advanced
+// to EOF having extracted nothing, and every IncrementalScan after that sees none of that mail.
+// FullRescan ("Rescan everything") clears the selected account's watermarks first.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``FullRescan clears the resolved account's watermarks once, before the mail reader runs`` () =
+    let spy = ClearWatermarksSpy()
+    let events = ResizeArray<string>()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks =
+                fun id ->
+                    events.Add "clear"
+                    spy.Dependency id
+            ReadMailFolder =
+                fun _ _ ->
+                    events.Add "read"
+                    Ok [ acmeMessage "m1" "INV-1" ] }
+
+    match runWith FullRescan deps 30 with
+    | Ok _ ->
+        Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
+        Assert.Equal<string list>([ "clear"; "read" ], List.ofSeq events)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an IncrementalScan never clears the watermarks`` () =
+    let spy = ClearWatermarksSpy()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency }
+
+    runWith IncrementalScan deps 30 |> ignore
+    Assert.Empty spy.Calls
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a clearWatermarks failure on a FullRescan aborts the scan and the mail reader is never called`` () =
+    let spy = ClearWatermarksSpy(Result = Error(MailStoreFailed "watermark store is unreachable"))
+    let mutable readCalled = false
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            ReadMailFolder =
+                fun _ _ ->
+                    readCalled <- true
+                    Ok [] }
+
+    match runWith FullRescan deps 30 with
+    | Error(InvoiceStoreFailed msg) ->
+        Assert.Contains("watermark store is unreachable", msg)
+        Assert.False(readCalled, "readMailFolder must not run after the pre-clear failed")
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed), got {other}")
+
+// ============================ Phase 17: a fatal scan resets the watermarks ============================
+//
+// readFolder saves each folder's watermark as part of `read`, which the workflow calls BEFORE it
+// processes a message. A fatal error mid-processing would otherwise strand every unprocessed
+// message behind a watermark at EOF - no invoice, no problem, nothing on screen.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a fatal store error at upsert resets the account's watermarks and still returns that error`` () =
+    let spy = ClearWatermarksSpy()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            UpsertInvoice = fun _ -> Error(InvoiceStoreFailed "disk full") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed "disk full") -> Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"disk full\"), got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a scan that completes does not reset the watermarks`` () =
+    let spy = ClearWatermarksSpy()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency }
+
+    match run deps 30 with
+    | Ok _ -> Assert.Empty spy.Calls
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a clearWatermarks failure on the fatal path does not replace the fatal error`` () =
+    let spy = ClearWatermarksSpy(Result = Error(MailStoreFailed "the reset failed too"))
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            UpsertInvoice = fun _ -> Error(InvoiceStoreFailed "disk full") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed "disk full") -> ()
+    | other -> Assert.Fail($"Expected the original Error (InvoiceStoreFailed \"disk full\"), got {other}")
+

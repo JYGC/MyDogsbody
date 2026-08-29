@@ -352,6 +352,58 @@ calls `scan` (which runs `InvoiceApi.Scan`).
 - [x] **15.7** Gate: `dotnet build MyDogsbody.sln` clean; `dotnet test` green — **1294**, zero skips
       (Unit 698 / Integration 264 / Contract 297 / E2E 35).
 
+## Phase 16 — "Rescan everything" (required — PR #18 review)
+
+A folder's watermark records how far it was read; `resumeOffset` skips a message older than the
+cutoff before its body is parsed, so a folder scanned once — even with no supplier configured —
+advances to EOF having extracted nothing, and every later scan sees none of that mail. A user who
+opens `/invoices` before configuring a supplier, then adds one, never sees its invoices. Recovery
+existed (`MailAccountApi.ClearWatermarks`, per account, on the mail-accounts page) but the invoices
+page never surfaced it. design.md → *Decisions taken* #16.
+
+- [x] **16.1** *(test-first)* `ScanMode` (`IncrementalScan | FullRescan`) in `InvoicesTypes.fs`.
+- [x] **16.2** *(test-first)* `scanForInvoices` gains `clearWatermarks: ClearWatermarks` and
+      `mode: ScanMode`. `FullRescan` calls `clearWatermarks accountId` after the account is
+      resolved and before `readMailFolder`; `IncrementalScan` does not.
+      Tests: `FullRescan` calls `clearWatermarks` with the resolved id, exactly once, before the
+      reader; `IncrementalScan` never calls it; a `clearWatermarks` failure aborts the scan with
+      that error and `readMailFolder` is never called.
+- [x] **16.3** *(test-first)* `InvoiceApi.RescanEverything: int -> Result<ScanResultUiType, MyDogsbodyException>`;
+      `ActionNames.MyDogsbody.Startup.InvoiceApi.rescanEverything`.
+      `InvoiceApiFactory`: a `clearWatermarksForAccount` adapter (same wiring as
+      `MailAccountApiFactory`), a `runScan mode rawDays` helper, `Scan` = `runScan IncrementalScan`,
+      `RescanEverything` = `runScan FullRescan`.
+      Tests *(Integration)*: `RescanEverything` with no account is the same readable alert as
+      `Scan`, nothing logged; with a seeded account + watermark row, the row is gone afterward.
+- [x] **16.4** *(test-first)* `InvoicesModule.RescanEverything: unit -> unit`;
+      `InvoicesModuleCreators` wires it through a `scanUsing` helper shared with `scan`.
+      Tests: `m.RescanEverything()` calls `InvoiceApi.RescanEverything` for the current window and
+      reloads the ledger from the store; `m.Rescan()` still calls `InvoiceApi.Scan`.
+- [x] **16.5** `InvoicesComponents.windowPicker`: a **"Rescan everything"** `MudButton` beside
+      "Scan now", `Disabled` while `IsScanningAval`.
+      Tests *(E2E)*: the button renders; pressing it with no mail account raises the alert.
+- [x] **16.6** `requirements.md` (§Scanning + §UI + §Edge cases), `design.md` → *Decisions taken*
+      #16, `outcome.md` all record it.
+
+## Phase 17 — a fatal scan resets the watermarks (required — PR #18 review round 6)
+
+`readFolder` saves each folder's watermark as part of `read`, which `scanForInvoices` calls before
+processing a single message. A fatal error mid-processing would otherwise strand every unprocessed
+message behind a watermark at EOF — no invoice, no problem, nothing on screen. design.md →
+*Decisions taken* #17.
+
+- [x] **17.1** *(test-first)* On the `ScanAcc.Fatal` branch, `scanForInvoices` calls
+      `clearWatermarks accountId` and returns the original fatal error whether or not the clear
+      succeeded (`Result.mapError (fun _ -> error)`).
+      Tests: a fatal `upsertInvoice` failure → `clearWatermarks` called with the account id, result
+      is still `Error (InvoiceStoreFailed …)`; a clean scan → `clearWatermarks` never called
+      (`IncrementalScan`); a `clearWatermarks` failure on the fatal path does not replace the
+      fatal error.
+- [x] **17.2** `InvoiceApiFactory` passes the `clearWatermarksForAccount` adapter (already wired in
+      16.3) to `scanForInvoices`.
+- [x] **17.3** Gate: `dotnet build MyDogsbody.sln` clean; `dotnet test` green, zero skips. Record
+      the new totals per level in `outcome.md`.
+
 ---
 
 ## Optional

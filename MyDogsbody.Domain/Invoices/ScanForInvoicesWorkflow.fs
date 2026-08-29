@@ -147,6 +147,7 @@ type private ScanAcc =
 let scanForInvoices
     (getCurrentTime: GetCurrentTime)
     (loadSelectedMailAccount: LoadSelectedMailAccount)
+    (clearWatermarks: ClearWatermarks)
     (readMailFolder: ReadMailFolder)
     (readDocumentText: ReadDocumentText)
     (loadSuppliers: LoadSuppliers)
@@ -155,6 +156,7 @@ let scanForInvoices
     (upsertInvoice: UpsertInvoice)
     (saveScanProblems: SaveScanProblems)
     (clearScanProblems: ClearScanProblems)
+    (mode: ScanMode)
     (window: ScanWindowDays)
     : Result<ScanResult, InvoiceError> =
     result {
@@ -167,6 +169,15 @@ let scanForInvoices
             match selectedAccount with
             | Some accountId -> Ok accountId
             | None -> Error NoAccountSelected
+
+        // FullRescan ("Rescan everything") discards the watermarks so every folder is read in
+        // full: a folder scanned before a supplier existed advanced to EOF having extracted
+        // nothing, and an IncrementalScan would resume from there and see none of that mail
+        // (design.md -> Decisions taken #16).
+        do!
+            match mode with
+            | FullRescan -> clearWatermarks accountId |> Result.mapError fromMailAccountError
+            | IncrementalScan -> Ok()
 
         let! messages = readMailFolder accountId cutoff |> Result.mapError fromMailAccountError
         let! suppliers = loadSuppliers () |> Result.mapError fromSupplierError
@@ -211,7 +222,17 @@ let scanForInvoices
             |> List.fold step { Stored = []; Recorded = []; Succeeded = []; Fatal = None }
 
         match final.Fatal with
-        | Some error -> return! Error error
+        | Some error ->
+            // readMailFolder advanced every folder's watermark to EOF before the first message was
+            // processed; this scan is aborting with some or none of them handled. Leaving the
+            // watermarks there would strand every unprocessed message behind an "already read"
+            // mark - resumeOffset resumes from OffsetReached whenever the file has only grown, so
+            // no invoice, no problem, nothing on screen (design.md -> Decisions taken #17). Reset
+            // them so the next scan re-reads the account; the original `error` is returned whether
+            // or not the clear succeeds, so a broken store - the usual cause of a fatal error -
+            // does not mask itself.
+            do! (clearWatermarks accountId |> Result.mapError (fun _ -> error))
+            return! Error error
         | None ->
             let problems = List.rev final.Recorded
             let succeeded = List.rev final.Succeeded
