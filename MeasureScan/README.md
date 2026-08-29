@@ -54,13 +54,13 @@ If the cause breakdown still shows lots of `NoSupplierMatched` for real supplier
 
 ## What the numbers mean
 
-- **12.4** — if "window widen" is more than ~2 s of scanning, Q1.9's immediate rescan loses:
-  replace it with an explicit **Refresh** button. `InvoicesModuleCreators.getInvoicesModule`
-  already splits `GetInvoices` (fast) from `Scan`, so it's a small change.
-- **12.5** — the `12% → 39%` prediction was over ~30 suppliers / 558 PDFs. Four suppliers won't
-  reproduce that scale; your number is "of what these four templates extracted, X% carry a due
-  date". **Read it off the merged branch before starting change #7** — if it's near 12%, the
-  calendar sync isn't the highest-value next change (friction #19).
+- **12.4** — **settled.** The 2026-08-29 runs measured ~60 s whatever the window, so Q1.9's
+  immediate rescan is gone: Phase 15 made a window change reload the ledger and added an explicit
+  "Scan now". This harness's remaining job is 12.5.
+- **12.5** — the `12% → 39%` prediction was over ~30 suppliers / 558 PDFs. The 730-day discovery
+  run showed this mailbox has almost none of that: 2,026 messages processed over 2 years, every
+  one `NoSupplierMatched`, the four target suppliers barely present. Filling `suppliers` and
+  running measurement mode would extract single-digit N. See `outcome.md` → 12.5.
 
 ## Cleanup
 
