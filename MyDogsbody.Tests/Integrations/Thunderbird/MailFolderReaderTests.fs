@@ -80,6 +80,58 @@ let ``normalizeStartOffset restarts at zero when the stored offset lies past the
 let ``normalizeStartOffset restarts at zero for a negative stored offset`` () =
     Assert.Equal(0L, normalizeStartOffset 1000L -1L)
 
+// -- resumeOffset --
+//
+// The decision in front of every incremental read. Pure, so every branch is asserted here without
+// a file; the integration tests in 4.4 and 4.4a then prove readFolder actually obeys it.
+
+let private mtime = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc)
+let private scannedAt = DateTime(2026, 8, 6)
+
+let private watermarkOf size offset cutoff : FolderWatermark =
+    { SizeBytes = size; ModifiedAt = mtime; OffsetReached = offset; CutoffReached = cutoff }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset restarts at zero when there is no watermark at all`` () =
+    Assert.Equal(0L, resumeOffset scannedAt 1000L mtime None)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset resumes when the file is unchanged and the cutoff is the same`` () =
+    Assert.Equal(400L, resumeOffset scannedAt 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset resumes when the file has grown and the cutoff is the same`` () =
+    Assert.Equal(400L, resumeOffset scannedAt 2000L (mtime.AddSeconds 5.0) (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset restarts at zero when the file has shrunk`` () =
+    Assert.Equal(0L, resumeOffset scannedAt 500L (mtime.AddSeconds 5.0) (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset restarts at zero when the cutoff has moved earlier, because the window widened`` () =
+    // The bytes before the offset were passed over at the recorded cutoff without their bodies
+    // being parsed. A cutoff a month earlier is asking for exactly those messages.
+    let widened = scannedAt.AddDays -30.0
+    Assert.Equal(0L, resumeOffset widened 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset resumes when the cutoff has moved later, because the window narrowed`` () =
+    // Narrowing asks for a subset of what has already been read - nothing in the file is new to it.
+    let narrowed = scannedAt.AddDays 7.0
+    Assert.Equal(400L, resumeOffset narrowed 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset resumes when the same window slides forward a day`` () =
+    // The ordinary second scan: the same N-day window a day later puts the cutoff one day LATER,
+    // which is not a widening. This is the 5.3 s warm scan the 12.4 measurement recorded.
+    Assert.Equal(400L, resumeOffset (scannedAt.AddDays 1.0) 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset restarts at zero for a watermark recorded before the cutoff was stored`` () =
+    // DateTime.MinValue is what CutoffTicks = 0 decodes to. It means "not recorded", NOT "scanned
+    // with no cutoff" - reading it the other way would suppress the re-read forever.
+    Assert.Equal(0L, resumeOffset scannedAt 1000L mtime (Some(watermarkOf 1000L 400L DateTime.MinValue)))
+
 // -- segmentStartOffsets --
 
 let private bytesOf (s: string) = System.Text.Encoding.Latin1.GetBytes s
@@ -829,6 +881,112 @@ let ``readFolder re-reads the whole folder when the modification time is inconsi
     finally
         Directory.Delete(tempDir, true)
 
+// ---------- 4.4a a widened window against an unchanged file ----------
+//
+// The watermark says "resume at OffsetReached" from the file's size and mtime alone. Those are
+// unchanged by the user picking a LONGER scan window - and everything before the offset that
+// predated the previous, narrower cutoff was skipped without ever being parsed. So a resume
+// answers "nothing new" for mail the wider window is precisely asking for: the user widens 7 days
+// to 180, presses "Scan now", waits, and gets an empty result with nothing on screen saying the
+// older mail was never read. requirements.md -> "WHEN a user asks to scan ... THE SYSTEM SHALL
+// read the mailbox for the current window", and outcome.md's own 12.4 table calls a window widen
+// a "full re-read (watermarks cleared)" - which nothing in the scan path did.
+
+/// Two messages far enough apart that one cutoff includes both and another only the later.
+let private datedMessage (messageId: string) (envelopeDate: string) (dateHeader: string) =
+    $"From sender@example.com {envelopeDate}\n"
+    + $"Message-ID: <{messageId}>\n"
+    + "From: sender@example.com\n"
+    + "To: me@example.com\n"
+    + $"Subject: Invoice {messageId}\n"
+    + $"Date: {dateHeader}\n"
+    + "Content-Type: text/plain; charset=utf-8\n\n"
+    + $"Body of {messageId}\n\n"
+
+let private januaryAndAugust =
+    datedMessage "old-jan@example.com" "Thu Jan 15 10:00:00 2026" "Thu, 15 Jan 2026 10:00:00 +0000"
+    + datedMessage "recent-aug@example.com" "Wed Aug 20 10:00:00 2026" "Wed, 20 Aug 2026 10:00:00 +0000"
+
+let private idsOf (result: Result<MailMessage list, MailAccountError>) =
+    match result with
+    | Ok messages -> messages |> List.map (fun m -> m.SourceMessageId) |> List.sort
+    | Error error -> failwith $"Expected Ok, but got Error: {error}"
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder re-reads the whole folder when the cutoff has widened, and returns the older messages the narrower one skipped`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Widened")
+        File.WriteAllText(path, januaryAndAugust)
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        // A narrow window: only the August message qualifies, and the offset still advances to
+        // EOF because the January message was read past, not stopped at.
+        let narrow = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 1))
+        let first = readFolder load save testAccountId (folder "Widened") tempDir Mbox narrow
+        Assert.Equal<string list>([ "<recent-aug@example.com>" ], idsOf first)
+
+        // The user widens the window and presses "Scan now". The file is byte-identical, so the
+        // size/mtime watermark alone would say "nothing new" - but the wider cutoff is asking for
+        // exactly the message the narrow one skipped.
+        let wide = ScanCutoff.ofStartOfDay (DateTime(2025, 1, 1))
+        let second = readFolder load save testAccountId (folder "Widened") tempDir Mbox wide
+
+        Assert.Equal<string list>(
+            [ "<old-jan@example.com>"; "<recent-aug@example.com>" ],
+            idsOf second
+        )
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder still resumes from the watermark when the cutoff has narrowed, so a shorter window costs no re-read`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Narrowed")
+        File.WriteAllText(path, januaryAndAugust)
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        let wide = ScanCutoff.ofStartOfDay (DateTime(2025, 1, 1))
+        Assert.Equal<string list>(
+            [ "<old-jan@example.com>"; "<recent-aug@example.com>" ],
+            idsOf (readFolder load save testAccountId (folder "Narrowed") tempDir Mbox wide)
+        )
+
+        // Narrowing asks for a SUBSET of what has already been read, so there is nothing new in
+        // the file for it - the resume must stand. (Which invoices are shown for the shorter
+        // window is the ledger's filter, not the reader's.)
+        let narrow = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 1))
+        Assert.Empty(idsOf (readFolder load save testAccountId (folder "Narrowed") tempDir Mbox narrow))
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder resumes from the watermark when the same window is scanned again a day later`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "SameWindow")
+        File.WriteAllText(path, januaryAndAugust)
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        // The ordinary case: the same N-day window scanned on two consecutive days. The cutoff
+        // SLIDES FORWARD, so it is never earlier than the recorded one and the resume stands -
+        // this is the 5.3 s second scan the 12.4 measurement recorded, and widening must not
+        // turn it into a 60 s one.
+        let day1 = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 10))
+        readFolder load save testAccountId (folder "SameWindow") tempDir Mbox day1 |> ignore
+
+        let day2 = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 11))
+        Assert.Empty(idsOf (readFolder load save testAccountId (folder "SameWindow") tempDir Mbox day2))
+    finally
+        Directory.Delete(tempDir, true)
+
 // ---------- 4.4b CRLF messages ----------
 
 /// RFC 5322 mandates CRLF, and a message stored exactly as it arrived over IMAP/SMTP keeps it.
@@ -1025,6 +1183,9 @@ let ``readFolder re-reads the whole folder when the stored offset lies past the 
                 SizeBytes = 1L
                 ModifiedAt = File.GetLastWriteTimeUtc path
                 OffsetReached = length + 500L
+                // The same cutoff this test reads with, so the resume path is the one exercised -
+                // the subject here is the stale OFFSET, not the cutoff check in front of it.
+                CutoffReached = ScanCutoff.value noCutoff
             }
 
         match readFolder load save testAccountId (folder "StaleOffset") tempDir Mbox noCutoff with

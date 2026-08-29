@@ -1,4 +1,4 @@
-module MyDogsbody.Tests.Contracts.ThunderbirdPersistedShapeTests
+﻿module MyDogsbody.Tests.Contracts.ThunderbirdPersistedShapeTests
 
 open System
 open System.IO
@@ -138,7 +138,11 @@ let ``a watermark is persisted under the documented field names`` () =
     withStoreAndRawAccess (fun context rawDatabase ->
         let id = MailAccountId.create @"C:\p|account1" |> valueOrFail
         let modifiedAt = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L
-        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L }
+        // A cutoff is the start of a day on the local clock - Kind Unspecified, never Utc.
+        let cutoffAt = DateTime(2026, 8, 6, 0, 0, 0, DateTimeKind.Unspecified)
+
+        let watermark: FolderWatermark =
+            { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L; CutoffReached = cutoffAt }
 
         ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection id "INBOX" watermark
         |> okOrFail "saveWatermarkEntry"
@@ -149,16 +153,23 @@ let ``a watermark is persisted under the documented field names`` () =
         // int64: LiteDB truncates a DateTime to whole milliseconds and returns it as Local, and
         // readFolder's watermark check compares the loaded value to the file's own mtime with
         // `=`. Asserting the field is an Int64 is what keeps that from quietly reverting.
-        for field in [ "_id"; "AccountId"; "RelativePath"; "SizeBytes"; "ModifiedAtTicksUtc"; "OffsetReached" ] do
+        // `CutoffTicks` is an int64 for the same reason as ModifiedAtTicksUtc, and for a sharper
+        // one: `resumeOffset` COMPARES it to the cutoff of the scan being asked for, and a value
+        // that came back shifted by the machine's UTC offset would make a same-window rescan look
+        // like a widening (a needless full re-read) or a widening look like a same-window rescan
+        // (older mail never read).
+        for field in [ "_id"; "AccountId"; "RelativePath"; "SizeBytes"; "ModifiedAtTicksUtc"; "OffsetReached"; "CutoffTicks" ] do
             Assert.True(document.ContainsKey field, $"expected a {field} field")
 
         Assert.False(document.ContainsKey "ModifiedAt", "ModifiedAt was renamed to ModifiedAtTicksUtc")
+        Assert.False(document.ContainsKey "CutoffReached", "CutoffReached is persisted as CutoffTicks")
 
         Assert.Equal(@"C:\p|account1", document.["AccountId"].AsString)
         Assert.Equal("INBOX", document.["RelativePath"].AsString)
         Assert.Equal(100L, document.["SizeBytes"].AsInt64)
         Assert.Equal(modifiedAt.Ticks, document.["ModifiedAtTicksUtc"].AsInt64)
-        Assert.Equal(50L, document.["OffsetReached"].AsInt64))
+        Assert.Equal(50L, document.["OffsetReached"].AsInt64)
+        Assert.Equal(cutoffAt.Ticks, document.["CutoffTicks"].AsInt64))
 
 [<Fact; Trait("Level", "Contract")>]
 let ``the five collections are named exactly as documented, and only those five exist`` () =
@@ -195,7 +206,7 @@ let ``the five collections are named exactly as documented, and only those five 
             context.GetWatermarksCollection
             id
             "INBOX"
-            { SizeBytes = 1L; ModifiedAt = DateTime.UtcNow; OffsetReached = 1L }
+            { SizeBytes = 1L; ModifiedAt = DateTime.UtcNow; OffsetReached = 1L; CutoffReached = DateTime(2026, 8, 1) }
         |> okOrFail "saveWatermarkEntry"
 
         Assert.Equal<string list>(

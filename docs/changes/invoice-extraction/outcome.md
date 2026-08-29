@@ -171,6 +171,20 @@ across 9 folders (was 0).
 the cost is reading and header-parsing every folder of every account, not the cutoff-filtered
 subset or the matching.
 
+> **The third row's parenthetical was a claim the code did not implement, and PR #18's round-2
+> review closed the gap.** `MeasureScan` produced that row by calling `ClearWatermarks` by hand;
+> the scan path had no equivalent, because a watermark was keyed on the folder's size and
+> modification time alone — neither of which a longer scan window changes. So widening 7 days to
+> 180 and pressing "Scan now" resumed from the stored offset and answered "nothing new" for the
+> older mail the wider window was asking for, silently: messages older than the previous cutoff
+> are skipped by `classifySegment` before their body is ever parsed, so they had been passed
+> over, not read. `FolderWatermark` now also records the cutoff its offset was reached under
+> (`ScanWatermarkEntity.CutoffTicks`, an int64 for the same round-trip reason as
+> `ModifiedAtTicksUtc`), and `MailFolderReader.resumeOffset` restarts at 0 when the cutoff being
+> asked for is earlier than the recorded one. A window that merely slides forward a day, or
+> narrows, still resumes — the 5.3 s second scan above is unaffected. A widen now costs the ~60 s
+> this row measured, automatically rather than by hand.
+
 **Immediate rescan kept? No.** A window change forcing this is far past Q1.9's "~2 s", so the
 fallback applies and is **built (Phase 15)**: a window change persists the choice and reloads the
 stored ledger (`GetInvoices` / `GetProblems`); an explicit **"Scan now"** button reads the mailbox.

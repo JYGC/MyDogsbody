@@ -113,13 +113,21 @@ let toSelectedMailAccountId (entity: SelectedAccountEntity option) : Result<Mail
 /// ScanWatermarkEntity for what LiteDB does to a DateTime, and why readFolder's equality check
 /// cannot survive it. This is a rename, not a new field: `ModifiedAt` became
 /// `ModifiedAtTicksUtc`.
+///
+/// `CutoffReached` is persisted as ticks for the same reason, and reconstructed as
+/// `DateTimeKind.Unspecified` rather than Utc: the cutoff comes from `GetCurrentTime`, which the
+/// composition root binds to `DateTime.Now`, so it is a local-clock value and calling it UTC would
+/// be a lie. Only `<` is ever applied to it, and DateTime comparison is on ticks regardless of
+/// Kind. Ticks of 0 (`DateTime.MinValue`) is what an entity stored before this field existed
+/// decodes to, and `resumeOffset` reads that as "not recorded".
 let toNewWatermarkEntity (accountId: string) (relativePath: string) (watermark: FolderWatermark) : ScanWatermarkEntity =
     ScanWatermarkEntity(
         AccountId = accountId,
         RelativePath = relativePath,
         SizeBytes = watermark.SizeBytes,
         ModifiedAtTicksUtc = watermark.ModifiedAt.Ticks,
-        OffsetReached = watermark.OffsetReached
+        OffsetReached = watermark.OffsetReached,
+        CutoffTicks = watermark.CutoffReached.Ticks
     )
 
 let toFolderWatermark (entity: ScanWatermarkEntity) : FolderWatermark =
@@ -127,4 +135,5 @@ let toFolderWatermark (entity: ScanWatermarkEntity) : FolderWatermark =
         SizeBytes = entity.SizeBytes
         ModifiedAt = DateTime(entity.ModifiedAtTicksUtc, DateTimeKind.Utc)
         OffsetReached = entity.OffsetReached
+        CutoffReached = DateTime(entity.CutoffTicks, DateTimeKind.Unspecified)
     }

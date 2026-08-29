@@ -10,13 +10,17 @@ open MimeKit.Utils
 open MyDogsbody.Domain
 open MyDogsbody.Domain.MailAccounts
 
-/// A folder's watermark: the file's size and last-write time when last read, and the byte
-/// offset reached. Integration-internal - the domain only ever sees `ClearWatermarks`.
+/// A folder's watermark: the file's size and last-write time when last read, the byte offset
+/// reached, and the scan cutoff it was reached under. Integration-internal - the domain only ever
+/// sees `ClearWatermarks`.
 type FolderWatermark =
     {
         SizeBytes: int64
         ModifiedAt: DateTime
         OffsetReached: int64
+        /// The cutoff `OffsetReached` was reached under. `DateTime.MinValue` means "not recorded"
+        /// - see `resumeOffset`, which treats that as unknown rather than as "no cutoff".
+        CutoffReached: DateTime
     }
 
 type LookupAccount = MailAccountId -> Result<DiscoveredMailAccount option, MailAccountError>
@@ -122,6 +126,42 @@ let MaxMessageBytes = 134_217_728
 /// past EOF is not. Pure and public so the reset is unit-tested without a file.
 let normalizeStartOffset (totalLength: int64) (fromOffset: int64) : int64 =
     if fromOffset < 0L || fromOffset > totalLength then 0L else fromOffset
+
+/// Where the next read of this folder should begin: the watermark's offset when resuming from it
+/// is still sound, or 0 for a full re-read. Pure and public so every branch is unit-tested without
+/// a file, the same reason `normalizeStartOffset` is.
+///
+/// A resume needs BOTH halves to hold. Size and modification time say the bytes already passed are
+/// still the same bytes. `CutoffReached` says they were examined for a window no wider than the
+/// one being asked about now - and that is the half the size/mtime pair cannot supply, because
+/// picking a longer scan window changes neither. `classifySegment` skips a message older than the
+/// cutoff BEFORE parsing its body, so those messages were passed over, not read; a later, wider
+/// cutoff is asking for exactly them. Resuming would answer "nothing new" for mail that was never
+/// looked at - the user widens 7 days to 180, presses "Scan now", and gets an empty result with
+/// nothing on screen to say why.
+///
+/// The recorded cutoff is the LAST one used, not the earliest ever used, and deliberately: after
+/// a narrow scan resumed from a wide one, the bytes appended since were examined only at the
+/// narrow cutoff, so the widest-ever claim would be false for them. Keeping the last one costs a
+/// re-read when a window is narrowed and then widened again, and that is the conservative side to
+/// err on - the upsert is on the natural key, so a re-read updates rather than duplicates.
+///
+/// A cutoff that slides forward by a day because the same N-day window is scanned again tomorrow
+/// is not a widening: it is later than the recorded one, so the resume stands.
+let resumeOffset
+    (cutoffAt: DateTime)
+    (currentSize: int64)
+    (currentModifiedAt: DateTime)
+    (existingWatermark: FolderWatermark option)
+    : int64 =
+    match existingWatermark with
+    // Written before the cutoff was recorded: unknown, not "no cutoff". One full re-read, after
+    // which the stored value is real.
+    | Some wm when wm.CutoffReached = DateTime.MinValue -> 0L
+    | Some wm when cutoffAt < wm.CutoffReached -> 0L // the window widened
+    | Some wm when currentSize = wm.SizeBytes && currentModifiedAt = wm.ModifiedAt -> wm.OffsetReached
+    | Some wm when currentSize > wm.SizeBytes && currentModifiedAt >= wm.ModifiedAt -> wm.OffsetReached
+    | _ -> 0L // no watermark, a shrunk file, or an inconsistent mtime - full re-read
 
 /// "From " as bytes: F r o m space.
 let private fromLineBytes = [| 70uy; 114uy; 111uy; 109uy; 32uy |]
@@ -497,12 +537,9 @@ let readFolder
                 let! existingWatermark = loadWatermark accountId folder.RelativePath
                 let currentSize = FileInfo(fullPath).Length
                 let currentModifiedAt = File.GetLastWriteTimeUtc fullPath
+                let cutoffAt = ScanCutoff.value cutoff
 
-                let fromOffset =
-                    match existingWatermark with
-                    | Some wm when currentSize = wm.SizeBytes && currentModifiedAt = wm.ModifiedAt -> wm.OffsetReached
-                    | Some wm when currentSize > wm.SizeBytes && currentModifiedAt >= wm.ModifiedAt -> wm.OffsetReached
-                    | _ -> 0L // no watermark, a shrunk file, or an inconsistent mtime - full re-read
+                let fromOffset = resumeOffset cutoffAt currentSize currentModifiedAt existingWatermark
 
                 let! messages, offsetReached = readMboxFile cutoff fullPath fromOffset
 
@@ -514,6 +551,7 @@ let readFolder
                             SizeBytes = currentSize
                             ModifiedAt = currentModifiedAt
                             OffsetReached = offsetReached
+                            CutoffReached = cutoffAt
                         }
 
                 return messages

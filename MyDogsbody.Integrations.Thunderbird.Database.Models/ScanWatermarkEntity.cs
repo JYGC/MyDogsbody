@@ -21,5 +21,19 @@ namespace MyDogsbody.Integrations.Thunderbird.Database.Models
         public long ModifiedAtTicksUtc { get; set; }
 
         public long OffsetReached { get; set; }
+
+        /// The ticks of the scan cutoff OffsetReached was reached under - the second half of what
+        /// makes a resume sound. Size and modification time alone say only that the file has not
+        /// changed; they cannot say that the bytes already passed were examined for the window
+        /// being asked about now. Messages older than the cutoff are skipped before their body is
+        /// ever parsed, so a wider window needs those same bytes read again.
+        ///
+        /// Ticks for the same reason as ModifiedAtTicksUtc: this value is COMPARED after loading,
+        /// and LiteDB's DateTime round trip truncates to whole milliseconds and shifts the Kind.
+        ///
+        /// Zero means "not recorded" - a watermark written before this field existed - and
+        /// readFolder treats it as unknown rather than as "no cutoff", forcing one full re-read
+        /// after which the recorded value is real.
+        public long CutoffTicks { get; set; }
     }
 }

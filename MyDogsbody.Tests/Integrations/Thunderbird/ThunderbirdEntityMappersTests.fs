@@ -148,11 +148,16 @@ let ``toNewWatermarkEntity and toFolderWatermark round trip every field`` () =
     // entity, and this asserts it as one.
     let modifiedAt = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L
 
+    // A cutoff is the start of a day on the LOCAL clock (GetCurrentTime is DateTime.Now), so it
+    // round trips as Unspecified - calling it Utc would be a lie, and only `<` is applied to it.
+    let cutoffAt = DateTime(2026, 8, 6, 0, 0, 0, DateTimeKind.Unspecified)
+
     let watermark: FolderWatermark =
         {
             SizeBytes = 4096L
             ModifiedAt = modifiedAt
             OffsetReached = 2048L
+            CutoffReached = cutoffAt
         }
 
     let entity = ThunderbirdEntityMappers.toNewWatermarkEntity "account1" "INBOX" watermark
@@ -161,7 +166,19 @@ let ``toNewWatermarkEntity and toFolderWatermark round trip every field`` () =
     Assert.Equal(4096L, entity.SizeBytes)
     Assert.Equal(modifiedAt.Ticks, entity.ModifiedAtTicksUtc)
     Assert.Equal(2048L, entity.OffsetReached)
+    Assert.Equal(cutoffAt.Ticks, entity.CutoffTicks)
 
     let roundTripped = ThunderbirdEntityMappers.toFolderWatermark entity
     Assert.Equal(watermark, roundTripped)
     Assert.Equal(DateTimeKind.Utc, roundTripped.ModifiedAt.Kind)
+    Assert.Equal(DateTimeKind.Unspecified, roundTripped.CutoffReached.Kind)
+
+/// The upgrade path: an entity stored before CutoffTicks existed has the C# default of 0. It must
+/// decode to DateTime.MinValue, which `resumeOffset` reads as "not recorded" - one full re-read -
+/// rather than as "scanned with no cutoff", which would suppress re-reads forever.
+[<Fact; Trait("Level", "Unit")>]
+let ``a watermark entity stored before CutoffTicks existed decodes to an unrecorded cutoff`` () =
+    let entity = ScanWatermarkEntity(AccountId = "account1", RelativePath = "INBOX", SizeBytes = 10L, OffsetReached = 5L)
+
+    Assert.Equal(0L, entity.CutoffTicks)
+    Assert.Equal(DateTime.MinValue, (ThunderbirdEntityMappers.toFolderWatermark entity).CutoffReached)

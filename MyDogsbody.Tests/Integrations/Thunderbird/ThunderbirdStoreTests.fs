@@ -1,4 +1,4 @@
-module MyDogsbody.Tests.Integrations.Thunderbird.ThunderbirdStoreTests
+﻿module MyDogsbody.Tests.Integrations.Thunderbird.ThunderbirdStoreTests
 
 open System
 open System.IO
@@ -325,7 +325,8 @@ let ``loadWatermarkEntry returns None when no watermark has been saved`` () =
 let ``saveWatermarkEntry then loadWatermarkEntry round trips the watermark`` () =
     withContext (fun context ->
         let id = MailAccountId.create @"C:\profile|account1" |> valueOrFail
-        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L }
+        let watermark: FolderWatermark =
+            { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L; CutoffReached = DateTime(2026, 8, 1) }
 
         ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection id "INBOX" watermark
         |> okOrFail "saveWatermarkEntry"
@@ -340,8 +341,10 @@ let ``saveWatermarkEntry then loadWatermarkEntry round trips the watermark`` () 
 let ``saveWatermarkEntry updates an existing watermark rather than duplicating it`` () =
     withContext (fun context ->
         let id = MailAccountId.create @"C:\profile|account1" |> valueOrFail
-        let first: FolderWatermark = { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L }
-        let second: FolderWatermark = { SizeBytes = 200L; ModifiedAt = DateTime(2026, 8, 21); OffsetReached = 150L }
+        let first: FolderWatermark =
+            { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L; CutoffReached = DateTime(2026, 8, 1) }
+        let second: FolderWatermark =
+            { SizeBytes = 200L; ModifiedAt = DateTime(2026, 8, 21); OffsetReached = 150L; CutoffReached = DateTime(2026, 8, 2) }
 
         ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection id "INBOX" first
         |> okOrFail "saveWatermarkEntry first"
@@ -366,7 +369,8 @@ let ``clearWatermarksFor deletes every watermark for the account and nothing els
     withContext (fun context ->
         let account1 = MailAccountId.create @"C:\profile|account1" |> valueOrFail
         let account2 = MailAccountId.create @"C:\profile|account2" |> valueOrFail
-        let watermark: FolderWatermark = { SizeBytes = 1L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 1L }
+        let watermark: FolderWatermark =
+            { SizeBytes = 1L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 1L; CutoffReached = DateTime(2026, 8, 1) }
 
         ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection account1 "INBOX" watermark
         |> okOrFail "save 1a"
@@ -518,7 +522,8 @@ let ``saveWatermarkEntry reports a MyDogsbodyException carrying its action when 
     let recordingHandleError = HandleErrorBuilder logged.Add
     let failingGetter: unit -> WatermarksCollection = fun () -> raise (InvalidOperationException "database is gone")
     let id = MailAccountId.create "a" |> valueOrFail
-    let watermark: FolderWatermark = { SizeBytes = 1L; ModifiedAt = DateTime.UtcNow; OffsetReached = 1L }
+    let watermark: FolderWatermark =
+        { SizeBytes = 1L; ModifiedAt = DateTime.UtcNow; OffsetReached = 1L; CutoffReached = DateTime(2026, 8, 1) }
 
     let actual = ThunderbirdStore.saveWatermarkEntry recordingHandleError failingGetter id "INBOX" watermark
 
