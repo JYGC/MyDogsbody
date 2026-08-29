@@ -31,8 +31,11 @@ type private ScanWindowApiSpy() =
     member val SelectedCalls: int list = [] with get, set
     member val GetSelectedResult: Result<int, MyDogsbodyException> = Ok 14 with get, set
 
+    member val GetScanWindowsResult: Result<ScanWindowUiType list, MyDogsbodyException> =
+        Ok [ aWindow 7; aWindow 14; aWindow 90 ] with get, set
+
     member this.Api: ScanWindowApi =
-        { GetScanWindows = fun () -> Ok [ aWindow 7; aWindow 14; aWindow 90 ]
+        { GetScanWindows = fun () -> this.GetScanWindowsResult
           AddScanWindow = fun _ -> Ok()
           DeleteScanWindow = fun _ -> Ok()
           GetSelectedScanWindow = fun () -> this.GetSelectedResult
@@ -50,6 +53,10 @@ type private InvoiceApiSpy() =
     member val GetInvoicesFor: int -> InvoiceUiType list = (fun _ -> []) with get, set
     /// The persisted problem rows GetProblems returns - Q1.19 keeps them across scans.
     member val ProblemsInStore: ScanProblemUiType list = [] with get, set
+    /// Set to make the LEDGER read fail while Scan still succeeds - the store can refuse a read
+    /// (an unusable stored row, a locked file) without the mailbox read having failed.
+    member val GetInvoicesError: MyDogsbodyException option = None with get, set
+    member val GetProblemsError: MyDogsbodyException option = None with get, set
 
     member this.Api: InvoiceApi =
         { Scan =
@@ -59,12 +66,18 @@ type private InvoiceApiSpy() =
           GetInvoices =
             fun days ->
                 this.GetInvoicesCalls <- this.GetInvoicesCalls @ [ days ]
-                Ok(this.GetInvoicesFor days)
+
+                match this.GetInvoicesError with
+                | Some ex -> Error ex
+                | None -> Ok(this.GetInvoicesFor days)
           DeleteInvoice = fun _ -> Ok()
           GetProblems =
             fun () ->
                 this.GetProblemsCalls <- this.GetProblemsCalls + 1
-                Ok this.ProblemsInStore
+
+                match this.GetProblemsError with
+                | Some ex -> Error ex
+                | None -> Ok this.ProblemsInStore
           GetTombstones = fun () -> Ok []
           UndeleteInvoice = fun _ _ -> Ok() }
 
@@ -238,6 +251,98 @@ let ``un-deleting an invoice scans the mailbox, since only a scan can restore th
 
     // initial load (30) then the rescan a restore needs (30)
     Assert.Equal<int list>([ 30; 30 ], invoiceApi.ScanCalls)
+
+// ---- a read that fails inside a composite load must not be swallowed ----
+//
+// `scan` and `loadLedger` each perform three or four reads and used to match every one of them
+// independently, discarding all but one error. So a LEDGER read that failed while the scan
+// succeeded set no alert at all - and since the initial page load scans, that is an empty table
+// under a "0 invoice(s)" count line with nothing on screen to say the read failed.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a ledger read that fails during a scan is reported, not swallowed`` () =
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
+
+    let invoiceApi =
+        InvoiceApiSpy(GetInvoicesError = Some(failure "a stored invoice is unusable"))
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    // the scan itself succeeded, so nothing else says the table is wrong
+    Assert.Equal<int list>([ 30 ], invoiceApi.ScanCalls)
+    Assert.Equal<InvoiceUiType list>([], AVal.force m.InvoicesAval)
+    Assert.Equal(Some "a stored invoice is unusable", AVal.force m.ErrorAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the scan's own failure still wins over a later read's`` () =
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
+
+    let invoiceApi =
+        InvoiceApiSpy(
+            ScanResult = Error(failure "the mailbox is unreachable"),
+            GetInvoicesError = Some(failure "a stored invoice is unusable")
+        )
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    Assert.Equal(Some "the mailbox is unreachable", AVal.force m.ErrorAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a problems read that fails during a window change is reported, not swallowed`` () =
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
+    let invoiceApi = InvoiceApiSpy()
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    Assert.Equal(None, AVal.force m.ErrorAval)
+
+    invoiceApi.GetProblemsError <- Some(failure "the problems table is unreachable")
+    m.SelectWindow 7
+
+    // a window change reloads the ledger only (no scan), so nothing else reports this
+    Assert.Equal<int list>([ 30 ], invoiceApi.ScanCalls)
+    Assert.Equal(Some "the problems table is unreachable", AVal.force m.ErrorAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a scan-window read that fails during a load is reported, not swallowed`` () =
+    let windowApi = ScanWindowApiSpy(GetScanWindowsResult = Error(failure "the window list is unreachable"))
+    let invoiceApi = InvoiceApiSpy()
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    Assert.Equal<ScanWindowUiType list>([], AVal.force m.ScanWindowsAval)
+    Assert.Equal(Some "the window list is unreachable", AVal.force m.ErrorAval)
+
+// ---- /settings/scan-windows: the same class, and this module creator had no test at all ----
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the scan-windows browser loads the windows and marks the remembered choice`` () =
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 90)
+
+    let m =
+        InvoicesModuleCreators.getScanWindowsBrowserModule runSynchronously windowApi.Api
+
+    Assert.Equal<int list>([ 7; 14; 90 ], AVal.force m.WindowsAval |> List.map (fun w -> w.Days))
+    Assert.Equal(90, AVal.force m.SelectedWindowDaysAval)
+    Assert.Equal(None, AVal.force m.ErrorAval)
+    Assert.False(AVal.force m.IsLoadingAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``the scan-windows browser reports a failed selected-window read rather than opening on nothing`` () =
+    let windowApi =
+        ScanWindowApiSpy(GetSelectedResult = Error(failure "the settings row is unreachable"))
+
+    let m =
+        InvoicesModuleCreators.getScanWindowsBrowserModule runSynchronously windowApi.Api
+
+    // the list loaded, so without an alert the page just marks nothing as current
+    Assert.Equal<int list>([ 7; 14; 90 ], AVal.force m.WindowsAval |> List.map (fun w -> w.Days))
+    Assert.Equal(0, AVal.force m.SelectedWindowDaysAval)
+    Assert.Equal(Some "the settings row is unreachable", AVal.force m.ErrorAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``the module creator uses no Async.Start`` () =

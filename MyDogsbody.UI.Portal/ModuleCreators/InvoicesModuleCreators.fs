@@ -5,6 +5,24 @@ open MyDogsbody.Exceptions.Types
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 
+/// The alert for a load that performs several reads: the message of the FIRST one that failed,
+/// in the order given, or None when every one of them succeeded.
+///
+/// Each read used to be matched on its own and all but one discarded its error with `| Error _ ->
+/// ()`, so a read that failed while the operation the user actually asked for succeeded set no
+/// alert at all. The ledger read is the one that costs: the initial page load scans, so a ledger
+/// read that failed left an EMPTY table under a "0 invoice(s)" count line with nothing on screen
+/// to say that anything had gone wrong - the stored invoices were there, unreadable, and the page
+/// said there were none.
+///
+/// Order is priority, and the operation the user pressed comes first: a failed mailbox scan is
+/// the news, and the stored ledger read alongside it is still on screen.
+let private firstFailure (results: Result<unit, MyDogsbodyException> list) : string option =
+    results
+    |> List.tryPick (function
+        | Error(ex: MyDogsbodyException) -> Some ex.Message
+        | Ok() -> None)
+
 /// Builds the invoices page state.
 ///
 /// startWork is how the module gets off the render thread; a test passes `fun work -> work ()`.
@@ -47,14 +65,18 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 match ledger with
-                | Ok invoices ->
-                    invoicesCval.Value <- invoices
-                    errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
+                | Ok invoices -> invoicesCval.Value <- invoices
+                | Error _ -> ()
 
                 match problems with
                 | Ok ps -> problemsCval.Value <- ps
                 | Error _ -> ()
+
+                errorCval.Value <-
+                    firstFailure
+                        [ ledger |> Result.map ignore
+                          problems |> Result.map ignore
+                          windows |> Result.map ignore ]
 
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
@@ -91,11 +113,15 @@ let getInvoicesModule
                 | Ok ps -> problemsCval.Value <- ps
                 | Error _ -> ()
 
-                match scanResult with
-                | Ok _ -> errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) ->
-                    // the stored ledger (read above) is still shown; only the mailbox read failed
-                    errorCval.Value <- Some ex.Message
+                // The scan comes first: when the mailbox read failed that is the news, and the
+                // stored ledger read alongside it is still on screen. When it SUCCEEDED, a failed
+                // ledger or problems read is the only thing that can report itself.
+                errorCval.Value <-
+                    firstFailure
+                        [ scanResult |> Result.map ignore
+                          ledger |> Result.map ignore
+                          problems |> Result.map ignore
+                          windows |> Result.map ignore ]
 
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
@@ -204,15 +230,16 @@ let getScanWindowsBrowserModule
             transact (fun _ ->
                 match windows with
                 | Ok ws -> windowsCval.Value <- ws
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
+                | Error _ -> ()
 
                 match selected with
                 | Ok days -> selectedDaysCval.Value <- days
                 | Error _ -> ()
 
-                (match windows with
-                 | Ok _ -> errorCval.Value <- None
-                 | Error _ -> ())
+                // A failed selected-window read used to be discarded, which left the page marking
+                // nothing as "(current)" and saying nothing about why.
+                errorCval.Value <-
+                    firstFailure [ windows |> Result.map ignore; selected |> Result.map ignore ]
 
                 isLoadingCval.Value <- false))
 

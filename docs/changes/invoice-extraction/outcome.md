@@ -109,6 +109,41 @@ Phase 14 (streaming reader) is **+7** over the 1283 the rest of the change reach
   commit**. The remedy — dropping `ClearAllPools()` from those seven harnesses, as the new ones
   already do — touches files this change does not, and wants its own change folder.
 
+### Review round 6 — a failed read inside a composite load set no alert
+
+`InvoicesModuleCreators` performs three or four API reads per load and matched each one on its
+own, discarding all but one error with `| Error _ -> ()`. So a read that failed while the
+operation the user actually asked for succeeded reported **nothing**:
+
+| Load | Reads | Reported before |
+| --- | --- | --- |
+| `scan` (initial load, "Scan now") | `Scan`, `GetInvoices`, `GetProblems`, `GetScanWindows` | `Scan` only |
+| `loadLedger` (window change, after a delete) | `GetInvoices`, `GetProblems`, `GetScanWindows` | `GetInvoices` only |
+| `getScanWindowsBrowserModule.load` | `GetScanWindows`, `GetSelectedScanWindow` | `GetScanWindows` only |
+
+The ledger read is the one that costs. The initial page load *scans*, so a `GetInvoices` failure
+(a stored row `InvoiceStore.orRaise` refuses, a locked database) opened the page on an empty table
+under a `0 invoice(s), mail received in the last 14 days` count line with no alert — the invoices
+were stored, unreadable, and the page said there were none. All three are now one
+`firstFailure` list, ordered so the operation the user pressed still wins.
+
+Six failing-first unit tests, four of them red for the predicted reason (`ErrorAval` was `None`
+where a message was expected). Two of the six cover `getScanWindowsBrowserModule`, which had **no
+test of any level** before this round.
+
+### Deferred out of round 6 — a fatal scan advances the watermark past mail it never processed
+
+`MailFolderReader.readFolder` saves each folder's watermark as part of `readMailFolder`, which
+`ScanForInvoicesWorkflow.scanForInvoices` calls *before* it processes a single message. If the
+scan then hits a fatal error (a `loadTemplatesForSupplier` or `upsertInvoice` store failure sets
+`ScanAcc.Fatal` and short-circuits), the watermarks for every folder are already at EOF, so the
+unprocessed messages are never read again — `resumeOffset` resumes from `OffsetReached` whenever
+the file has only grown. No invoice, no scan problem, nothing on screen.
+
+Not fixed here: the remedy is that the watermark commit has to follow successful *processing*,
+not successful *reading*, which moves the commit point across the reader/workflow boundary and
+wants its own change folder.
+
 ## What landed
 
 - **Phase 0** — `Integrations.Pdf` → `Integrations.Documents` (one project per capability).
