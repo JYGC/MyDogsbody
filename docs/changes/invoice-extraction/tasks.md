@@ -259,12 +259,11 @@ one file.
       2026-08-29, Phase 14 reader, 10 accounts, 180 d): cold **58.3 s**, warm **5.3 s**, full
       re-read (= a 14→180 widen) **59.6 s**. **~60 s is far past Q1.9's "~2 s", so the immediate
       rescan is dropped for an explicit Refresh — Phase 15.**
-- [ ] **12.5** **Record the real due-date coverage.** How many scanned invoices have a due date, with
-      and without `DateFromField`. The measurement predicted 12% → 39%; friction #19 says change #7's
-      value depends on it more than on anything in its own scope.
-      *(Still open: discovery mode yields 0 invoices. Needs `MeasureScan/Program.fs` supplier config
-      from the sender-domain table, then a measurement-mode re-run — task 14.8. Early friction-#19
-      read: biller volume over 180 d is ~a dozen emails, not ~558 PDFs.)*
+- [x] **12.5** **Record the real due-date coverage.** Recorded in `outcome.md` → 12.5: a
+      measurement-mode run with 3 token suppliers extracted **0 invoices (0/0 coverage)** — 8
+      supplier matches, 6 `RuleFoundNothing` on guessed labels, ~6 plausible invoices in the whole
+      mailbox over 2 years. The 12→39% prediction cannot be validated here; friction #19's number
+      needs the maintainer to author templates against real invoice PDFs. See also 14.8b.
 - [x] **12.6** Confirm `MainWindow.xaml.cs` is untouched.
 
 ## Phase 13 — Documentation (required)

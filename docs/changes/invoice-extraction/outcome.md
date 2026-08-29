@@ -4,7 +4,8 @@ Branch `change/invoice-extraction`, cut from `main` at `9b0d4ce`.
 
 ## Status
 
-**Code complete. Build clean. Suite green at all four levels, zero skips.**
+**Code complete. Build clean. Suite green at all four levels, zero skips. Phases 0–15 done;
+12.4 and 12.5 measured. Ready for review (13.3).**
 
 The Phase 12 measurement (2026-08-29) **found a blocking defect in change #3's `MailFolderReader`**:
 it dropped any folder file over ~1 GiB silently, and the maintainer's invoice mail is in a 2.0 GB
@@ -121,7 +122,7 @@ Phase 14 (streaming reader) is **+7** over the 1283 the rest of the change reach
 - `.gitignore` — `*.db` added (Phase 14): the `MeasureScan` commits had checked in four runtime
   databases, one holding real Thunderbird account data. Untracked now.
 
-## Manual measurement — REQUIRED before change #7 (Phase 12.4 / 12.5)
+## Manual measurement — DONE (Phase 12.4 / 12.5, 2026-08-29)
 
 Not runnable from the test suite. **`MeasureScan/` is a throwaway harness that does it** — it uses
 the real composition root (real migrations, `MailAccountApi` / `SupplierApi` / `TemplateApi` /
