@@ -11,14 +11,16 @@ it dropped any folder file over ~1 GiB silently, and the maintainer's invoice ma
 Gmail INBOX. **Phase 14** replaced the whole-folder buffer with a streaming reader — done, green,
 and the re-run confirms the 2.0 GB INBOX now reads (89,992 messages, was 0).
 
-**12.4 is measured and settled:** a full re-read is ~60 s (58 s at 180 days, 63 s at 730 — the
-cost is reading every folder, not the window), so the Q1.9 immediate-rescan is **dropped** for an
-explicit "Scan now" — **Phase 15, done and green**. **12.5 is still open:** discovery mode yields
-no invoices, so the due-date number needs `MeasureScan/Program.fs` supplier config and a
-measurement-mode re-run (task 14.8b). Friction #19 read, now firm after a 730-day discovery run:
-across ~100 K messages / 2 years, 2,026 were processed and **every one `NoSupplierMatched`** — the
-four target suppliers barely appear, and real biller volume is ~a dozen senders, not the ~558-PDF
-scale the 12→39% prediction assumed.
+**12.4 is measured and settled:** a full re-read is ~60 s across three runs (58 s at 180 days,
+62–66 s at 730 — the cost is reading every folder, not the window), so the Q1.9 immediate-rescan
+is **dropped** for an explicit "Scan now" — **Phase 15, done and green**.
+
+**12.5 is measured and closed as "not meaningfully answerable from this mailbox."** A
+measurement-mode run with three token suppliers extracted **0 invoices** — the pipeline ran (8
+messages matched a supplier, 6 reached template evaluation) but every guessed template rule found
+nothing, and there are only ~6 plausible invoices in 2 years anyway. Friction #19's due-date
+number needs the maintainer to author templates against real invoice PDFs; the ~558-PDF scale the
+12→39% prediction assumed is not present here.
 
 ## Test totals
 
@@ -153,19 +155,20 @@ Cleanup: `Remove-Item measure.db, Thunderbird.db, Logging.db -ErrorAction Silent
 dropped `outpost597100@gmail.com`'s 2.0 GB INBOX silently. Phase 14 fixed that; the re-run below is
 against the streaming reader.
 
-### 12.4 — scan timing (re-run 2026-08-29, Phase 14 reader, all 10 accounts)
+### 12.4 — scan timing (2026-08-29, Phase 14 reader, all 10 accounts)
 
 The 2.0 GB INBOX is now read: `outpost597100@gmail.com` reports **89,992 header-passing messages**
 across 9 folders (was 0).
 
-| Measurement | 180-day window | 730-day window |
-| --- | --- | --- |
-| First cold full scan (watermarks empty) | **58.3 s** (1,506 processed) | **63.1 s** (2,026 processed) |
-| Second scan (watermarks in place, no re-read) | **5.3 s** | **5.7 s** |
-| Full re-read (watermarks cleared — what a window widen costs) | **59.6 s** | **63.4 s** |
+| Measurement | 180 d | 730 d (discovery) | 730 d (3 suppliers) |
+| --- | --- | --- | --- |
+| First cold full scan (watermarks empty) | **58.3 s** | **63.1 s** | **62.6 s** |
+| Second scan (watermarks in place, no re-read) | **5.3 s** | **5.7 s** | **5.2 s** |
+| Full re-read (watermarks cleared — a window widen) | **59.6 s** | **63.4 s** | **61.0 s** |
 
-**Scan cost is ~60 s whatever the window** — 4× the window added ~5 s, because the cost is reading
-and header-parsing every folder of every account, not the cutoff-filtered subset.
+**Scan cost is ~60 s whatever the window or supplier count** — 4× the window added ~5 s, because
+the cost is reading and header-parsing every folder of every account, not the cutoff-filtered
+subset or the matching.
 
 **Immediate rescan kept? No.** A window change forcing this is far past Q1.9's "~2 s", so the
 fallback applies and is **built (Phase 15)**: a window change persists the choice and reloads the
@@ -174,21 +177,35 @@ stored ledger (`GetInvoices` / `GetProblems`); an explicit **"Scan now"** button
 Exceptions logged: **0** on both runs. Cause breakdown (730-day): `NoSupplierMatched` 1,940
 (discovery mode), `FormatUnsupported` 59, `AttachmentUnreadable` 27.
 
-### 12.5 — due-date coverage (pending supplier config — task 14.8b)
+### 12.5 — due-date coverage (measurement-mode run, 3 token suppliers, 730-day window)
 
-Discovery mode produces **0 invoices** by construction (no suppliers → no templates → no
-extraction), so the number needs `MeasureScan/Program.fs` → `suppliers` filled and a
-measurement-mode re-run. **The 730-day discovery run makes friction #19 firm:** across ~100 K
-messages / 2 years, **2,026 processed, every one `NoSupplierMatched`**. The sender table is
-newsletters/research (`smartbrief.com` ×477, `outlook.com`/`hotmail.com` ×636, `physorg.com` ×115,
-`arxiv.org` ×95); the billers present are low-count — IKEA ×10, OnePass ×13, HCF ×12, ahm ×6,
-ATO ×4, VicRoads ×3, Hostplus ×2. The four target suppliers (IODM, Yarra Valley Water, Xero,
-OC Energy) barely register — YVW appeared once at 180 days and not in the 730-day top 40. So a
-measurement-mode run would extract a handful of invoices at most, and any coverage % is over
-single-digit N. **The volume itself is the friction-#19 answer: this mailbox cannot validate the
-12→39% prediction, so change #7's value has to be judged on the friction list, not a measured %.**
+`MeasureScan/Program.fs` → `suppliers` was filled with the three that appear as **direct biller
+mail** in the discovery dump — InkStation (`inkstation.com.au`, "Your InkStation Tax Invoice"),
+"Plumbing Bros" (subject "Invoice I…", a Xero-generated invoice), HCF (`hcf.com.au`, premium
+notices) — with best-effort templates (the real PDF/body layouts are unknown).
+
+**Result: 0 invoices extracted, 0 with a due date — coverage undefined (0/0).**
+
+The cause breakdown is the informative part — the engine ran end to end:
+
+| Cause | Count | Meaning |
+| --- | --- | --- |
+| `NoSupplierMatched` | 1,932 | (was 1,940 — so **8 messages did match a supplier**) |
+| `RuleFoundNothing` | 6 | matched a supplier **and** a template, but the guessed labels ("Total (inc GST)", "Amount Due", "Invoice Date") found nothing in the real document |
+| `NoTemplateMatched` | 2 | matched a supplier but the message had no part the template targets |
+
+So the pipeline works — suppliers matched, templates applied — and **0 came out because the
+templates are guesses.** A real coverage number needs a human to open an actual invoice PDF from
+this mailbox and author the rules against its labels. And the ceiling is low: **8 supplier-matched
+messages over 2 years, ~6 plausible invoices**, against the ~558-PDF / ~30-supplier scale the
+12→39% prediction was made at.
+
+**Friction #19, answered:** this mailbox cannot produce a meaningful due-date-coverage figure —
+too few invoices, and extracting them needs template authoring that only the maintainer can do.
+Change #7's value has to be judged on the friction list and the `DateFromField` mechanism itself
+(which *is* built and unit-tested), not on a measured % from here.
 
 | Measurement | Result |
 | --- | --- |
-| Due-date coverage, no `DateFromField` | _pending — needs supplier config + measurement-mode re-run_ |
-| Due-date coverage, with `DateFromField` | _pending — same_ |
+| Due-date coverage, no `DateFromField` | **0 / 0** — no invoice reached extraction (templates are guesses; 6 `RuleFoundNothing`) |
+| Due-date coverage, with `DateFromField` | **0 / 0** — same |

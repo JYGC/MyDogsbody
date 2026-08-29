@@ -40,27 +40,26 @@ type SupplierConfig =
 /// Leave any MatcherValue as "REPLACE..." and the harness runs in DISCOVERY mode: it scans every
 /// account with no suppliers and prints the sender-domain frequency table, so you can see which
 /// domains your invoices actually come from. Fill these in, run again, get the coverage numbers.
+///
+/// 2026-08-29: three suppliers that appear as direct biller mail in the 730-day discovery run.
+/// The templates are best-effort - the real PDF/body layouts are unknown - so a low extraction
+/// count here IS the friction-#19 finding, not a template bug.
 let suppliers: SupplierConfig list =
-    [ { Name = "IODM"
+    [ { Name = "InkStation"
         MatcherKind = "Domain"
-        MatcherValue = "REPLACE-iodm"
-        PaymentTermDays = 30
+        MatcherValue = "inkstation.com.au"
+        PaymentTermDays = 0
+        DateFormat = "d/MM/yyyy" }
+      { Name = "Plumbing Bros"
+        MatcherKind = "Subject"
+        MatcherValue = "Invoice I"
+        PaymentTermDays = 7
         DateFormat = "d MMM yyyy" }
-      { Name = "Yarra Valley Water"
+      { Name = "HCF"
         MatcherKind = "Domain"
-        MatcherValue = "REPLACE-yvw"
+        MatcherValue = "hcf.com.au"
         PaymentTermDays = 14
-        DateFormat = "d/M/yyyy" }
-      { Name = "Xero"
-        MatcherKind = "Domain"
-        MatcherValue = "REPLACE-xero"
-        PaymentTermDays = 14
-        DateFormat = "d MMM yyyy" }
-      { Name = "OC Energy"
-        MatcherKind = "Domain"
-        MatcherValue = "REPLACE-ocenergy"
-        PaymentTermDays = 14
-        DateFormat = "d MMM yyyy" } ]
+        DateFormat = "d MMMM yyyy" } ]
 
 // ======================================================================================
 
@@ -73,43 +72,40 @@ let private rule field kind text offset sourceField hintKind hintText : Template
       RuleSourceField = sourceField; HintKind = hintKind; HintText = hintText }
 
 let private templatesFor (s: SupplierConfig) (supplierId: string) (deriveDueDates: bool) : TemplateUiTypeWithoutId list =
-    let template name position rules : TemplateUiTypeWithoutId =
-        { SupplierId = supplierId; Name = name; DocumentPart = "Attachment"
-          AttachmentFormat = "Pdf"; Position = position; Rules = rules }
+    let make part attFmt name position rules : TemplateUiTypeWithoutId =
+        { SupplierId = supplierId; Name = name; DocumentPart = part
+          AttachmentFormat = attFmt; Position = position; Rules = rules }
+
+    let pdf = make "Attachment" "Pdf"
+    let body = make "AnyPart" "" // AttachmentFormat is ignored unless DocumentPart = "Attachment"
+
+    let derived =
+        if deriveDueDates then [ rule "DueDate" "DateFromField" "" 0 "IssueDate" "AsText" "" ] else []
 
     match s.Name with
-    | "IODM" ->
-        [ template "IODM default" 0 (
-            [ rule "Reference" "AttachmentName" "^(\\d+)\\.pdf$" 0 "" "AsText" ""
-              rule "Amount" "LinesAfterLabel" "Total" 1 "" "AsMoney" "."
+    | "InkStation" ->
+        // e-commerce tax invoice, PDF attachment; "paid on order" so due = issue.
+        [ pdf "InkStation tax invoice" 0 (
+            [ rule "Reference" "SubjectCapture" "(A\\d+)" 0 "" "AsText" ""
+              rule "Amount" "AfterLabel" "Total (inc GST)" 0 "" "AsMoney" "."
               rule "Currency" "FixedValue" "AUD" 0 "" "AsText" ""
-              rule "IssueDate" "AfterLabel" "Date:" 0 "" "AsDate" s.DateFormat ]
-            @ (if deriveDueDates then [ rule "DueDate" "DateFromField" "" 0 "IssueDate" "AsText" "" ] else [])) ]
-    | "Yarra Valley Water" ->
-        [ template "YVW - Due date" 0 [
-            rule "Reference" "LinesAfterLabel" "Invoice number" 1 "" "AsText" ""
-            rule "Amount" "LinesAfterLabel" "Amount due" 1 "" "AsMoney" "."
+              rule "IssueDate" "AfterLabel" "Invoice Date" 0 "" "AsDate" s.DateFormat ]
+            @ derived) ]
+    | "Plumbing Bros" ->
+        // Xero-generated ("Invoice I6386"), PDF attachment.
+        [ pdf "Xero-style invoice" 0 [
+            rule "Reference" "RegexCapture" "Invoice\\s+(I\\d+)" 0 "" "AsText" ""
+            rule "Amount" "LinesAfterLabel" "Amount Due" 1 "" "AsMoney" "."
             rule "Currency" "FixedValue" "AUD" 0 "" "AsText" ""
-            rule "DueDate" "LinesAfterLabel" "Due date" 1 "" "AsDate" s.DateFormat ]
-          template "YVW - Direct debit" 1 [
-            rule "Reference" "LinesAfterLabel" "Invoice number" 1 "" "AsText" ""
-            rule "Amount" "LinesAfterLabel" "Amount due" 1 "" "AsMoney" "."
-            rule "Currency" "FixedValue" "AUD" 0 "" "AsText" ""
-            rule "DueDate" "LinesAfterLabel" "Direct debit" 1 "" "AsDate" s.DateFormat ] ]
-    | "Xero" ->
-        [ template "Xero default" 0 [
-            rule "Reference" "LinesAfterLabel" "Invoice Number" 1 "" "AsText" ""
-            rule "Amount" "LinesAfterLabel" "Amount AUD" 1 "" "AsMoney" "."
-            rule "Currency" "FixedValue" "AUD" 0 "" "AsText" ""
-            rule "IssueDate" "LinesAfterLabel" "Invoice Date" 1 "" "AsDate" s.DateFormat
+            rule "IssueDate" "AfterLabel" "Invoice Date" 0 "" "AsDate" s.DateFormat
             rule "DueDate" "AfterLabel" "Due Date" 0 "" "AsDate" s.DateFormat ] ]
-    | _ ->
-        [ template "OC Energy default" 0 [
-            rule "Reference" "LinesAfterLabel" "Invoice Number" 1 "" "AsText" ""
-            rule "Amount" "LinesAfterLabel" "Total Amount Due" 1 "" "AsMoney" "."
-            rule "Currency" "FixedValue" "AUD" 0 "" "AsText" ""
-            rule "IssueDate" "LinesAfterLabel" "Date of Issue" 1 "" "AsDate" s.DateFormat
-            rule "DueDate" "LinesAfterLabel" "Due Date" 1 "" "AsDate" s.DateFormat ] ]
+    | _ -> // HCF - premium notice, details in the email body
+        [ body "HCF premium notice" 0 (
+            [ rule "Reference" "RegexCapture" "([Mm]embership\\s+(?:number|no\\.?)\\s*:?\\s*\\d+)" 0 "" "AsText" ""
+              rule "Amount" "AfterLabel" "Amount due" 0 "" "AsMoney" "."
+              rule "Currency" "FixedValue" "AUD" 0 "" "AsText" ""
+              rule "IssueDate" "AfterLabel" "Date of issue" 0 "" "AsDate" s.DateFormat ]
+            @ derived) ]
 
 let private expect label (result: Result<'T, MyDogsbodyException>) : 'T =
     match result with
@@ -243,6 +239,21 @@ let main _ =
         |> List.truncate 40
     for (d, n) in domains do
         printfn "    %5d  %s" n d
+
+    if not suppliersConfigured then
+        // Full sender + subject for messages that read like a bill, so `suppliers` can be filled
+        // with domains that actually match rather than guesses.
+        printfn "\n  invoice-candidate messages (subject looks bill-like):"
+        let billish (s: string) =
+            let s = s.ToLowerInvariant()
+            [ "invoice"; "bill"; "payment due"; "amount due"; "due date"; "statement"
+              "premium"; "renew"; "registration"; "rego"; "account summary"; "tax invoice"
+              "your account"; "direct debit"; "receipt" ]
+            |> List.exists s.Contains
+        query "SELECT Sender, Subject, ReceivedAt FROM ScanProblems ORDER BY Sender" (fun r -> r.GetString 0, r.GetString 1, r.GetString 2)
+        |> List.filter (fun (sender, subject, _) -> billish subject || billish sender)
+        |> List.truncate 60
+        |> List.iter (fun (sender, subject, at) -> printfn "    %-40s | %-55s | %s" (sender.Substring(0, min 40 sender.Length)) (subject.Substring(0, min 55 subject.Length)) (at.Substring(0, min 10 at.Length)))
 
     // ---- 12.5 coverage (only if configured) ----
     if suppliersConfigured then

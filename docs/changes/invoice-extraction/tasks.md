@@ -319,12 +319,11 @@ the scan") that blocks 12.4 and 12.5 and defeats the feature's purpose. This is 
       still pass.
 - [x] **14.8a** Re-run `MeasureScan` — 12.4 timing done (see `outcome.md` / 12.4). The 2.0 GB INBOX
       now reads (89,992 messages, was 0). No exceptions logged.
-- [ ] **14.8b** 12.5 — a 730-day discovery re-run (2026-08-29) confirmed the mailbox has almost no
-      invoice volume: 2,026 processed over 2 years, **all `NoSupplierMatched`**; the four target
-      suppliers barely appear. A measurement-mode run needs `MeasureScan/Program.fs` → `suppliers`
-      filled and would extract single-digit N. Open question for the maintainer: run it anyway for
-      a token number, or record 12.5 as "not measurable from this mailbox" (friction #19 answered
-      by the volume). See `outcome.md` → 12.5.
+- [x] **14.8b** 12.5 — measurement-mode run with 3 token suppliers (InkStation / "Plumbing Bros" /
+      HCF): **0 invoices extracted, 0/0 coverage.** 8 messages matched a supplier, 6 reached
+      template evaluation and hit `RuleFoundNothing` (guessed labels). ~6 plausible invoices in
+      2 years — the mailbox cannot produce a meaningful due-date % and friction #19's number needs
+      the maintainer to author real templates. `outcome.md` → 12.5.
 - [x] **14.9** `CLAUDE-project.md`: the `MailFolderReader` structure-table bullet names the streaming
       reader and its `StreamChunkBytes` constant; the *Run* note records the `*.db` gitignore.
 
