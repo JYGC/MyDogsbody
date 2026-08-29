@@ -60,13 +60,71 @@ let ``the unique index on (SupplierId, Reference) refuses a duplicate`` () =
         Assert.Contains("UNIQUE", ex.Message))
 
 [<Fact; Trait("Level", "Integration")>]
-let ``the Invoices foreign keys reject an unknown supplier or template`` () =
+let ``the Invoices supplier foreign key rejects an unknown supplier`` () =
     withTempDatabase (fun cs ->
         MigrationSetup.setupMigrations cs
         let s = insertSupplier cs
         let t = insertTemplate cs s
-        Assert.Throws<SqliteException>(fun () -> insertInvoice cs 999L t "INV-X") |> ignore
-        Assert.Throws<SqliteException>(fun () -> insertInvoice cs s 999L "INV-Y") |> ignore)
+        Assert.Throws<SqliteException>(fun () -> insertInvoice cs 999L t "INV-X") |> ignore)
+
+/// TemplateId is PROVENANCE, not a relationship - requirements.md asks only that an invoice
+/// "record which template produced it", and nothing joins the two: InvoiceRecordMappers reads the
+/// column straight back into an opaque TemplateId and InvoiceUiType does not carry one at all.
+/// So the column deliberately has no foreign key, exactly as ScanProblems.SupplierId does and for
+/// the same stated reason ("the supplier may legitimately be gone ... a diagnostic, not a
+/// relationship"). An unknown TemplateId is therefore accepted.
+[<Fact; Trait("Level", "Integration")>]
+let ``the Invoices table accepts a TemplateId whose template is gone`` () =
+    withTempDatabase (fun cs ->
+        MigrationSetup.setupMigrations cs
+        let s = insertSupplier cs
+        insertInvoice cs s 999L "INV-Y"
+        Assert.Equal(1L, Convert.ToInt64(queryScalar cs "SELECT COUNT(*) FROM Invoices")))
+
+/// An invoice is a stored fact (Q5.7) and the ledger is what this change exists to keep. Deleting
+/// the TEMPLATE that produced one must not take the invoice with it: a template is a parsing
+/// recipe, the invoice is the result, and invoice-templates requirements.md line 167 says deleting
+/// a template deletes "it and its rules" - not the ledger rows it once produced. There is no
+/// tombstone for a cascade, so the rows would be gone silently and permanently.
+[<Fact; Trait("Level", "Integration")>]
+let ``deleting a template leaves the invoices it produced`` () =
+    withTempDatabase (fun cs ->
+        MigrationSetup.setupMigrations cs
+        let s = insertSupplier cs
+        let keptTemplate = insertTemplate cs s
+        let doomedTemplate = insertTemplate cs s
+
+        insertInvoice cs s doomedTemplate "INV-FROM-DELETED-TEMPLATE"
+        insertInvoice cs s keptTemplate "INV-FROM-KEPT-TEMPLATE"
+
+        execParams cs "DELETE FROM InvoiceTemplates WHERE Id = @t" [ "@t", box doomedTemplate ]
+
+        Assert.Equal(1L, Convert.ToInt64(queryScalar cs "SELECT COUNT(*) FROM InvoiceTemplates"))
+        Assert.Equal(2L, Convert.ToInt64(queryScalar cs "SELECT COUNT(*) FROM Invoices"))
+
+        let references =
+            use connection = new SqliteConnection(cs)
+            connection.Open()
+            use command = connection.CreateCommand()
+            command.CommandText <- "SELECT Reference FROM Invoices ORDER BY Reference"
+            use reader = command.ExecuteReader()
+            [ while reader.Read() do yield reader.GetString 0 ]
+
+        Assert.Equal<string list>([ "INV-FROM-DELETED-TEMPLATE"; "INV-FROM-KEPT-TEMPLATE" ], references))
+
+/// The supplier cascade is deliberate and stays: the domain carries SupplierGone for exactly this,
+/// and an invoice whose supplier is gone has no name to render.
+[<Fact; Trait("Level", "Integration")>]
+let ``deleting a supplier still removes its invoices`` () =
+    withTempDatabase (fun cs ->
+        MigrationSetup.setupMigrations cs
+        let s = insertSupplier cs
+        let t = insertTemplate cs s
+        insertInvoice cs s t "INV-1"
+
+        execParams cs "DELETE FROM Suppliers WHERE Id = @s" [ "@s", box s ]
+
+        Assert.Equal(0L, Convert.ToInt64(queryScalar cs "SELECT COUNT(*) FROM Invoices")))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``Down on every change #4 migration removes all five tables, and MigrateUp rebuilds them`` () =

@@ -261,11 +261,24 @@ is a unit test with a fixed clock and no mail store anywhere near it.
 
 | Timestamp | Name | Creates |
 | --- | --- | --- |
-| `…0004` | `CreateInvoicesTable` | `Invoices(Id, SupplierId FK, TemplateId FK, Reference, Amount, Currency, IssueDate NULL, DueDate NULL, SourceMessageId, ScannedAt)` + **unique index on `(SupplierId, Reference)`** |
+| `…0004` | `CreateInvoicesTable` | `Invoices(Id, SupplierId FK cascade, TemplateId **no FK**, Reference, Amount, Currency, IssueDate NULL, DueDate NULL, SourceMessageId, MessageReceivedAt, ScannedAt)` + **unique index on `(SupplierId, Reference)`** |
 | `…0005` | `CreateScanProblemsTable` | `ScanProblems(Id, SourceMessageId, SupplierId NULL, Sender, Subject, ReceivedAt, Cause, Detail, RecordedAt)` + index on `SourceMessageId` |
 | `…0006` | `CreateInvoiceTombstonesTable` | `InvoiceTombstones(Id, SupplierId FK, Reference, DeletedAt)` + unique index on `(SupplierId, Reference)` |
 | `…0007` | `CreateScanWindowsTable` | `ScanWindows(Id, Days)` + unique index on `Days`, **and `Insert.IntoTable` for 7, 14, 30, 90, 180** |
 | `…0008` | `CreateInvoiceSettingsTable` | `InvoiceSettings(Id INTEGER PK CHECK(Id = 1), SelectedScanWindowDays INTEGER NULL)` |
+
+**`…0004`'s `TemplateId` deliberately carries no foreign key.** It was written as a second
+`ON DELETE CASCADE` alongside `SupplierId`, and PR #18's third review round measured what that
+costs: deleting one template removed every invoice that template had produced (2 invoices → 1,
+against the real migrations). No tombstone is written for a cascade, so those ledger rows go
+silently and cannot be recovered — and the ledger is the thing this change exists to keep.
+`TemplateId` is *provenance*, not a relationship: requirements.md asks only that an invoice
+"record which template produced it", and nothing joins the two — `InvoiceRecordMappers` reads the
+column straight back into an opaque `TemplateId`, and `InvoiceUiType` carries no template at all.
+`invoice-templates` requirements.md asks that deleting a template remove "it and its rules", not
+the ledger rows it once produced. So the column is treated exactly as `ScanProblems.SupplierId` is
+in `…0005`, and for the reason stated there. `SupplierId` keeps its cascade: the domain carries
+`SupplierGone` for precisely that case, and an invoice with no supplier has no name to render.
 
 **`…0007` is a new precedent in this repository** (friction #17): every migration so far creates
 schema and nothing else. The alternatives are worse — `Startup.fs` checking on each launch whether it

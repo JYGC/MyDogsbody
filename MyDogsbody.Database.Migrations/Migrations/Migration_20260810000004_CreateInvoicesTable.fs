@@ -6,9 +6,22 @@ open FluentMigrator
 /// reference (Q5.8) - the unique index below is the backstop that refuses a duplicate even when
 /// the code is wrong.
 ///
-/// Execute.Sql rather than Create.Table() for the two foreign keys - SQLite has no ALTER TABLE
-/// ADD CONSTRAINT and FluentMigrator's SQLite generator refuses Create.ForeignKey, so a foreign
-/// key has to be declared inline (same reason as the InvoiceTemplates migrations).
+/// Execute.Sql rather than Create.Table() for the foreign key - SQLite has no ALTER TABLE ADD
+/// CONSTRAINT and FluentMigrator's SQLite generator refuses Create.ForeignKey, so a foreign key
+/// has to be declared inline (same reason as the InvoiceTemplates migrations).
+///
+/// SupplierId is a relationship and cascades: the domain carries SupplierGone for an invoice whose
+/// supplier went away mid-scan, and an invoice with no supplier has no name to render.
+///
+/// TemplateId is NOT, and deliberately has no foreign key at all. requirements.md asks only that
+/// an invoice "record which template produced it" - provenance, not a relationship. Nothing joins
+/// the two: InvoiceRecordMappers reads the column straight back into an opaque TemplateId and
+/// InvoiceUiType carries no template at all. It used to be a second cascading foreign key, which
+/// meant deleting a template took every invoice that template had ever produced with it - silently
+/// (no tombstone is written for a cascade) and unrecoverably, against a ledger whose whole purpose
+/// is to keep what a scan found. invoice-templates requirements.md ("delete it and its rules")
+/// asks for the template and its rules to go, not the ledger rows. Same treatment, and the same
+/// stated reason, as ScanProblems.SupplierId in the next migration.
 ///
 /// Amount is TEXT: SQLite has no decimal type, and a money value stored as REAL loses exactness.
 /// The store writes decimal.ToString(InvariantCulture) and parses it back. Dates are TEXT ISO
@@ -36,8 +49,7 @@ type CreateInvoicesTable() =
                 SourceMessageId TEXT(998) NOT NULL,
                 MessageReceivedAt TEXT(33) NOT NULL,
                 ScannedAt TEXT(33) NOT NULL,
-                FOREIGN KEY (SupplierId) REFERENCES Suppliers (Id) ON DELETE CASCADE,
-                FOREIGN KEY (TemplateId) REFERENCES InvoiceTemplates (Id) ON DELETE CASCADE
+                FOREIGN KEY (SupplierId) REFERENCES Suppliers (Id) ON DELETE CASCADE
             );"
         )
 
