@@ -81,32 +81,31 @@ Baseline before this change was **1061** (`thunderbird-account-selection` head),
 
 ## Manual measurement — REQUIRED before change #7 (Phase 12.4 / 12.5)
 
-Not runnable from the test suite. Run the app against the real profile and record here:
+Not runnable from the test suite. **`MeasureScan/` is a throwaway harness that does it** — it uses
+the real composition root (real migrations, `MailAccountApi` / `SupplierApi` / `TemplateApi` /
+`InvoiceApi`, real `MailFolderReader` against the real profile), seeds the four measured suppliers
++ templates, scans three times with a `Stopwatch`, and prints a table to paste below. See
+`MeasureScan/README.md` — **it is not in `MyDogsbody.sln`, so the gate never touches it**; delete
+it and the root `.db` files once the numbers are in.
 
 ```powershell
-dotnet run --project MyDogsbody\MyDogsbody.csproj
+# from the repo root
+dotnet run --project MeasureScan\MeasureScan.fsproj      # step 1: prints your accounts
+# edit MeasureScan/Program.fs: accountEmail + the four suppliers' domain / term / date-format
+dotnet run --project MeasureScan\MeasureScan.fsproj      # step 3: measures, prints the table
 ```
 
-Then, in the app:
+The `12% → 39%` prediction was over ~30 suppliers / 558 PDFs; four suppliers won't reproduce that
+scale, so the number is "of what these four templates extracted, X% carry a due date". **Take it
+off the merged branch before starting change #7** — if it stays near 12%, the sync is not the
+highest-value next change (friction #19).
 
-1. **Settings → Mail accounts** — choose the profile folder, scan, select an account.
-2. **Settings → Suppliers** — add the four measured suppliers (background.md → *The four worked
-   templates*) with sender-domain matchers and payment terms.
-3. **Settings → each supplier → Templates** — author the four templates. *(Note: the templates UI
-   page — change #2's `2-6-ui` branch — is **not yet merged to `main`**; if it is still missing,
-   seed `InvoiceTemplates` / `TemplateFieldRules` by hand or land that branch first.)*
-4. **Invoices** — the initial scan runs on 14 days. Record:
-   - **12.4 scan timing** — the first cold full scan; a second scan (watermarks in place); a
-     window change from 14 → 180 days. **If a window change costs seconds, replace the immediate
-     rescan with an explicit Refresh button** (the module creator already separates
-     `GetInvoices` from `Scan` — wiring a Refresh is small).
-   - **12.5 due-date coverage** — how many scanned invoices have a due date, and how many gain
-     one once `DateFromField` + per-supplier payment terms are in the templates. The prediction
-     is **12% → 39%**. **Take this number off the merged branch before starting change #7** — if
-     it stays near 12%, the sync is not the highest-value next change (friction #19).
+*(The templates UI — change #2's `2-6-ui` branch — is still not merged; the harness sidesteps it
+by seeding through `TemplateApi`, which is wired. Merging `2-6-ui` and clicking through the app is
+the alternative if you want the numbers from the real UI path.)*
 
-Delete `MyDogsbody.db`, `Thunderbird.db`, `Logging.db`, `Credentials.db` from the repo root after
-the manual run.
+Cleanup: `Remove-Item measure.db, Thunderbird.db, Logging.db -ErrorAction SilentlyContinue` and
+`Remove-Item -Recurse MeasureScan`.
 
 ### Timings
 
