@@ -273,10 +273,10 @@ one file.
       **a sentence recording that migrations may now carry seed data**; the *Build state* totals.
 - [x] **13.2** `outcome.md`: totals per level, the scan timings from 12.4, the due-date coverage from
       12.5, and whether the immediate rescan survived.
-- [ ] **13.3** Open `change/invoice-extraction` for review, with this file's checkboxes ticked and
-      `outcome.md` on the branch. **Merge only after Phase 12 passed in full.**
-      *Read 12.5's due-date number off the merged result before starting #7 — if it stays near 12%,
-      the sync is not the highest-value next change (friction #19).*
+- [x] **13.3** Opened as **one PR** for the whole change — JYGC/MyDogsbody#18, `change/invoice-extraction`
+      → `main`, 30 commits. Phase 12 passed in full (1294 green, 0 skips; 12.4 / 12.5 measured).
+      *Friction #19 (12.5): the due-date number could not be measured from this mailbox — it needs the
+      maintainer to author templates against real invoice PDFs. `MeasureScan/` is kept for that.*
 
 ## Phase 14 — Streaming mbox reader (required — forced by the Phase 12 measurement)
 
