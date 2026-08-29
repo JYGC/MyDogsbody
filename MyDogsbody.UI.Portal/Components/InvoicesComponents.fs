@@ -105,6 +105,15 @@ let invoicesTable (m: InvoicesModule) (confirmAndDelete: InvoiceUiType -> unit) 
                 Dense true
                 Breakpoint Breakpoint.Sm
 
+                // Q1.10: an invoice with no due date is listed anyway, greyed out. The class goes
+                // on the row MudTable itself renders - RowTemplate supplies the CELLS only, as
+                // every other table in this application does. Wrapping them in a MudTr as well
+                // produced <tr><tr><td>...</td></tr></tr>, which is not a legal table row and
+                // which CSS table fix-up boxes into a single anonymous cell of the outer row, so
+                // the ledger's columns stopped lining up with its own headers.
+                RowClassFunc(fun (invoice: InvoiceUiType) (_: int) ->
+                    if invoice.CanBecomeCalendarEvent then "" else "mud-text-disabled")
+
                 NoRecordsContent(fragment { MudText'' { "No invoices in this window." } })
 
                 HeaderContent(
@@ -119,9 +128,7 @@ let invoicesTable (m: InvoicesModule) (confirmAndDelete: InvoiceUiType -> unit) 
                 )
 
                 RowTemplate(fun (invoice: InvoiceUiType) ->
-                    MudTr'' {
-                        class' (if invoice.CanBecomeCalendarEvent then "" else "mud-text-disabled")
-
+                    fragment {
                         MudTd'' { invoice.SupplierName }
                         MudTd'' { invoice.Reference }
                         MudTd'' { $"{invoice.Currency} {invoice.Amount}" }

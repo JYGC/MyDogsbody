@@ -1,5 +1,6 @@
 module MyDogsbody.Tests.E2E.InvoicesFlowTests
 
+open System
 open Xunit
 open Bunit
 open Fun.Blazor
@@ -67,6 +68,49 @@ let ``the invoices table renders a seeded invoice, and one with no due date is g
             // the greyed row shows "no due date" and, on the tooltip, the reason
             Assert.Contains("no due date", markup)
             Assert.Contains("2 invoice(s)", markup)))
+
+/// The `<tbody>` of the first table in the rendered markup.
+let private tableBody (markup: string) =
+    let start = markup.IndexOf("<tbody", StringComparison.Ordinal)
+    let finish = markup.IndexOf("</tbody>", StringComparison.Ordinal)
+    Assert.True(start >= 0 && finish > start, "expected a rendered <tbody>")
+    markup.Substring(start, finish - start + "</tbody>".Length)
+
+let private countOccurrences (needle: string) (haystack: string) =
+    let mutable count = 0
+    let mutable index = haystack.IndexOf(needle, StringComparison.Ordinal)
+
+    while index >= 0 do
+        count <- count + 1
+        index <- haystack.IndexOf(needle, index + 1, StringComparison.Ordinal)
+
+    count
+
+/// MudTable renders the `<tr>` around whatever RowTemplate produces - every other table in this
+/// application (credentials, suppliers, mail accounts, scan windows, and the problems and
+/// tombstones views in this same component file) hands it a bare fragment of `MudTd`. Wrapping the
+/// cells in a `MudTr` as well produces `<tr><tr><td>…</td></tr></tr>`: a `tr` is not allowed inside
+/// a `tr`, and under CSS table fix-up the inner row is boxed into a single anonymous cell of the
+/// outer one, so the ledger's columns stop lining up with its own headers.
+///
+/// One row per invoice, its cells directly inside it - and the no-due-date row still greyed, which
+/// is the reason the `MudTr` was there (Q1.10: stored and listed, greyed out).
+[<Fact; Trait("Level", "E2E")>]
+let ``each invoice is one table row, its cells directly inside it, and a no-due-date row is greyed`` () =
+    withInvoicesHarness (fun harness ->
+        seedInvoice harness "INV-NODUE" "NULL"
+
+        let _, rendered = renderInvoices harness
+        rendered.WaitForAssertion(fun () -> Assert.Contains("INV-NODUE", rendered.Markup))
+
+        let body = tableBody rendered.Markup
+
+        // one invoice -> exactly one <tr>, not a row nested inside a row
+        Assert.Equal(1, countOccurrences "<tr" body)
+        // the five cells and the delete button's cell are that row's own children
+        Assert.Equal(6, countOccurrences "<td" body)
+        // the greying survives: it is on the row MudTable renders
+        Assert.Contains("mud-text-disabled", body))
 
 [<Fact; Trait("Level", "E2E")>]
 let ``deleting an invoice writes a tombstone and the row disappears; the tombstones view then lists it`` () =

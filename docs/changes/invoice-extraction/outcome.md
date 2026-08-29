@@ -81,6 +81,34 @@ Phase 14 (streaming reader) is **+7** over the 1283 the rest of the change reach
   pooled connections mid-use (two cross-test failures were traced to it during Phase 7). They
   leak a GUID-named temp file instead if the pool still holds a handle.
 
+  **The hazard is still live, and this is the second known flake — captured in PR #18 review round
+  5.** Seven *older* harnesses still call `ClearAllPools()`: `SupplierApiContractTests`,
+  `SupplierDependencyContractTests`, `SupplierPersistedShapeTests`, `DatabaseContextSetupTests`,
+  `MigrationTestHelpers`, `SupplierStoreTests` and `TemplateStoreTests`. xUnit runs their
+  collections in parallel, so one of them finishing disposes a pooled connection another is
+  mid-command on:
+
+  ```
+  System.ObjectDisposedException : Cannot access a disposed object.
+  Object name: 'SQLitePCL.sqlite3'.
+     at System.Runtime.InteropServices.SafeHandle.DangerousAddRef(Boolean& success)
+     at SQLitePCL.SQLite3Provider_e_sqlite3...sqlite3_prepare_v2(...)
+     at Microsoft.Data.Sqlite.SqliteCommand.ExecuteReader(CommandBehavior behavior)
+  ```
+
+  **Measured at the untouched review head `c1beff0`: 45 full-suite runs produced 5 failures**, of
+  *both* kinds — this one taking `TemplateApiFactoryTests.TestTemplate reports a rule that found
+  nothing as a sentence, not a union dump` and `SupplierApiFactoryTests.AddSupplier rejects a name
+  already taken and stores nothing more` (which surfaces it as `Failed to retrieve all suppliers`
+  rather than as the raw exception), and the `BsonMapper` one above taking
+  `ThunderbirdStoreTests.loadProfileRoot returns None for a fresh database` and
+  `MailAccountApiFactoryTests.ScanForAccounts reports NoProfileFound as an unlogged exception when
+  the folder has no prefs.js`. 20 Integration-level-only runs produced none, which is consistent
+  with the cause: the collision needs the Contract/E2E/Startup SQLite tests running alongside.
+  Both flakes are therefore **pre-existing at the reviewed head and introduced by no review
+  commit**. The remedy — dropping `ClearAllPools()` from those seven harnesses, as the new ones
+  already do — touches files this change does not, and wants its own change folder.
+
 ## What landed
 
 - **Phase 0** — `Integrations.Pdf` → `Integrations.Documents` (one project per capability).
