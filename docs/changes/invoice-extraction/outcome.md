@@ -44,6 +44,37 @@ Phase 14 (streaming reader) is **+7** over the 1283 the rest of the change reach
 - **`ThunderbirdPersistedShapeTests` / any LiteDB-context test** — the documented `BsonMapper`
   first-use race (CLAUDE-project.md → *Per-integration databases*). Fails ~1 run in 6 under the
   full suite's parallelism, passes in isolation. Do not re-run to green; note the test.
+
+  **Captured** (PR #18 review round 4, 8 consecutive `--filter "Level=Contract"` runs at the
+  reviewed head and 8 more at the commit before it — 3 failures and 1 failure respectively, so it
+  is reproducible at the Contract level alone and is *not* introduced by any review commit). Same
+  exception every time, thrown **at the warm-up line itself**, in
+  `ThunderbirdDatabaseContextModule.fs` line 15 or 16 — not the `CredentialsDatabaseContextModule`
+  the CLAUDE-project.md note records:
+
+  ```
+  System.InvalidOperationException : Collection was modified; enumeration operation may not execute.
+     at System.Collections.Generic.List`1.Enumerator.MoveNext()
+     at System.Linq.Enumerable.ListWhereIterator`1.MoveNext()
+     at LiteDB.BsonMapper.SerializeObject(Type type, Object obj, Int32 depth)
+     at LiteDB.BsonMapper.Serialize(Type type, Object obj, Int32 depth)
+     at LiteDB.BsonMapper.ToDocument(Type type, Object entity)
+     at LiteDB.BsonMapper.ToDocument[T](T entity)
+     at ...ThunderbirdDatabaseContextModule.getDatabaseContext(String, String)
+        in ...\ThunderbirdDatabaseContextModule.fs:line 16
+  ```
+
+  Three different tests were seen taking it, all of them the *first* thing their fixture does —
+  whichever one happens to construct a context concurrently with another:
+  `ThunderbirdDependencyContractTests.a saved selection is visible to a later load, and clearing it
+  persists as absent(implementation: "real adapter")` (via `withTempContext`, line 37),
+  `MailAccountApiContractTests.ScanForAccounts against the committed fixture finds ten accounts, and
+  GetAccounts sees them(implementation: "real api")` (via `withRealApi`, line 24), and
+  `ThunderbirdPersistedShapeTests.the five collections are named exactly as documented, and only
+  those five exist`. The test is incidental; the shared `BsonMapper.Global` is the subject. This
+  confirms CLAUDE-project.md's own diagnosis and its stated remedy — a process-wide lock around the
+  warm-up, or one static initialiser warming every entity under a single lock — which wants its own
+  change folder and is **not** attempted here.
 - The SQLite store-test harnesses this change adds (`InvoiceStoreTests`, `ScanWindowStoreTests`,
   the contract and E2E harnesses) deliberately **do not** call
   `SqliteConnection.ClearAllPools()` — that process-global call was clearing *other* tests'

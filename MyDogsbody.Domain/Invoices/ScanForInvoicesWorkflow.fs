@@ -77,15 +77,44 @@ let private processMessage
     (attachmentCauses: ScanProblemCause list)
     : Result<MessageOutcome, InvoiceError> =
     result {
+        // An attachment that could not be read, or whose format has no reader, is the more useful
+        // diagnostic whenever the message yielded nothing: it is a fact ABOUT THE MESSAGE, whereas
+        // every other cause here is a conclusion about the template, and it is recorded nowhere
+        // else - ScanMessageWorkflow hands it over exactly once, in this list. Reported only for a
+        // message that produced no invoice, since a scan records one problem per message and a
+        // message that yielded an invoice has its rows cleared by clearScanProblems.
+        //
+        // requirements.md names these two among the eight distinguishable causes, asks that an
+        // unsupported format be named "so the question of whether to build a reader for it can
+        // later be answered from data", says a legacy .doc "SHALL NOT" be skipped silently, and
+        // pins the case outright: "WHEN an attachment is empty or zero bytes THE SYSTEM SHALL
+        // report it as unreadable RATHER THAN AS TEXT THAT MATCHED NOTHING."
+        //
+        // Consulting the list only when NO supplier matched left both unreachable for a CONFIGURED
+        // supplier - the case the feature exists for - and produced two measured wrong diagnostics:
+        //
+        //   RuleFoundNothing(acme, acme-t1, "Reference")  - literally the sentence the requirement
+        //                                                   above forbids, for an unreadable PDF;
+        //   NoTemplateMatched(acme)                       - for a supplier that HAS a PDF template.
+        //
+        // The second is the worse of the two and is why this covers the whole selectTemplate
+        // branch: SelectTemplateWorkflow filters out every template whose DocumentPart the message
+        // does not carry, and an attachment that failed to read is not among the message's parts.
+        // So the one supplier configured correctly is told to go and configure a template that is
+        // already there. outcome.md's 12.5 run recorded NoTemplateMatched twice against the real
+        // mailbox.
+        let orAttachmentCause (conclusion: ScanProblemCause) : ScanProblemCause =
+            match attachmentCauses with
+            | cause :: _ -> cause
+            | [] -> conclusion
+
         match MatchSupplierWorkflow.matchSupplier suppliers scanned with
+        // Decided BEFORE any template is tried, so the attachment is not the diagnostic: the
+        // matchers have to be narrowed whatever the attachment turned out to be.
         | Error(MultipleSuppliersMatched(_, ids)) -> return Recorded(SeveralSuppliersMatched ids)
         | Error _ ->
-            // matchSupplier only ever returns SupplierNotRecognised here. If the message also had
-            // an unreadable or unsupported attachment, that is the more useful diagnostic.
-            return
-                match attachmentCauses with
-                | cause :: _ -> Recorded cause
-                | [] -> Recorded NoSupplierMatched
+            // matchSupplier only ever returns SupplierNotRecognised here.
+            return Recorded(orAttachmentCause NoSupplierMatched)
         | Ok supplierId ->
             let supplier = suppliers |> List.find (fun s -> s.Id = supplierId)
 
@@ -93,10 +122,11 @@ let private processMessage
                 loadTemplatesForSupplier supplierId |> Result.mapError fromTemplateError
 
             match SelectTemplateWorkflow.selectTemplate supplier.PaymentTermDays supplierId templates scanned with
-            | Error selectError -> return Recorded(toProblemCause supplierId selectError)
+            | Error selectError -> return Recorded(orAttachmentCause (toProblemCause supplierId selectError))
             | Ok extracted ->
                 match ValidateInvoiceWorkflow.validateInvoice scanned.ReceivedAt extracted with
-                | Error validationError -> return Recorded(toProblemCause supplierId validationError)
+                | Error validationError ->
+                    return Recorded(orAttachmentCause (toProblemCause supplierId validationError))
                 | Ok invoice ->
                     let key = SupplierId.value invoice.SupplierId, InvoiceReference.value invoice.Reference
 

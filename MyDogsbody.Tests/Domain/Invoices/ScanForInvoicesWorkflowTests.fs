@@ -310,6 +310,163 @@ let ``an unreadable attachment on an unmatched message is an AttachmentUnreadabl
         | other -> Assert.Fail($"Expected AttachmentUnreadable, got {other}")
     | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
 
+// ---- the same two causes on a message whose supplier IS recognised ----
+//
+// requirements.md asks for eight DISTINGUISHABLE causes, two of which are about the attachment
+// itself: "an attachment was unreadable" and "the attachment's format is unsupported" - the latter
+// so "the question of whether to build a reader for it can later be answered from data", and a
+// legacy .doc explicitly "SHALL NOT" be skipped silently. Those two facts are produced by
+// scanMessage for every message, but were consulted only when NO supplier matched - the one case
+// where the attachment matters least, since the message may not even be an invoice.
+//
+// For a configured supplier - the case the feature exists for - they were dropped, and the message
+// was reported under whatever the template concluded instead: "Acme's template found nothing for
+// the Reference field" when the truth is "invoice.pdf could not be read". Nothing anywhere else
+// records the attachment fact, so it was lost.
+
+/// A message from Acme (so the supplier matches) whose subject and body carry neither label, so
+/// the template can only fail - leaving which cause is reported as the thing under test.
+let private acmeMessageCarryingOnly (attachment: MailAttachment) (id: string) : MailMessage =
+    { acmeMessage id "X" with
+        Subject = "Statement attached"
+        BodyText = Some "Thanks for your business."
+        Attachments = [ attachment ] }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an unreadable attachment on a matched supplier's message is an AttachmentUnreadable problem, not the template's`` () =
+    let brokenReader: ReadDocumentText =
+        fun source ->
+            if source.Name.EndsWith ".pdf" then Error(DocumentUnreadable "corrupt") else textReader source
+
+    let message =
+        acmeMessageCarryingOnly
+            { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] }
+            "m-broken"
+
+    let deps =
+        { baseDeps [ message ] (FakeLedger()) (FakeProblemLog()) with ReadDocumentText = brokenReader }
+
+    match run deps 30 with
+    | Ok result ->
+        Assert.Empty result.Invoices
+        let problem = Assert.Single result.Problems
+        Assert.Equal(AttachmentUnreadable("invoice.pdf", "corrupt"), problem.Cause)
+        Assert.Equal("m-broken", SourceMessageId.value problem.SourceMessageId)
+        Assert.Equal("billing@acme.test", problem.Sender)
+        Assert.Equal("Statement attached", problem.Subject)
+        Assert.Equal(DateTime(2026, 6, 1, 10, 0, 0), problem.ReceivedAt)
+        Assert.Equal(DateTime(2026, 6, 15, 12, 0, 0), problem.RecordedAt)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``an unsupported attachment format on a matched supplier's message names the format`` () =
+    let message =
+        acmeMessageCarryingOnly
+            { FileName = "statement.xlsx"
+              DeclaredContentType = "application/octet-stream"
+              Content = [| 1uy |] }
+            "m-xlsx"
+
+    match run (baseDeps [ message ] (FakeLedger()) (FakeProblemLog())) 30 with
+    | Ok result ->
+        Assert.Empty result.Invoices
+        Assert.Equal(FormatUnsupported("statement.xlsx", "xlsx"), (Assert.Single result.Problems).Cause)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+/// The masked cause that matters most in practice - and the one the measured run actually produced
+/// (outcome.md 12.5: NoTemplateMatched, 2 messages). SelectTemplateWorkflow filters out every
+/// template whose DocumentPart the message does not carry, and an attachment that failed to read is
+/// not among the message's parts. So a supplier that HAS a PDF template, sent an unreadable PDF, was
+/// filed as NoTemplateMatched - the opposite of the truth, and it sends the user to the template
+/// editor to add a template that is already there. This is why the preference covers the whole
+/// selectTemplate branch and not only the value-extraction cases.
+[<Fact; Trait("Level", "Unit")>]
+let ``a supplier whose PDF template cannot see an unreadable PDF reports the attachment, not a missing template`` () =
+    let pdfTemplate =
+        let unvalidated: UnvalidatedTemplate =
+            { SupplierId = "acme"
+              Name = "Acme PDF"
+              Part = Attachment Pdf
+              Position = 0
+              Rules =
+                [ { Field = Reference; Rule = AfterLabel "Invoice:"; Hint = AsText }
+                  { Field = Amount; Rule = AfterLabel "Total:"; Hint = AsMoney '.' }
+                  { Field = Currency; Rule = FixedValue "AUD"; Hint = AsText } ] }
+
+        { Id = TemplateId.create "acme-pdf" |> orFail
+          Template = ValidateTemplateWorkflow.validateTemplate unvalidated |> orFail }
+
+    let brokenReader: ReadDocumentText =
+        fun source ->
+            if source.Name.EndsWith ".pdf" then Error(DocumentUnreadable "corrupt") else textReader source
+
+    let message =
+        acmeMessageCarryingOnly
+            { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] }
+            "m-pdf-template"
+
+    let deps =
+        { baseDeps [ message ] (FakeLedger()) (FakeProblemLog()) with
+            LoadTemplatesForSupplier = fun _ -> Ok [ pdfTemplate ]
+            ReadDocumentText = brokenReader }
+
+    match run deps 30 with
+    | Ok result ->
+        Assert.Empty result.Invoices
+        Assert.Equal(AttachmentUnreadable("invoice.pdf", "corrupt"), (Assert.Single result.Problems).Cause)
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+/// The other side of the rule, so it cannot degrade into "always blame the attachment": when every
+/// attachment read cleanly there is no attachment fact to report, and the template's own conclusion
+/// stands. Passes before the fix as well as after - a guard, not a demonstration.
+[<Fact; Trait("Level", "Unit")>]
+let ``a matched supplier's message whose attachments all read is still reported as the template's own cause`` () =
+    let message =
+        acmeMessageCarryingOnly
+            { FileName = "notes.txt"
+              DeclaredContentType = "text/plain"
+              Content = Text.Encoding.UTF8.GetBytes "nothing useful here" }
+            "m-readable"
+
+    match run (baseDeps [ message ] (FakeLedger()) (FakeProblemLog())) 30 with
+    | Ok result ->
+        match (Assert.Single result.Problems).Cause with
+        | RuleFoundNothing(sid, tid, field) ->
+            Assert.Equal("acme", SupplierId.value sid)
+            Assert.Equal("acme-t1", TemplateId.value tid)
+            Assert.Equal("Reference", field)
+        | other -> Assert.Fail($"Expected RuleFoundNothing, got {other}")
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
+/// The boundary of the rule, pinned deliberately: "two suppliers matched" is decided BEFORE any
+/// template is tried, so the attachment is not the diagnostic - the user has to narrow the matchers
+/// whatever the attachment turned out to be. Passes before the fix as well as after.
+[<Fact; Trait("Level", "Unit")>]
+let ``two suppliers matching stays SeveralSuppliersMatched even when an attachment could not be read`` () =
+    let acme2 = { acme with Id = SupplierId.create "acme-2" |> orFail }
+
+    let brokenReader: ReadDocumentText =
+        fun source ->
+            if source.Name.EndsWith ".pdf" then Error(DocumentUnreadable "corrupt") else textReader source
+
+    let message =
+        acmeMessageCarryingOnly
+            { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] }
+            "m-two"
+
+    let deps =
+        { baseDeps [ message ] (FakeLedger()) (FakeProblemLog()) with
+            LoadSuppliers = fun () -> Ok [ acme; acme2 ]
+            ReadDocumentText = brokenReader }
+
+    match run deps 30 with
+    | Ok result ->
+        match (Assert.Single result.Problems).Cause with
+        | SeveralSuppliersMatched ids ->
+            Assert.Equal<string list>([ "acme"; "acme-2" ], ids |> List.map SupplierId.value |> List.sort)
+        | other -> Assert.Fail($"Expected SeveralSuppliersMatched, got {other}")
+    | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
+
 // ============================ task 4.2: upsert and the natural key ============================
 
 [<Fact; Trait("Level", "Unit")>]

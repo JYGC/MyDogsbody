@@ -511,6 +511,28 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
 3. **A partly unreadable message still yields an invoice.** `ScanMessageWorkflow` returns a
    `ScannedMessage` **and** a list of problem causes rather than a `Result`, so one corrupt
    attachment out of two does not lose the invoice in the other.
+   *Reporting rule, decided in implementation:* when a message yields **no** invoice,
+   `ScanForInvoicesWorkflow.processMessage` records the first attachment cause in preference to the
+   conclusion it would otherwise reach. An unreadable attachment or an unsupported format is a fact
+   *about the message*, where every other cause is a conclusion about the template, and it is
+   recorded nowhere else — this list is the only place it exists. Consulting it only on the
+   "no supplier matched" branch left `AttachmentUnreadable` and `FormatUnsupported` — two of the
+   eight causes requirements.md asks to be distinguishable — unreachable for a **configured**
+   supplier, and the `.doc`/`.xlsx` naming that requirements.md asks for ("SHALL NOT silently
+   skip it", "answered from data") never happened. Two measured wrong diagnostics came out of it:
+   `RuleFoundNothing(acme, acme-t1, "Reference")` — word for word what requirements.md forbids
+   ("WHEN an attachment is empty or zero bytes THE SYSTEM SHALL report it as unreadable **rather
+   than as text that matched nothing**") — and, worse, `NoTemplateMatched` for a supplier that
+   *has* a PDF template, because `SelectTemplateWorkflow` filters out every template whose
+   `DocumentPart` the message does not carry and an unreadable attachment is not among the
+   message's parts. That second one is why the preference covers the whole `selectTemplate` branch
+   rather than only the value-extraction cases: it tells the one correctly-configured supplier to
+   go and add a template that is already there, and `outcome.md`'s 12.5 run recorded
+   `NoTemplateMatched` twice against the real mailbox. Two boundaries are deliberate: *several suppliers
+   matched* keeps its own cause, because it is decided before a template is tried and the matchers
+   must be narrowed whatever the attachment turned out to be; and a message that **did** yield an
+   invoice records nothing, because a scan keeps one problem row per message and `clearScanProblems`
+   removes the rows of messages that succeeded.
 4. **Problems are cleared per source message, not wholesale.** A scan clears only the rows for
    messages it processed and which now succeed. A narrower window must not silently erase the
    diagnostics for messages outside it.
