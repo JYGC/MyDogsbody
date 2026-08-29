@@ -48,6 +48,8 @@ type private InvoiceApiSpy() =
     member val ScanResult: Result<ScanResultUiType, MyDogsbodyException> = Ok { Invoices = []; Problems = [] } with get, set
     /// Per-window ledger contents, so a test can prove narrowing re-queries for the smaller window.
     member val GetInvoicesFor: int -> InvoiceUiType list = (fun _ -> []) with get, set
+    /// The persisted problem rows GetProblems returns - Q1.19 keeps them across scans.
+    member val ProblemsInStore: ScanProblemUiType list = [] with get, set
 
     member this.Api: InvoiceApi =
         { Scan =
@@ -62,7 +64,7 @@ type private InvoiceApiSpy() =
           GetProblems =
             fun () ->
                 this.GetProblemsCalls <- this.GetProblemsCalls + 1
-                Ok []
+                Ok this.ProblemsInStore
           GetTombstones = fun () -> Ok []
           UndeleteInvoice = fun _ _ -> Ok() }
 
@@ -127,6 +129,63 @@ let ``Rescan reads the mailbox for the current window`` () =
     // the initial load's scan (30) then the explicit Rescan (30)
     Assert.Equal<int list>([ 30; 30 ], invoiceApi.ScanCalls)
 
+let private aProblem messageId : ScanProblemUiType =
+    { SourceMessageId = messageId
+      Sender = "billing@acme.test"
+      Subject = "Statement"
+      ReceivedAt = DateTime(2026, 5, 1)
+      Cause = "No supplier's matchers recognised this message."
+      RecordedAt = DateTime(2026, 5, 2) }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a scan that finds no new mail leaves the stored ledger on screen`` () =
+    // ScanResult carries only what THIS scan did (design.md -> design deviation 6: "the page's
+    // full view comes from GetInvoices / GetProblems"). Watermarks mean the second and every
+    // later scan of an unchanged mailbox reads no messages and so returns an EMPTY list - and
+    // the initial page load scans, so a returning user whose watermarks are current would open
+    // on a blank table while the ledger is still in the store.
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
+    let invoiceApi = InvoiceApiSpy(GetInvoicesFor = (fun _ -> [ anInvoice "INV-STORED" ]))
+    // ScanResult stays the default Ok { Invoices = []; Problems = [] } - "nothing new in the mail"
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    Assert.Equal<string list>(
+        [ "INV-STORED" ],
+        AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference)
+    )
+
+    m.Rescan()
+
+    Assert.Equal<string list>(
+        [ "INV-STORED" ],
+        AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference)
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a scan that records no new problems leaves the persisted problem rows on screen`` () =
+    // Q1.19: problem rows are PERSISTED "so incremental scanning does not empty the diagnostic
+    // list before it is looked at" (InvoicesTypes.ScanProblemCause). Taking the problems view
+    // from the scan result undoes exactly that.
+    let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
+    let invoiceApi = InvoiceApiSpy(ProblemsInStore = [ aProblem "m1" ])
+
+    let m =
+        InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
+
+    Assert.Equal<string list>(
+        [ "m1" ],
+        AVal.force m.ProblemsAval |> List.map (fun p -> p.SourceMessageId)
+    )
+
+    m.Rescan()
+
+    Assert.Equal<string list>(
+        [ "m1" ],
+        AVal.force m.ProblemsAval |> List.map (fun p -> p.SourceMessageId)
+    )
+
 [<Fact; Trait("Level", "Unit")>]
 let ``a scan failure sets ErrorAval; a later success clears it`` () =
     let windowApi = ScanWindowApiSpy()
@@ -137,11 +196,18 @@ let ``a scan failure sets ErrorAval; a later success clears it`` () =
 
     Assert.Equal(Some "the store is unreachable", AVal.force m.ErrorAval)
 
+    // The scan now succeeds and stores INV-1. The table is read back from the STORE, not from
+    // ScanResult (design decision 6), so that is where the spy holds it.
     invoiceApi.ScanResult <- Ok { Invoices = [ anInvoice "INV-1" ]; Problems = [] }
+    invoiceApi.GetInvoicesFor <- fun _ -> [ anInvoice "INV-1" ]
     m.Rescan()
 
     Assert.Equal(None, AVal.force m.ErrorAval)
-    Assert.Equal(1, (AVal.force m.InvoicesAval).Length)
+
+    Assert.Equal<string list>(
+        [ "INV-1" ],
+        AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference)
+    )
 
 [<Fact; Trait("Level", "Unit")>]
 let ``deleting an invoice reloads the current window WITHOUT scanning the mailbox`` () =

@@ -59,17 +59,24 @@ let getInvoicesModule
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
 
-    /// Read the mailbox for `days` and refresh the ledger from the result. The scan may fail (no
-    /// mail account, an unreachable store) - the stored ledger (loaded first) stays on screen with
-    /// the alert.
+    /// Read the mailbox for `days`, then show the stored ledger for it. The scan may fail (no
+    /// mail account, an unreachable store) - the stored ledger stays on screen with the alert.
+    ///
+    /// The page's view comes from `GetInvoices` / `GetProblems`, never from `ScanResult`: that
+    /// carries only what THIS scan did (design decision 6), and watermarks mean a scan of an
+    /// unchanged mailbox reads no messages and so returns two empty lists. Taking the table from
+    /// it blanked a ledger that was still stored - on the initial load too, since `start` scans,
+    /// so a returning user opened on an empty table. Q1.19 says the same of problems: they are
+    /// persisted precisely "so incremental scanning does not empty the diagnostic list before it
+    /// is looked at". Read AFTER the scan, so whatever it just stored is included.
     let scan (days: int) =
         transact (fun _ -> isScanningCval.Value <- true)
 
         startWork (fun () ->
             let windows = scanWindowApi.GetScanWindows()
+            let scanResult = invoiceApi.Scan days
             let ledger = invoiceApi.GetInvoices days
             let problems = invoiceApi.GetProblems()
-            let scanResult = invoiceApi.Scan days
 
             transact (fun _ ->
                 match windows with
@@ -85,12 +92,9 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 match scanResult with
-                | Ok result ->
-                    invoicesCval.Value <- result.Invoices
-                    problemsCval.Value <- result.Problems
-                    errorCval.Value <- None
+                | Ok _ -> errorCval.Value <- None
                 | Error(ex: MyDogsbodyException) ->
-                    // the ledger (from GetInvoices above) is still shown; only the refresh failed
+                    // the stored ledger (read above) is still shown; only the mailbox read failed
                     errorCval.Value <- Some ex.Message
 
                 selectedDaysCval.Value <- days
