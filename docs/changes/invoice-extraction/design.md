@@ -539,6 +539,25 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    single scan (`matchSupplier` only matches a loaded supplier and the upsert is in the same
    scan); the guard exists for a supplier deleted mid-scan by another process, and reuses an
    existing cause rather than adding a ninth requirements.md did not enumerate.
+14. **`MailFolderReader` gets a streaming mbox reader — Phase 14, forced by the Phase 12
+   measurement.** The reader change #3 shipped buffered each folder file whole and refused
+   anything a Latin1 string cannot hold (~1 GiB); `read`'s `| Error _ -> []` then dropped that
+   folder silently on every scan. The 12.4/12.5 measurement run (`MeasureScan`) hit it head-on:
+   the maintainer's invoice mail lives in a 2.0 GB Gmail INBOX (`imap.googlemail-1.com/INBOX`,
+   `outpost597100@gmail.com`), which contributed **zero** messages with nothing on screen — a
+   direct violation of Q1.5 ("never silent, never fatal to the scan") that made the feature
+   unable to see the invoices it exists to extract. The fix (`foldMboxSegments`) streams the file
+   `StreamChunkBytes` (4 MiB) at a time, emitting one message segment at a time in memory bounded
+   by that chunk plus one in-progress message; `bufferSpan` / `splitIntoMessages` / `processSegment`
+   are gone, replaced by `segmentStartOffsets` (a byte-scan for `From ` boundaries), `foldMboxSegments`
+   and `normalizeStartOffset`. `MaxBufferableBytes` survives as a **per-segment** ceiling only. A
+   single segment larger than `MaxMessageBytes` (128 MiB — a corrupt file or a mis-split, never a
+   real email) is emitted once for the caller to skip, then the reader byte-scans forward to the
+   next real boundary rather than accumulating without limit. Watermarks, the torn-final-message
+   rule, the false-`From `-boundary rule and the CRLF handling are all unchanged; the resume seam
+   (a watermark landing one byte before a `\nFrom ` blank line) is trimmed in `foldMboxSegments`.
+   `countMessages` no longer over-counts a non-last fragment with no header/body separator — it
+   now counts a segment iff it has a separator, matching what `read` returns.
 
 ---
 

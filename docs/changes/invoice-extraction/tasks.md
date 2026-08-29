@@ -259,9 +259,12 @@ one file.
       full scan; a second scan with watermarks in place; a window change from 14 to 180 days.
       **If a window change costs seconds, replace the immediate rescan with an explicit Refresh
       button** — that is the condition Q1.9 was accepted under, and this is where it is settled.
+      *(First run, 2026-08-29: blocked — the invoice mail is in a 2.0 GB INBOX the reader dropped
+      silently. See Phase 14; re-run after it lands.)*
 - [ ] **12.5** **Record the real due-date coverage.** How many scanned invoices have a due date, with
       and without `DateFromField`. The measurement predicted 12% → 39%; friction #19 says change #7's
       value depends on it more than on anything in its own scope.
+      *(Blocked by the same folder — see Phase 14.)*
 - [x] **12.6** Confirm `MainWindow.xaml.cs` is untouched.
 
 ## Phase 13 — Documentation (required)
@@ -275,6 +278,49 @@ one file.
       `outcome.md` on the branch. **Merge only after Phase 12 passed in full.**
       *Read 12.5's due-date number off the merged result before starting #7 — if it stays near 12%,
       the sync is not the highest-value next change (friction #19).*
+
+## Phase 14 — Streaming mbox reader (required — forced by the Phase 12 measurement)
+
+The 12.4/12.5 measurement run found `MailFolderReader` (change #3) drops any folder file over
+~1 GiB **silently** — it buffers the whole span into one Latin1 string, `bufferSpan` refuses a span
+that large, and `read`'s `| Error _ -> []` swallows the result. The maintainer's invoice mail is in a
+2.0 GB Gmail INBOX, so the scan saw **none** of it: a Q1.5 violation ("never silent, never fatal to
+the scan") that blocks 12.4 and 12.5 and defeats the feature's purpose. This is design deviation #14.
+
+- [x] **14.1** *(test-first)* `segmentStartOffsets : byte[] -> int list` — a byte-scan for `From `
+      message boundaries (offset 0, or a `From ` line preceded by a visible `\n\n` / `\n\r\n`),
+      replacing the string-`Split` in `splitIntoMessages`.
+      Tests: opens with `From `; LF blank line before; CRLF blank line before; mbox-quoted `>From `
+      ignored; `From ` not preceded by a blank line ignored; a leading `\nFrom ` is **not** a
+      boundary (the fold trims that seam).
+- [x] **14.2** *(test-first)* `normalizeStartOffset : int64 -> int64 -> int64` — the offset-reset
+      half of the old `bufferSpan` (past-EOF or negative → 0), without the size cap.
+      Tests: in-range kept; at-EOF kept; zero kept; past-EOF → 0; negative → 0.
+- [x] **14.3** *(test-first)* `foldMboxSegments chunkSize maxMessageBytes stream fromOffset onSegment
+      initial` — walks the stream one segment at a time in bounded memory, folding `onSegment state
+      absStart segBytes isLast` into the state.
+      Tests: each message emitted once, last flagged, offsets exact; identical segments at chunk
+      sizes 1 / 3 / huge; resume trims a leading LF seam and reports file-absolute offsets; resume
+      exactly at a `From ` keeps the whole message; an oversized boundary-less segment is emitted
+      once and the reader resumes at the next real boundary.
+- [x] **14.4** Rewrite `readMboxFile` on `foldMboxSegments` — `classifySegment` folds in the cutoff
+      check, the torn-final-message rule and the false-boundary-fragment rule; `MaxBufferableBytes`
+      becomes a per-segment skip; `OutOfMemoryException` caught → `MailFolderUnreadable`. Delete
+      `bufferSpan`, `splitIntoMessages`, `processSegment`.
+- [x] **14.5** Rewrite `countMessages`'s Mbox branch on `foldMboxSegments`. A segment counts iff it
+      has a header/body separator (drops the old over-count of non-last no-separator fragments).
+- [x] **14.6** Rework `MailFolderReaderTests`: drop the 10 `bufferSpan` tests and the 2
+      "too large to buffer" tests (the ceiling they asserted is gone); add the 14.1–14.3 unit tests;
+      add integration tests — a folder spanning several `StreamChunkBytes` reads every message and
+      counts right; a large boundary-less file returns `Ok []` without throwing or hanging.
+      Keep every watermark / incremental-read / torn / false-boundary / CRLF test passing unchanged.
+- [x] **14.7** Gate: `dotnet build MyDogsbody.sln` clean; `dotnet test` green (**1290**, +7 vs 13.2's
+      1283); `ThunderbirdDependencyContractTests` (`ReadMailFolder` / `CountMessages` shared suites)
+      still pass.
+- [ ] **14.8** Re-run `MeasureScan` and complete 12.4 / 12.5 with real numbers.
+- [x] **14.9** `CLAUDE-project.md`: the `MailFolderReader` bullet in the structure table and the
+      *Per-integration databases* note no longer claim a whole-folder buffer ceiling; the streaming
+      reader and its `StreamChunkBytes` / `MaxMessageBytes` constants are named.
 
 ---
 

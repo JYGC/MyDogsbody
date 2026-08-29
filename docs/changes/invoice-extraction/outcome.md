@@ -4,10 +4,14 @@ Branch `change/invoice-extraction`, cut from `main` at `9b0d4ce`.
 
 ## Status
 
-**Code complete. Build clean. Suite green at all four levels, zero skips.** Two tasks in Phase 12
-require running the application against the real 16 GB Thunderbird profile and are **pending the
-maintainer** — see *Manual measurement* below. The immediate-rescan decision (Q1.9) stays
-provisional until that measurement is taken.
+**Code complete. Build clean. Suite green at all four levels, zero skips.**
+
+The first attempt at the Phase 12 measurement (2026-08-29) **found a blocking defect in change #3's
+`MailFolderReader`**: it drops any folder file over ~1 GiB silently, and the maintainer's invoice
+mail is in a 2.0 GB Gmail INBOX. **Phase 14** (added to `tasks.md`, forced by this finding) replaced
+the whole-folder buffer with a streaming reader; that is done and green. **12.4 and 12.5 still need a
+measurement re-run** against the real profile now that the folder is readable — task 14.8, pending
+the maintainer. The immediate-rescan decision (Q1.9) stays provisional until then.
 
 ## Test totals
 
@@ -15,13 +19,15 @@ Measured with `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and `--filt
 
 | Level | Count |
 | --- | --- |
-| Unit | 689 |
-| Integration | 263 |
+| Unit | 695 |
+| Integration | 264 |
 | Contract | 297 |
 | E2E | 34 |
-| **Total** | **1283** |
+| **Total** | **1290** |
 
-Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+222**.
+Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+229**.
+(Phase 14 is **+7** over the 1283 the rest of the change reached: 16 new streaming-primitive and
+big-folder tests, less the 10 `bufferSpan` and 2 "too large to buffer" tests it deletes.)
 
 ### Known flakes (pre-existing category, not introduced here)
 
@@ -58,6 +64,15 @@ Baseline before this change was **1061** (`thunderbird-account-selection` head),
 - **Phase 11** — `E2E/InvoicesFlowTests`: seeded invoice renders, due-date-less greyed, delete →
   tombstone → row gone → un-delete, problem row renders, window picker bound to the store,
   no-account scan → alert + nothing logged, unreachable store → alert + logged.
+- **Phase 14** — `MailFolderReader` streaming rewrite (forced by the Phase 12 measurement).
+  `bufferSpan` / `splitIntoMessages` / `processSegment` gone; `segmentStartOffsets` (byte-scan for
+  `From ` boundaries), `foldMboxSegments` (streams `StreamChunkBytes` = 4 MiB at a time, one
+  segment per `onSegment` call, memory bounded by one chunk + one message), `normalizeStartOffset`
+  in. `MaxBufferableBytes` is now a per-segment ceiling; `MaxMessageBytes` (128 MiB) bounds an
+  in-progress segment before the reader byte-scans forward for the next boundary. `classifySegment`
+  keeps the cutoff / torn-message / false-boundary rules verbatim. Watermarks, CRLF, incremental
+  reads all unchanged; the resume seam (`\nFrom ` at the buffer start) is trimmed in the fold.
+  `countMessages` stops over-counting a separator-less non-last fragment.
 
 ### Design deviations from the specs (all recorded in `design.md`)
 
@@ -70,6 +85,10 @@ Baseline before this change was **1061** (`thunderbird-account-selection` head),
 7. `ValidInvoice` gained `MessageReceivedAt` (the window filter is measured on mail-received date, which the invoice must therefore carry).
 8. "Two invoices from one message" is verified at the store layer (the engine produces one per message; the table key is `(SupplierId, Reference)`).
 9. `SupplierGone` reuses the `NoSupplierMatched` problem cause rather than adding a ninth.
+10. `MailFolderReader` gets a streaming mbox reader (Phase 14). Not in the original scope —
+    forced by the Phase 12 measurement finding that change #3's reader drops any folder over
+    ~1 GiB silently, which hid the maintainer's entire invoice history. design.md → *Decisions
+    taken* #14.
 
 ### Scope touched outside change #4
 
@@ -78,6 +97,9 @@ Baseline before this change was **1061** (`thunderbird-account-selection` head),
   reflection-counted contract tests.
 - `MigrationSetup.rollbackToVersion` added (test-only).
 - `MyDogsbody.Startup` gained a `ProjectReference` to `Integrations.Documents`.
+- **`MyDogsbody.Integrations.Thunderbird/MailFolderReader.fs`** (change #3's file) — the streaming
+  rewrite, Phase 14. See *Decisions taken* #14. `thunderbird-account-selection/outcome.md` → **O.5**
+  is marked done and points here.
 
 ## Manual measurement — REQUIRED before change #7 (Phase 12.4 / 12.5)
 
@@ -107,13 +129,29 @@ the alternative if you want the numbers from the real UI path.)*
 Cleanup: `Remove-Item measure.db, Thunderbird.db, Logging.db -ErrorAction SilentlyContinue` and
 `Remove-Item -Recurse MeasureScan`.
 
-### Timings
+### First run (2026-08-29) — surfaced the Phase 14 defect, numbers not usable
+
+`MeasureScan` in discovery mode over **all 10 discovered accounts**: 879 header-passing messages,
+**0 invoices**, 46–879 problem rows (all `NoSupplierMatched` — the sender-domain table showed only
+research newsletters, `smartbrief.com` ×477, `physorg.com` ×115, `arxiv.org` ×95…). The invoice
+mail was **not in the scan** — it lives in `imap.googlemail-1.com/INBOX` (`outpost597100@gmail.com`,
+2.0 GB), which `MailFolderReader.read` skipped via `| Error _ -> []` because the folder exceeds
+`MaxBufferableBytes`. Phase 14 fixes that.
+
+Scan *timing* from that run (10 accounts, invoice folder **not** included, so a lower bound for the
+real workload): cold full scan **≈ 20 s**, warm second scan **≈ 5 s**. The 14→180 widen measured
+**≈ 20 s** but is **not meaningful** — watermarks had already advanced, so it re-read almost
+nothing; a real widen needs `ClearWatermarks` first and is then a full re-read. **This already
+points at replacing the immediate rescan with an explicit Refresh** (Q1.9 fallback), but 14.8 must
+confirm it with the invoice folder in the set.
+
+### Timings — re-run required (task 14.8)
 
 | Measurement | Result |
 | --- | --- |
-| First cold full scan | _pending_ |
-| Second scan (watermarks) | _pending_ |
-| Window change 14 → 180 | _pending_ |
-| Due-date coverage, no `DateFromField` | _pending_ |
-| Due-date coverage, with `DateFromField` | _pending_ |
-| Immediate rescan kept? | _pending_ |
+| First cold full scan | _pending 14.8_ (first run, no invoice folder: ≈ 20 s / 10 accts) |
+| Second scan (watermarks) | _pending 14.8_ (first run: ≈ 5 s) |
+| Window change 14 → 180 | _pending 14.8_ — first run ≈ 20 s but watermarks already advanced; needs `ClearWatermarks` first |
+| Due-date coverage, no `DateFromField` | _pending 14.8_ |
+| Due-date coverage, with `DateFromField` | _pending 14.8_ |
+| Immediate rescan kept? | _leaning no_ — a true widen is a full re-read of GBs; confirm in 14.8 then wire the Refresh button |

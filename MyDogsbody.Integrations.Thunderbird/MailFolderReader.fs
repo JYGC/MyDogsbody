@@ -62,10 +62,10 @@ let private messageIdOf (headerBlock: string) : string =
 /// BOTH line endings are recognised, and that is load-bearing rather than defensive. RFC 5322
 /// mandates CRLF, and a message written to the store exactly as it arrived over IMAP or SMTP
 /// keeps it, so a folder can hold CRLF messages whatever the file's own convention is. Looking
-/// only for "\n\n" made every such message report "no separator", which processSegment turns
-/// into a silently dropped message and readMboxFile turns into "torn" - data loss with nothing
-/// on screen to show for it. Whichever separator appears first wins, so a CRLF header block
-/// followed by an LF blank line inside the body still splits at the header block.
+/// only for "\n\n" made every such message report "no separator", which `classifySegment` turns
+/// into a silently dropped message and a torn-message offset - data loss with nothing on screen
+/// to show for it. Whichever separator appears first wins, so a CRLF header block followed by an
+/// LF blank line inside the body still splits at the header block.
 let private headerBlockAndRest (text: string) : (string * string) option =
     let lfIndex = text.IndexOf("\n\n", StringComparison.Ordinal)
     let crlfIndex = text.IndexOf("\r\n\r\n", StringComparison.Ordinal)
@@ -81,105 +81,199 @@ let private headerBlockAndRest (text: string) : (string * string) option =
     separator
     |> Option.map (fun (index, separatorLength) -> text.Substring(0, index), text.Substring(index + separatorLength))
 
-/// The largest span this reader can buffer in one pass, and it is NOT `Array.MaxLength`.
+/// The largest a single message may be and still be turned into text.
 ///
-/// The buffer is only ever an intermediate: `splitIntoMessages` turns the whole of it into a
-/// Latin1 string on its first line, and every step after that works on text. .NET caps a string
-/// at 1,073,741,791 chars - the 2 GB object-size ceiling at two bytes per char - which is a
-/// little under HALF what an array may hold. So a span between this and `Array.MaxLength`
-/// allocates fine and then dies converting, with 51 GB of memory still free: it is a hard
-/// runtime ceiling, not memory pressure, and no machine grows out of it.
+/// It is NOT `Array.MaxLength`. Every step past the raw bytes works on a Latin1 string, and .NET
+/// caps a string at 1,073,741,791 chars - the 2 GB object-size ceiling at two bytes per char,
+/// a little under HALF what an array may hold. A `From `-delimited segment larger than this
+/// cannot be stringified, so it is skipped and the offset advanced past it (see
+/// `foldMboxSegments`). A real email never approaches this - Gmail caps attachments at 25 MB and
+/// even 50 MB base64'd is ~70 MB - so a segment this size is a corrupt file or a mis-split, not
+/// a message the reader failed.
 ///
-/// Sizing the guard by the array rather than by the string is what let a folder of 1.0-2.0 GiB
-/// through it. `countMessages` answered `Ok 0` for one (its `with _ -> Ok 0` swallowed the
-/// `OutOfMemoryException` into "this folder holds no messages") and `readFolder` threw the same
-/// exception straight out of `read`, `readFolder` and the whole API call, past both `with`
-/// handlers in this file - which are the two failures the guard was added to prevent in the
-/// first place, still reachable at every size between the two ceilings.
+/// This used to gate the WHOLE folder: any INBOX over ~1 GiB was reported unreadable and then,
+/// through `read`'s `| Error _ -> []`, silently dropped on every scan. `invoice-extraction`'s
+/// Phase 12 measurement caught it - a 2.0 GB Gmail INBOX holding years of un-archived invoice
+/// mail contributed zero messages with nothing on screen. The streaming reader below removes the
+/// per-folder ceiling entirely; this constant now only bounds a single segment.
 [<Literal>]
 let MaxBufferableBytes = 1_073_741_791
 
-/// The span of a folder file to buffer for one read: where to start, and how many bytes that is.
-/// Pure, and public, so both size guards it encodes are testable directly - a fixture large
-/// enough to reach them cannot be committed, and neither is reachable from one that can.
+/// The chunk the streaming reader pulls from the file at a time. Small enough that a folder of
+/// any size stays in bounded memory (this plus at most one in-progress message), large enough
+/// that a multi-GB folder is not millions of syscalls.
+[<Literal>]
+let StreamChunkBytes = 4_194_304
+
+/// Once an in-progress message (no second boundary yet) passes this, it is not a message: a real
+/// mbox message is at most tens of MB, so this is a corrupt file or a `From ` line the split
+/// mistook for a boundary. It is emitted as an oversized segment - skipped, offset advanced -
+/// and the reader then byte-scans forward for the next real boundary rather than accumulating a
+/// gigabyte in memory.
+[<Literal>]
+let MaxMessageBytes = 134_217_728
+
+/// Where a streaming read should actually start: the stored offset, unless it lies outside the
+/// file. A watermark can outlive the bytes it pointed at - `readFolder` measures the size before
+/// opening the file, so a folder that grew in between records an `OffsetReached` past its
+/// `SizeBytes`, and a later compaction between the two leaves that offset past EOF; a negative
+/// value is the same hazard from the other end. Either way the file cannot contain what the
+/// watermark claims, so the read restarts at 0 - re-reading a message is recoverable, seeking
+/// past EOF is not. Pure and public so the reset is unit-tested without a file.
+let normalizeStartOffset (totalLength: int64) (fromOffset: int64) : int64 =
+    if fromOffset < 0L || fromOffset > totalLength then 0L else fromOffset
+
+/// "From " as bytes: F r o m space.
+let private fromLineBytes = [| 70uy; 114uy; 111uy; 109uy; 32uy |]
+
+let private startsWithFrom (bytes: byte[]) (at: int) : bool =
+    at + fromLineBytes.Length <= bytes.Length
+    && Array.forall2 (=) fromLineBytes bytes.[at .. at + fromLineBytes.Length - 1]
+
+/// The byte offsets within `bytes` at which a message segment begins: every "From " line whose
+/// predecessor line is blank - one immediately preceded by "\n\n" or "\n\r\n" - plus offset 0
+/// when `bytes` itself starts with a "From " line.
 ///
-/// It encodes the two ways this arithmetic went wrong, at opposite ends of the range:
+/// Byte-scanned rather than string-split (the old `splitIntoMessages`), so a segment larger than
+/// a .NET string is still located rather than throwing on the way in. A properly mbox-quoted
+/// ">From " never matches; an unquoted "From " opening a body line preceded by a blank one does,
+/// exactly as before - `tryParseMessage` is what holds the resulting fragment. The blank line has
+/// to be VISIBLE in `bytes`: a "From " at offset 0 or 1 whose preceding newline was left in the
+/// previous buffer is `foldMboxSegments`'s concern, not this function's.
+let segmentStartOffsets (bytes: byte[]) : int list =
+    let offsets = ResizeArray<int>()
+
+    if startsWithFrom bytes 0 then
+        offsets.Add 0
+
+    // A boundary "From " begins at j+1, where bytes.[j] = '\n' and the line before it was blank:
+    // bytes.[j-1] = '\n', or bytes.[j-1] = '\r' with bytes.[j-2] = '\n'.
+    for j in 1 .. bytes.Length - 2 do
+        if bytes.[j] = 10uy && startsWithFrom bytes (j + 1) then
+            let blankLineBefore =
+                bytes.[j - 1] = 10uy || (bytes.[j - 1] = 13uy && j >= 2 && bytes.[j - 2] = 10uy)
+
+            if blankLineBefore then
+                offsets.Add(j + 1)
+
+    List.ofSeq offsets
+
+/// Bytes kept as a rolling tail while seeking past an oversized segment, so a "\n\r\nFrom "
+/// boundary split across two chunk reads is still recognised. Seven would do ("\r\nFrom " plus
+/// the "\n" before it); eight is a round number with a byte to spare.
+[<Literal>]
+let private seekCarryBytes = 8
+
+/// Walks an mbox stream one message segment at a time, in memory bounded by `chunkSize` plus one
+/// in-progress message. `onSegment state absoluteStartOffset segmentBytes isLastInFile` is called
+/// once per segment - the bytes from one "From " boundary to the next, or to EOF - and its
+/// results are folded into `state`, which is returned.
 ///
-///  - Past `MaxBufferableBytes` the span cannot be turned into text at all (see above), and past
-///    2 GiB `int (totalLength - fromOffset)` also wraps silently - the measured profile has a
-///    single 2.5 GB mbox - after which `Array.zeroCreate` throws an `ArgumentException` that no
-///    handler in this file catches. Reported as a value instead, so the caller decides.
-///  - A stored offset can outlive the bytes it pointed at. `readFolder` measures the size BEFORE
-///    opening the file, so a folder that grew in between records an `OffsetReached` past the
-///    `SizeBytes` beside it, and a later compaction to a size between the two leaves that offset
-///    past the end of the file. Resuming from it asks for a NEGATIVE buffer - the same uncaught
-///    `ArgumentException`, from the other end. The file cannot contain what the watermark claims,
-///    so the span restarts at 0 and the folder is read in full: re-reading a message is
-///    recoverable, crashing out of the whole API call is not.
+/// The invariant: outside `seeking`, `pending` begins at a message boundary and `pendingStart`
+/// is its absolute offset in the file. A segment larger than `maxMessageBytes` with no second
+/// boundary is not a message (a corrupt file, or a body line the split mistook for a boundary):
+/// it is emitted once so the caller can skip it, then bytes are discarded until the next real
+/// boundary rather than accumulating without limit.
 ///
-/// The reported figure is the span still to read, not the file's size - on an incremental read
-/// of a folder already partly consumed those are different numbers, and the one that decides the
-/// answer is the one the message has to name.
-let bufferSpan (totalLength: int64) (fromOffset: int64) : Result<int64 * int, string> =
-    let startOffset = if fromOffset < 0L || fromOffset > totalLength then 0L else fromOffset
-    let remaining = totalLength - startOffset
+/// `chunkSize` and `maxMessageBytes` are parameters so the chunk-boundary and oversized-segment
+/// paths are exercised with a few hundred bytes rather than a few gigabytes.
+let foldMboxSegments
+    (chunkSize: int)
+    (maxMessageBytes: int)
+    (stream: Stream)
+    (readStartOffset: int64)
+    (onSegment: 'state -> int64 -> byte[] -> bool -> 'state)
+    (initial: 'state)
+    : 'state =
+    stream.Seek(readStartOffset, SeekOrigin.Begin) |> ignore
 
-    if remaining > int64 MaxBufferableBytes then
-        Error
-            $"The folder has {remaining} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes)."
-    else
-        Ok(startOffset, int remaining)
+    let chunk = Array.zeroCreate<byte> (max 1 chunkSize)
+    let mutable state = initial
+    let mutable pending: byte[] = Array.empty
+    let mutable pendingStart = readStartOffset
+    // `pending` does NOT begin at a boundary: an oversized segment was skipped and the reader is
+    // byte-scanning forward for the next "\n\nFrom " / "\n\r\nFrom ", keeping only a short carry.
+    let mutable seeking = false
+    // Still on the first bytes read: a resume from a watermark lands one past the previous
+    // message's terminating newline, so `pending` can open with the blank line ("\n" or "\r\n")
+    // whose "From " `segmentStartOffsets` cannot see the predecessor of. Trimmed once, here.
+    let mutable atResumeSeam = readStartOffset > 0L
+    let mutable atEof = false
 
-/// Splits raw mbox bytes into per-message byte ranges at "From " envelope lines - the only
-/// place this file looks for a boundary, independent of MIME structure entirely, so one
-/// message's malformed or unterminated multipart body can never swallow the messages that
-/// follow it in the same file. A boundary line is the first line of the buffer, or any line
-/// immediately preceded by a blank one - a properly mbox-quoted body never produces a false
-/// match (FromQuotedBody.mbox exercises exactly this).
-///
-/// Each segment is returned with its byte offset WITHIN `bytes`, and is a real slice of the
-/// buffer rather than a re-joined string. Both matter for the watermark: rebuilding a segment
-/// with String.Join dropped the newline that separated it from the next one, so the summed
-/// lengths under-counted the bytes consumed by one per message, and bytes lying before the
-/// first boundary were not counted at all. Slicing by offset is exact, so "the offset reached"
-/// is the offset actually reached and an incremental read resumes where the last one stopped.
-let private splitIntoMessages (bytes: byte[]) : (int * byte[]) list =
-    if bytes.Length = 0 then
-        []
-    else
-        let text = latin1.GetString bytes
-        let lines = text.Split('\n')
+    while not atEof do
+        let read = stream.Read(chunk, 0, chunk.Length)
 
-        // Latin1 is one byte per char, so a char index into `text` is a byte index into `bytes`.
-        // Every line but the last was terminated by the '\n' that Split consumed, hence the +1.
-        let lineStartOffsets = Array.zeroCreate<int> (lines.Length + 1)
-
-        for i in 0 .. lines.Length - 1 do
-            lineStartOffsets.[i + 1] <- lineStartOffsets.[i] + lines.[i].Length + 1
-
-        lineStartOffsets.[lines.Length] <- bytes.Length
-
-        let isBoundary i =
-            lines.[i].StartsWith("From ", StringComparison.Ordinal)
-            && (i = 0 || lines.[i - 1].TrimEnd('\r') = "")
-
-        let boundaryLineIndexes = [| 0 .. lines.Length - 1 |] |> Array.filter isBoundary
-
-        if boundaryLineIndexes.Length = 0 then
-            []
+        if read = 0 then
+            atEof <- true
+            // A torn final message begins with "From " but was never terminated by the next
+            // boundary; hand it over so the caller can decide it is torn. Boundary-less trailing
+            // junk (never started with "From ") is dropped - the old whole-file split dropped it
+            // too.
+            if not seeking && pending.Length > 0 && startsWithFrom pending 0 then
+                state <- onSegment state pendingStart pending true
         else
-            boundaryLineIndexes
-            |> Array.mapi (fun idx startLine ->
-                let endLineExclusive =
-                    if idx + 1 < boundaryLineIndexes.Length then
-                        boundaryLineIndexes.[idx + 1]
-                    else
-                        lines.Length
+            // `chunk` is reused every read, so `pending` must never alias it: `Array.append` copies,
+            // and `Array.copy` covers the first-chunk case where `incoming` IS `chunk`.
+            let incoming = if read = chunk.Length then chunk else Array.sub chunk 0 read
+            pending <- if pending.Length = 0 then Array.copy incoming else Array.append pending incoming
 
-                let startOffset = lineStartOffsets.[startLine]
-                let endOffset = lineStartOffsets.[endLineExclusive]
-                startOffset, bytes.[startOffset .. endOffset - 1])
-            |> Array.toList
+            if atResumeSeam && pending.Length >= fromLineBytes.Length + 2 then
+                if pending.[0] = 10uy && startsWithFrom pending 1 then
+                    pendingStart <- pendingStart + 1L
+                    pending <- pending.[1..]
+                elif pending.[0] = 13uy && pending.[1] = 10uy && startsWithFrom pending 2 then
+                    pendingStart <- pendingStart + 2L
+                    pending <- pending.[2..]
+
+                atResumeSeam <- false
+
+            let mutable progress = true
+
+            while progress do
+                progress <- false
+
+                if seeking then
+                    match segmentStartOffsets pending |> List.filter (fun o -> o > 0) with
+                    | boundary :: _ ->
+                        pendingStart <- pendingStart + int64 boundary
+                        pending <- pending.[boundary..]
+                        seeking <- false
+                        progress <- true // re-run: `pending` now begins at a boundary
+                    | [] when pending.Length > seekCarryBytes ->
+                        // No boundary yet: discard all but a short tail so one split across the
+                        // next read is still recognised.
+                        let dropped = pending.Length - seekCarryBytes
+                        pendingStart <- pendingStart + int64 dropped
+                        pending <- pending.[dropped..]
+                    | [] -> () // already down to the carry - wait for the next chunk
+                else
+                    match segmentStartOffsets pending with
+                    | first :: _ when first > 0 ->
+                        // Junk before the first message - only reachable when the file itself does
+                        // not begin with "From ". Drop it and re-scan from the real first boundary.
+                        pendingStart <- pendingStart + int64 first
+                        pending <- pending.[first..]
+                        progress <- true
+                    | offsets ->
+                        let bs = List.toArray offsets
+
+                        if bs.Length >= 2 then
+                            // Every boundary but the last closes a complete segment.
+                            for i in 0 .. bs.Length - 2 do
+                                state <- onSegment state (pendingStart + int64 bs.[i]) pending.[bs.[i] .. bs.[i + 1] - 1] false
+
+                            let last = bs.[bs.Length - 1]
+                            pendingStart <- pendingStart + int64 last
+                            pending <- pending.[last..]
+                        elif pending.Length > maxMessageBytes then
+                            state <- onSegment state pendingStart pending false
+                            pendingStart <- pendingStart + int64 pending.Length
+                            pending <- Array.empty
+                            seeking <- true
+                            progress <- true
+                        // else: 0 or 1 boundary, under the ceiling - wait for the next chunk.
+
+    state
 
 /// Strips the leading "From ..." envelope line, leaving standard RFC822 content MimeMessage.Load
 /// can parse directly.
@@ -257,11 +351,11 @@ let private parseMessage (rfc822Bytes: byte[]) (headerBlock: string) : MailMessa
 /// running" asks for the other folders to keep returning.
 ///
 /// This is reachable from ordinary mail, not only from a corrupt file. mbox carries no length
-/// header, so `splitIntoMessages` has to guess a boundary from an unquoted "From " at the start of
-/// a line preceded by a blank one - which a plain-text body signing off "From the accounts team,"
-/// satisfies exactly. The half after that false boundary begins with body text where RFC822
-/// headers should be, and one such line anywhere in one folder took down every folder of the
-/// account. (A properly mbox-quoted ">From " never produces the split - FromQuotedBody.mbox
+/// header, so `segmentStartOffsets` has to guess a boundary from an unquoted "From " at the start
+/// of a line preceded by a blank one - which a plain-text body signing off "From the accounts
+/// team," satisfies exactly. The half after that false boundary begins with body text where
+/// RFC822 headers should be, and one such line anywhere in one folder took down every folder of
+/// the account. (A properly mbox-quoted ">From " never produces the split - FromQuotedBody.mbox
 /// covers that - but nothing makes a sender quote it.)
 ///
 /// Discarded rather than reported as a folder-level failure, and deliberately: the fragment is
@@ -276,88 +370,70 @@ let private tryParseMessage (rfc822Bytes: byte[]) (headerBlock: string) : MailMe
     with :? FormatException ->
         None
 
-/// One segment's cutoff decision plus, only when it is worth keeping, the fully parsed message.
-/// A message whose Date cannot be found or parsed is always kept - excluding it would be silent
-/// data loss with nothing on screen to show for it (Q1.6).
-let private processSegment (cutoff: ScanCutoff) (segmentBytes: byte[]) : MailMessage option =
-    let segmentText = latin1.GetString segmentBytes
+/// What one streamed segment contributed: a message to keep, or nothing, plus where the offset
+/// should sit afterwards. `KeepNothingStopBefore` is a torn final message - the offset stays in
+/// front of it so the whole thing is re-read once Thunderbird finishes writing it; every other
+/// outcome advances past the segment.
+type private SegmentOutcome =
+    | KeepMessage of MailMessage
+    | KeepNothingAdvance
+    | KeepNothingStopBefore
 
-    match headerBlockAndRest segmentText with
-    | None -> None // torn: no header/body separator at all before EOF
-    | Some(headerBlock, _) ->
-        let shouldSkip =
-            match tryParseHeaderDate headerBlock with
-            | Some date -> date.DateTime < ScanCutoff.value cutoff
-            | None -> false
+/// One segment's cutoff-and-parse decision. A message whose Date cannot be found or parsed is
+/// always kept - excluding it would be silent data loss with nothing on screen to show for it
+/// (Q1.6). A segment with no header/body separator is torn when it is the last in the file, and
+/// a false-boundary fragment (an unquoted "From " mid-body) otherwise - the first is re-read
+/// later, the second never becomes parseable so the offset moves on.
+let private classifySegment (cutoff: ScanCutoff) (isLast: bool) (segmentBytes: byte[]) : SegmentOutcome =
+    if segmentBytes.LongLength > int64 MaxBufferableBytes then
+        // Larger than a .NET string: a corrupt file or a mis-split, never a real message. Skip it
+        // without trying to turn it into text.
+        KeepNothingAdvance
+    else
+        match headerBlockAndRest (latin1.GetString segmentBytes) with
+        | None when isLast -> KeepNothingStopBefore
+        | None -> KeepNothingAdvance
+        | Some(headerBlock, _) ->
+            let shouldSkip =
+                match tryParseHeaderDate headerBlock with
+                | Some date -> date.DateTime < ScanCutoff.value cutoff
+                | None -> false
 
-        if shouldSkip then
-            None // skipped BEFORE the body is ever touched - see splitIntoMessages's comment
-        else
-            let rfc822Bytes = stripEnvelopeLine segmentBytes
-            tryParseMessage rfc822Bytes headerBlock
+            if shouldSkip then
+                KeepNothingAdvance // skipped BEFORE the body is ever touched
+            else
+                match tryParseMessage (stripEnvelopeLine segmentBytes) headerBlock with
+                | Some message -> KeepMessage message
+                | None -> KeepNothingAdvance
 
-/// Reads one mbox-format folder file in full, applying the cutoff. The file's own byte content
-/// is never modified - opened for read only, with sharing that permits Thunderbird's own reads
-/// and writes.
+/// Reads one mbox-format folder file, applying the cutoff, streaming it a chunk at a time so a
+/// folder of any size stays in bounded memory (requirements.md -> "read it without loading the
+/// whole folder into memory"). The file's own byte content is never modified - opened for read
+/// only, with sharing that permits Thunderbird's own reads and writes.
 let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64) : Result<MailMessage list * int64, MailAccountError> =
     try
         use stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
+        let startOffset = normalizeStartOffset stream.Length fromOffset
 
-        // The span is buffered whole and then turned into one string, so it has to fit both - and
-        // the offset it starts from has to still be inside the file. `bufferSpan` decides all of
-        // that; reporting the folder as unreadable keeps the other folders returning, per
-        // requirements.md -> "Reading safely while Thunderbird is running". Reading a folder too
-        // large for one buffer WITHOUT buffering it whole is requirements.md's "read it without
-        // loading the whole folder into memory", and needs the streaming reader this does not
-        // have - see outcome.md -> O.5.
-        match bufferSpan stream.Length fromOffset with
-        | Error reason -> Error(MailFolderUnreadable(path, reason))
-        | Ok(startOffset, remainingLength) ->
+        let messages = ResizeArray<MailMessage>()
+        let mutable finalOffset = startOffset
 
-        stream.Seek(startOffset, SeekOrigin.Begin) |> ignore
+        let onSegment () (segmentStart: int64) (segmentBytes: byte[]) (isLast: bool) : unit =
+            match classifySegment cutoff isLast segmentBytes with
+            | KeepMessage message ->
+                messages.Add message
+                finalOffset <- segmentStart + segmentBytes.LongLength
+            | KeepNothingAdvance -> finalOffset <- segmentStart + segmentBytes.LongLength
+            | KeepNothingStopBefore -> finalOffset <- segmentStart
 
-        let buffer = Array.zeroCreate<byte> remainingLength
-        let mutable readSoFar = 0
+        foldMboxSegments StreamChunkBytes MaxMessageBytes stream startOffset onSegment ()
 
-        while readSoFar < remainingLength do
-            let read = stream.Read(buffer, readSoFar, remainingLength - readSoFar)
-            if read = 0 then
-                readSoFar <- remainingLength // EOF reached early; treat what we have as final
-            else
-                readSoFar <- readSoFar + read
-
-        let segments = splitIntoMessages buffer
-
-        match segments with
-        | [] -> Ok([], startOffset)
-        | segments ->
-            let lastIndex = segments.Length - 1
-
-            let mutable finalOffset = startOffset
-            let messages = ResizeArray<MailMessage>()
-
-            segments
-            |> List.iteri (fun i (segmentStart, segment) ->
-                let isLast = i = lastIndex
-                let segmentText = latin1.GetString segment
-
-                let isTorn = isLast && (headerBlockAndRest segmentText).IsNone
-
-                if isTorn then
-                    // Discarded, and the offset stops BEFORE it rather than after the previous
-                    // segment, so the whole torn message is re-read once Thunderbird finishes it.
-                    finalOffset <- startOffset + int64 segmentStart
-                else
-                    match processSegment cutoff segment with
-                    | Some message -> messages.Add message
-                    | None -> ()
-
-                    finalOffset <- startOffset + int64 (segmentStart + segment.Length))
-
-            Ok(List.ofSeq messages, finalOffset)
+        Ok(List.ofSeq messages, finalOffset)
     with
     | :? IOException as ex -> Error(MailFolderUnreadable(path, ex.Message))
     | :? UnauthorizedAccessException as ex -> Error(MailFolderUnreadable(path, ex.Message))
+    | :? OutOfMemoryException ->
+        Error(MailFolderUnreadable(path, "The folder holds a single message too large to read into memory."))
 
 /// Reads one maildir-format folder's messages - synthetic-only (Q4.11), one message per file
 /// under `cur` and `new`, each already a complete RFC822 message with no envelope line to strip.
@@ -506,19 +582,12 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
     result {
         let! account = accountWithReadableStore lookupAccount accountId
 
-        // A folder this cannot read contributes 0 and the rest still count - EXCEPT a folder that
-        // is merely too large to buffer, which is reported. The two are not the same failure and
-        // must not look the same: a locked folder is momentary and a later count gets it, whereas
-        // one over `MaxBufferableBytes` is unreadable by this reader every single time. `int
-        // stream.Length` wrapped negative for it, `Array.zeroCreate` threw, and `with _ -> 0`
-        // swallowed that into "the folder holds no messages" - so the user was told a confident
-        // total that silently omitted their largest folder. Answering with the reason instead is
-        // the only honest option until O.5's streaming reader lands.
-        //
-        // `with _ -> Ok 0` is still the last line of defence here, and it is still capable of
-        // turning any unexpected exception into "empty folder" - which is exactly how the
-        // over-limit case hid for two review rounds. The guard being sized correctly is what
-        // keeps it out of that branch; do not widen the range it lets through.
+        // A folder this cannot read contributes 0 and the rest still count. `with _ -> Ok 0` is the
+        // last line of defence: an unexpected exception turns into "empty folder" rather than
+        // failing the whole count. The streaming reader means a large folder no longer reaches it -
+        // it used to answer `Ok 0` for a folder over `MaxBufferableBytes` (the whole span could not
+        // be allocated, `Array.zeroCreate` threw, and this branch swallowed it), silently omitting
+        // the user's largest folder from a confident total. That folder now streams like any other.
         let countOneFolder (folder: MailFolder) : Result<int, MailAccountError> =
             let fullPath = MailFolderEnumerator.resolvePath account.StoreDirectory account.StoreFormat folder.RelativePath
 
@@ -536,23 +605,16 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
                     try
                         use stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)
 
-                        match bufferSpan stream.Length 0L with
-                        | Error reason -> Error(MailFolderUnreadable(fullPath, reason))
-                        | Ok(_, length) ->
-                            let buffer = Array.zeroCreate<byte> length
-                            let mutable readSoFar = 0
+                        // A segment is a complete message iff it has a header/body separator: a
+                        // torn final message and a false-boundary fragment both lack one, and
+                        // `read` returns neither. An oversized non-message segment never counts.
+                        let countSegment (count: int) (_: int64) (segmentBytes: byte[]) (_: bool) : int =
+                            if segmentBytes.LongLength > int64 MaxBufferableBytes then count
+                            elif (headerBlockAndRest (latin1.GetString segmentBytes)).IsSome then count + 1
+                            else count
 
-                            while readSoFar < buffer.Length do
-                                let read = stream.Read(buffer, readSoFar, buffer.Length - readSoFar)
-                                if read = 0 then readSoFar <- buffer.Length else readSoFar <- readSoFar + read
-
-                            let segments = splitIntoMessages buffer
-
-                            segments
-                            |> List.mapi (fun i (_, segment) -> i = segments.Length - 1, latin1.GetString segment)
-                            |> List.filter (fun (isLast, text) -> not (isLast && (headerBlockAndRest text).IsNone))
-                            |> List.length
-                            |> Ok
+                        foldMboxSegments StreamChunkBytes MaxMessageBytes stream 0L countSegment 0
+                        |> Ok
                     with _ ->
                         Ok 0
 
