@@ -30,11 +30,27 @@ let private windowSelect (windows: ScanWindowUiType list) (selectedDays: int) (o
         }
     }
 
+/// The window picker and an explicit "Scan now". Changing the window filters the stored ledger
+/// (instant); "Scan now" reads the mailbox (task 12.4 measured ~60 s, so it is never automatic).
 let private windowPicker (m: InvoicesModule) =
     adapt {
         let! windows = m.ScanWindowsAval
         let! selectedDays = m.SelectedWindowDaysAval
-        windowSelect windows selectedDays m.SelectWindow
+        let! isScanning = m.IsScanningAval
+
+        div {
+            style' "display:flex; gap:1rem; align-items:flex-end"
+            windowSelect windows selectedDays m.SelectWindow
+
+            MudButton'' {
+                Variant Variant.Filled
+                Color Color.Primary
+                StartIcon Icons.Material.Filled.Refresh
+                Disabled isScanning
+                OnClick(fun _ -> m.Rescan())
+                "Scan now"
+            }
+        }
     }
 
 /// "37 invoice(s), mail received in the last 90 days" - the count and window above the table.

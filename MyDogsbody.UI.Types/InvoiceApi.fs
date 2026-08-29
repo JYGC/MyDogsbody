@@ -8,7 +8,8 @@ open MyDogsbody.Exceptions.Types
 /// Scan returns the scan's result; the getters return the full current view. Writes that change
 /// stored data return unit - a write reloads.
 type InvoiceApi =
-    { /// Run a scan of the given window (days). Rescans on every window change.
+    { /// Read the mailbox for the given window (days) and return what this scan produced. Called on
+      /// the initial load and by the explicit "Scan now" - not on a window change (Q1.9 fallback).
       Scan: int -> Result<ScanResultUiType, MyDogsbodyException>
       /// The invoices inside the given window (days), for the table.
       GetInvoices: int -> Result<InvoiceUiType list, MyDogsbodyException>

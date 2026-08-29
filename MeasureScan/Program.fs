@@ -21,8 +21,10 @@ let profileRoot =
     @"C:\Users\jygcn\AppData\Roaming\Thunderbird\Profiles\49stkd1y.default"
 
 /// How far back to scan for the measurement. Every account is scanned; a scan-window row is what
-/// the app's picker offers, but the harness just passes this int.
-let windowDays = 180
+/// the app's picker offers, but the harness just passes this int (Scan accepts 1..3650).
+/// 730 = 2 years, to catch quarterly / annual billers (IODM, Xero, OC Energy) that a 180-day
+/// window missed - the 2026-08-29 discovery run at 180 saw only YVW once.
+let windowDays = 730
 
 type SupplierConfig =
     { Name: string

@@ -319,9 +319,12 @@ the scan") that blocks 12.4 and 12.5 and defeats the feature's purpose. This is 
       still pass.
 - [x] **14.8a** Re-run `MeasureScan` — 12.4 timing done (see `outcome.md` / 12.4). The 2.0 GB INBOX
       now reads (89,992 messages, was 0). No exceptions logged.
-- [ ] **14.8b** 12.5 needs `MeasureScan/Program.fs` → `suppliers` filled from the sender-domain
-      table (Yarra Valley Water `online.yvw.com.au`, Alinta Energy, IKEA, ahm, OnePass…), then a
-      measurement-mode re-run for the due-date coverage.
+- [ ] **14.8b** 12.5 — a 730-day discovery re-run (2026-08-29) confirmed the mailbox has almost no
+      invoice volume: 2,026 processed over 2 years, **all `NoSupplierMatched`**; the four target
+      suppliers barely appear. A measurement-mode run needs `MeasureScan/Program.fs` → `suppliers`
+      filled and would extract single-digit N. Open question for the maintainer: run it anyway for
+      a token number, or record 12.5 as "not measurable from this mailbox" (friction #19 answered
+      by the volume). See `outcome.md` → 12.5.
 - [x] **14.9** `CLAUDE-project.md`: the `MailFolderReader` structure-table bullet names the streaming
       reader and its `StreamChunkBytes` constant; the *Run* note records the `*.db` gitignore.
 
@@ -332,24 +335,24 @@ cost seconds, the immediate rescan would be replaced by an explicit Refresh. `In
 already carries `Rescan` (stubbed for exactly this) and its comment says so; `selectWindow` still
 calls `scan` (which runs `InvoiceApi.Scan`).
 
-- [ ] **15.1** *(test-first)* `InvoicesModuleCreators.selectWindow` persists the choice and reloads
-      the **ledger view only** — `GetInvoices days` + `GetProblems` for the new window — and does
-      **not** call `InvoiceApi.Scan`. Module-creator test with a recording fake `InvoiceApi`:
-      `selectWindow` invokes `GetInvoices` / `GetProblems`, never `Scan`; the previously-scanned
-      rows outside the new window disappear from the view and reappear when it widens back
-      ("narrowing hides, it does not forget" — the ledger is the store, the view is the window).
-- [ ] **15.2** *(test-first)* `Rescan` calls `InvoiceApi.Scan selectedDays` and refreshes from the
-      result. (Already wired to `scan`; the test pins it now that it is the only `Scan` caller.)
-- [ ] **15.3** *(test-first)* `InvoicesComponents` renders a visible **Refresh** control bound to
-      `m.Rescan`, disabled while `IsScanningAval`. A `MudButton` beside the window picker.
-- [ ] **15.4** `start ()` still scans on first load (the ledger must be populated once); only a
-      *window change* stops scanning. Confirm the initial-load test still asserts a scan.
-- [ ] **15.5** `E2E/InvoicesFlowTests`: changing the window does not hit the scan path (assert via
-      the harness's recording API); clicking Refresh does. Update the existing "a window change
-      persists and rescans" flow — it now persists and *reloads*, and a separate step Refreshes.
-- [ ] **15.6** `requirements.md` / `design.md` / `outcome.md`: record that the Q1.9 fallback was
-      taken, with the 60 s measurement as the reason. `design.md` → *Decisions taken* #15.
-- [ ] **15.7** Gate: build clean, full suite green, zero skips.
+- [x] **15.1** *(test-first)* `InvoicesModuleCreators.selectWindow` persists the choice and calls
+      `loadLedger` (`GetInvoices` / `GetProblems`), never `InvoiceApi.Scan`. `deleteInvoice` too
+      (the row is hard-deleted). Module-creator tests: select/delete re-query but do not scan;
+      narrowing then widening re-queries for each window ("hides, does not forget").
+- [x] **15.2** *(test-first)* `Rescan` calls `InvoiceApi.Scan selectedDays`; `undeleteInvoice`
+      scans too (only a scan restores a hard-deleted row). Both pinned by tests.
+- [x] **15.3** *(test-first)* `InvoicesComponents.windowPicker` renders a **"Scan now"** `MudButton`
+      bound to `m.Rescan`, `Disabled` while `IsScanningAval`.
+- [x] **15.4** `start ()` still scans on first load; the `the initial window comes from the API's
+      resolved choice` test still asserts `ScanCalls = [<resolved>]`.
+- [x] **15.5** `E2E/InvoicesFlowTests`: `the window picker … selecting one persists and reloads`
+      (renamed) asserts the initial no-account error is *cleared* by the reload, not re-raised; new
+      `changing the window filters the stored ledger without a scan; Scan now reads the mailbox`
+      seeds an in-window and an out-of-window invoice and drives the whole loop.
+- [x] **15.6** `requirements.md` (§Scanning + §UI), `design.md` → *Decisions taken* #15,
+      `outcome.md` all record the Q1.9 fallback and the ~60 s measurement behind it.
+- [x] **15.7** Gate: `dotnet build MyDogsbody.sln` clean; `dotnet test` green — **1294**, zero skips
+      (Unit 698 / Integration 264 / Contract 297 / E2E 35).
 
 ---
 

@@ -558,6 +558,19 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    (a watermark landing one byte before a `\nFrom ` blank line) is trimmed in `foldMboxSegments`.
    `countMessages` no longer over-counts a non-last fragment with no header/body separator — it
    now counts a segment iff it has a separator, matching what `read` returns.
+15. **A window change reloads; a scan is explicit — Phase 15, settled by the Phase 12 measurement.**
+   Q1.9 ("changing the window rescans immediately") was accepted on the written condition that if
+   a window change cost seconds, an explicit Refresh would replace it. The measurement put a full
+   scan at **~60 s whatever the window** — 58 s at 180 days, 63 s at 730 — because the cost is
+   reading every folder of every account, not the cutoff. So `InvoicesModuleCreators.selectWindow`
+   now persists the choice and calls `loadLedger` (`GetInvoices` / `GetProblems` for the new
+   window — no `InvoiceApi.Scan`); `deleteInvoice` likewise reloads (the row is hard-deleted, so
+   `GetInvoices` already omits it). `InvoiceApi.Scan` is reached only by the initial load, the new
+   **"Scan now"** button (`InvoicesComponents.windowPicker`, disabled while busy), and
+   `undeleteInvoice` (only a scan can restore a hard-deleted row — `UndeleteInvoiceWorkflow` says
+   so). `InvoicesModule` already carried a stubbed `Rescan` for exactly this. "Narrowing hides, it
+   does not forget" now holds by construction: the store keeps every invoice, the window is a
+   read filter.
 
 ---
 

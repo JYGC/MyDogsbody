@@ -15,9 +15,11 @@ type InvoicesModule =
       IsScanningAval: aval<bool>
       /// The message from the last failed operation, cleared by the next successful one.
       ErrorAval: aval<string option>
-      /// Persist the choice, then rescan - the table shows what was scanned, not what the picker held.
+      /// Persist the choice and reload the stored ledger for it. NOT a mailbox scan - task 12.4
+      /// measured that at ~60 s whatever the window, so a window change filters, it does not rescan.
       SelectWindow: int -> unit
-      /// Rescan the current window (the explicit Refresh, if task 12.4 turns out to need it).
+      /// Read the mailbox for the current window and refresh the ledger - the explicit "Scan now",
+      /// the only path that reads mail after the initial load (Q1.9 fallback, settled by 12.4).
       Rescan: unit -> unit
       DeleteInvoice: string -> unit
       /// supplierId, reference - the natural key the tombstone row carries.

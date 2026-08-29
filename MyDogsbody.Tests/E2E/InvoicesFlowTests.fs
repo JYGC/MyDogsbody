@@ -35,9 +35,10 @@ let private renderInvoices (harness: InvoicesHarness) =
     let view = InvoicesComponents.invoicesTable m (fun _ -> ())
     m, renderWithProviders harness view
 
-/// Seeds a supplier (id 1) + template (id 1) + one invoice, so a flow can read it back through
-/// the real API. dueDate is a yyyy-MM-dd string or NULL.
-let private seedInvoice (harness: InvoicesHarness) (reference: string) (dueDate: string) =
+/// Seeds a supplier (id 1) + template (id 1) + one invoice with an explicit MessageReceivedAt, so
+/// a flow can place an invoice inside or outside a window (the harness clock is 2026-06-15).
+/// dueDate is a 'yyyy-MM-dd' string (quoted) or NULL.
+let private seedInvoiceReceived (harness: InvoicesHarness) (reference: string) (dueDate: string) (receivedAt: string) =
     harness.Exec
         "INSERT OR IGNORE INTO Suppliers (Id, Name, PaymentTermDays) VALUES (1, 'Acme Pty Ltd', 30);
          INSERT OR IGNORE INTO InvoiceTemplates (Id, SupplierId, Name, DocumentPart, AttachmentFormat, Position)
@@ -45,7 +46,10 @@ let private seedInvoice (harness: InvoicesHarness) (reference: string) (dueDate:
 
     harness.Exec
         $"INSERT INTO Invoices (SupplierId, TemplateId, Reference, Amount, Currency, IssueDate, DueDate, SourceMessageId, MessageReceivedAt, ScannedAt)
-          VALUES (1, 1, '{reference}', '100.00', 'AUD', NULL, {dueDate}, 'msg-{reference}', '2026-06-10T00:00:00.0000000', '2026-06-15T00:00:00.0000000');"
+          VALUES (1, 1, '{reference}', '100.00', 'AUD', NULL, {dueDate}, 'msg-{reference}', '{receivedAt}', '2026-06-15T00:00:00.0000000');"
+
+let private seedInvoice (harness: InvoicesHarness) (reference: string) (dueDate: string) =
+    seedInvoiceReceived harness reference dueDate "2026-06-10T00:00:00.0000000"
 
 [<Fact; Trait("Level", "E2E")>]
 let ``the invoices table renders a seeded invoice, and one with no due date is greyed with its reason`` () =
@@ -107,7 +111,7 @@ let ``the problems view lists a persisted scan problem with its sender and subje
             Assert.Contains("recognised", rendered.Markup)))
 
 [<Fact; Trait("Level", "E2E")>]
-let ``the window picker is bound to the store's windows and selecting one persists then rescans`` () =
+let ``the window picker is bound to the store's windows and selecting one persists and reloads`` () =
     withInvoicesHarness (fun harness ->
         let m, rendered = renderInvoices harness
 
@@ -116,15 +120,48 @@ let ``the window picker is bound to the store's windows and selecting one persis
             Assert.Equal(5, (FSharp.Data.Adaptive.AVal.force m.ScanWindowsAval).Length)
             Assert.Equal(14, FSharp.Data.Adaptive.AVal.force m.SelectedWindowDaysAval)
             // the label above the table says what the window measures, not a bare number
-            Assert.Contains("mail received in the last 14 days", rendered.Markup))
+            Assert.Contains("mail received in the last 14 days", rendered.Markup)
+            // "Scan now" is on screen next to the picker
+            Assert.Contains("Scan now", rendered.Markup))
 
         m.SelectWindow 90
 
-        rendered.WaitForAssertion(fun () -> Assert.Equal(90, FSharp.Data.Adaptive.AVal.force m.SelectedWindowDaysAval))
+        rendered.WaitForAssertion(fun () ->
+            Assert.Equal(90, FSharp.Data.Adaptive.AVal.force m.SelectedWindowDaysAval)
+            // the window change did NOT scan the mailbox: the initial load's "no mail account"
+            // error is cleared by the reload rather than re-raised
+            Assert.Equal(None, FSharp.Data.Adaptive.AVal.force m.ErrorAval))
 
         match harness.ScanWindowApi.GetSelectedScanWindow() with
         | Ok days -> Assert.Equal(90, days)
         | Error e -> Assert.Fail($"expected the choice to persist: {e.Message}"))
+
+[<Fact; Trait("Level", "E2E")>]
+let ``changing the window filters the stored ledger without a scan; Scan now reads the mailbox`` () =
+    withInvoicesHarness (fun harness ->
+        // one invoice inside a 14-day window (clock 2026-06-15), one only inside 90 days
+        seedInvoiceReceived harness "INV-RECENT" "NULL" "2026-06-11T00:00:00.0000000"
+        seedInvoiceReceived harness "INV-OLD" "NULL" "2026-04-01T00:00:00.0000000"
+
+        let m, rendered = renderInvoices harness
+
+        // opens on 14 days: only the recent invoice is in view
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("INV-RECENT", rendered.Markup)
+            Assert.DoesNotContain("INV-OLD", rendered.Markup))
+
+        // widen to 90: the older invoice was hidden, not forgotten - it comes back with no scan
+        m.SelectWindow 90
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("INV-OLD", rendered.Markup)
+            Assert.Contains("INV-RECENT", rendered.Markup)
+            Assert.Equal(None, FSharp.Data.Adaptive.AVal.force m.ErrorAval))
+
+        // "Scan now" DOES read the mailbox - and with no mail account selected that raises the alert
+        m.Rescan()
+
+        rendered.WaitForAssertion(fun () -> Assert.Contains("mail account", rendered.Markup)))
 
 [<Fact; Trait("Level", "E2E")>]
 let ``a scan with no mail account selected shows an alert and logs nothing`` () =

@@ -28,9 +28,40 @@ let getInvoicesModule
         | Ok _ -> errorCval.Value <- None
         | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
 
-    /// Show the ledger for the given window and then try to refresh it with a scan. The scan may
-    /// fail (no mail account, an unreachable store) - the ledger stays on screen with the alert,
-    /// so "narrowing hides, it does not forget" holds even when a rescan cannot run.
+    /// Show the stored ledger for the given window - `GetInvoices` / `GetProblems`, no mailbox
+    /// read. This is what a window change does: task 12.4 measured a full scan at ~60 s whatever
+    /// the window (the cost is reading every folder, not the cutoff), so Q1.9's immediate-rescan
+    /// is dropped for the explicit `rescan` below. "Narrowing hides, it does not forget" - the
+    /// store keeps every invoice; the window only decides which are shown.
+    let loadLedger (days: int) =
+        transact (fun _ -> isScanningCval.Value <- true)
+
+        startWork (fun () ->
+            let windows = scanWindowApi.GetScanWindows()
+            let ledger = invoiceApi.GetInvoices days
+            let problems = invoiceApi.GetProblems()
+
+            transact (fun _ ->
+                match windows with
+                | Ok ws -> windowsCval.Value <- ws
+                | Error _ -> ()
+
+                match ledger with
+                | Ok invoices ->
+                    invoicesCval.Value <- invoices
+                    errorCval.Value <- None
+                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
+
+                match problems with
+                | Ok ps -> problemsCval.Value <- ps
+                | Error _ -> ()
+
+                selectedDaysCval.Value <- days
+                isScanningCval.Value <- false))
+
+    /// Read the mailbox for `days` and refresh the ledger from the result. The scan may fail (no
+    /// mail account, an unreachable store) - the stored ledger (loaded first) stays on screen with
+    /// the alert.
     let scan (days: int) =
         transact (fun _ -> isScanningCval.Value <- true)
 
@@ -65,7 +96,8 @@ let getInvoicesModule
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
 
-    /// The initial load: resolve the remembered window through the API, then scan it.
+    /// The initial load: resolve the remembered window through the API, then scan it once so the
+    /// ledger is populated. Only a *window change* after this stops scanning.
     let start () =
         transact (fun _ -> isScanningCval.Value <- true)
 
@@ -77,15 +109,13 @@ let getInvoicesModule
                     errorCval.Value <- Some ex.Message
                     isScanningCval.Value <- false))
 
-    /// Persist the choice, then rescan.
+    /// Persist the choice, then reload the stored ledger for it - NOT a scan (see `loadLedger`).
     let selectWindow (days: int) =
         transact (fun _ -> isScanningCval.Value <- true)
 
         startWork (fun () ->
-            let persisted = scanWindowApi.SelectScanWindow days
-
-            match persisted with
-            | Ok() -> scan days
+            match scanWindowApi.SelectScanWindow days with
+            | Ok() -> loadLedger days
             | Error(ex: MyDogsbodyException) ->
                 transact (fun _ ->
                     errorCval.Value <- Some ex.Message
@@ -97,7 +127,8 @@ let getInvoicesModule
             transact (fun _ -> setError result)
 
             match result with
-            | Ok() -> scan selectedDaysCval.Value
+            // the row is hard-deleted, so a reload is enough - no need to re-read the mailbox
+            | Ok() -> loadLedger selectedDaysCval.Value
             | Error _ -> ())
 
     let undeleteInvoice (supplierId: string) (reference: string) =
@@ -106,6 +137,8 @@ let getInvoicesModule
             transact (fun _ -> setError result)
 
             match result with
+            // un-delete only removes the tombstone; the invoice row is gone, so only a scan of a
+            // covering window can put it back (UndeleteInvoiceWorkflow says as much).
             | Ok() -> scan selectedDaysCval.Value
             | Error _ -> ())
 

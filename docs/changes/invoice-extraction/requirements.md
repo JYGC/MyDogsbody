@@ -88,9 +88,10 @@ WHEN a scan runs THE SYSTEM SHALL pass the computed cutoff to the mail reader so
 WHEN a scan reads a message THE SYSTEM SHALL flatten it and its attachments to text, match a supplier, apply that supplier's templates in order, validate the result, and store it.
 WHEN a scan encounters a message that yields no invoice THE SYSTEM SHALL record the reason against that message and **continue** — never silent, never fatal to the scan.
 WHEN a scan completes THE SYSTEM SHALL return both the invoices found and the problems recorded, as two lists.
-WHEN a user changes the scan window THE SYSTEM SHALL rescan immediately.
+WHEN a user changes the scan window THE SYSTEM SHALL persist the choice and reload the stored ledger for that window, and SHALL NOT read the mailbox again. *(Phase 15: the Phase 12 measurement put a full scan at ~60 s whatever the window — the cost is reading every folder, not the cutoff — so the immediate rescan of the earlier draft is dropped.)*
+WHEN a user asks to scan (the explicit "Scan now", and the initial page load) THE SYSTEM SHALL read the mailbox for the current window and refresh the ledger from the result.
 WHEN a scan runs THE SYSTEM SHALL NOT block the user interface.
-WHEN a scan is measured against the real mail store THE SYSTEM SHALL have its duration recorded in the change description — if changing the window costs seconds, an explicit Refresh button comes back in place of the immediate rescan.
+WHEN a scan is measured against the real mail store THE SYSTEM SHALL have its duration recorded in the change description — if changing the window costs seconds, an explicit Refresh button comes back in place of the immediate rescan. *(Measured at ~60 s; the Refresh button — "Scan now" — is Phase 15.)*
 
 ---
 
@@ -150,8 +151,9 @@ WHEN this change is complete THE SYSTEM SHALL still have exactly **two** mapping
 WHEN a user navigates to `/invoices` THE SYSTEM SHALL display the scan-window picker, the invoice table, and the number of invoices and the window they fall in, stated above the table.
 WHEN the scan-window picker is rendered THE SYSTEM SHALL render whatever windows the store holds, and SHALL hold no list of its own — adding a sixth window is done on screen and takes effect without a rebuild.
 WHEN the picker is rendered THE SYSTEM SHALL open on the resolved remembered choice, never on a literal value written into a component.
-WHEN a user changes the window THE SYSTEM SHALL persist the choice and then rescan, so the table shows what was actually scanned rather than what the picker was holding.
-WHEN the window is narrowed THE SYSTEM SHALL hide invoices outside it and SHALL NOT delete them — narrowing hides, it does not forget.
+WHEN a user changes the window THE SYSTEM SHALL persist the choice and reload the stored ledger for that window (Phase 15 — not a mailbox scan; see the *Scanning* section).
+WHEN the `/invoices` page is rendered THE SYSTEM SHALL show a "Scan now" control that reads the mailbox for the current window, disabled while a scan or reload is in flight.
+WHEN the window is narrowed THE SYSTEM SHALL hide invoices outside it and SHALL NOT delete them — narrowing hides, it does not forget; widening the window again brings them back with no scan.
 WHEN an invoice has no due date THE SYSTEM SHALL show it greyed with the reason it cannot go on a calendar.
 WHEN a user deletes an invoice THE SYSTEM SHALL ask for confirmation, then delete it and reload.
 WHEN a user opens the problems view THE SYSTEM SHALL list the messages that yielded nothing, with sender, subject, date and cause.
@@ -180,7 +182,7 @@ WHEN the document readers are tested THE SYSTEM SHALL run against committed fixt
 WHEN the ledger is tested THE SYSTEM SHALL run against a real SQLite database in a fresh temp file per test with the schema built by the migration runner.
 WHEN each migration is added THE SYSTEM SHALL have `Up`/`Down` tests, and the seeding migration SHALL have a test that `Down()` removes the seeded rows.
 WHEN a dependency function type is published THE SYSTEM SHALL have one shared contract suite run against the real adapter **and** every fake.
-WHEN the invoices flow is complete THE SYSTEM SHALL have an E2E test covering a scan producing invoices, a window change rescanning, a per-row delete producing a tombstone, an un-delete, and a problem row appearing for a message that yields nothing.
+WHEN the invoices flow is complete THE SYSTEM SHALL have an E2E test covering a scan producing invoices, a window change that filters the ledger without a scan, "Scan now" reading the mailbox, a per-row delete producing a tombstone, an un-delete, and a problem row appearing for a message that yields nothing.
 WHEN a test is added THE SYSTEM SHALL tag it with its level.
 
 ### Specific proofs this change owes

@@ -95,7 +95,7 @@ There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
 ### Build state
 
-`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1290 tests — 695 Unit, 264 Integration, 297 Contract, 34 E2E**, zero skips (measured against `invoice-extraction`'s head — Phase 14 included — via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
+`dotnet build MyDogsbody.sln` succeeds and `dotnet test` runs green: **1294 tests — 698 Unit, 264 Integration, 297 Contract, 35 E2E**, zero skips (measured against `invoice-extraction`'s head — Phases 14 and 15 included — via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). If the build breaks now, assume you broke it.
 
 > **A second known flake joined the LiteDB one during `invoice-extraction`:** any test that constructs `ThunderbirdPersistedShapeTests` or another LiteDB context can still hit the `BsonMapper` race under the full suite's parallelism (it passes in isolation) — this is the documented one below. The SQLite store-test harnesses added by that change deliberately **do not** call `SqliteConnection.ClearAllPools()`, because that process-global call was clearing other tests' pooled connections mid-use; they leak their GUID-named temp file instead if the pool still holds a handle.
 
