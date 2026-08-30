@@ -11,10 +11,10 @@ open MyDogsbody.Integrations.Thunderbird.Database
 open MyDogsbody.Startup
 open MyDogsbody.UI.Types
 
-/// Same shape as E2E/BlazorTestHarness.fs's CredentialsHarness, over the Thunderbird integration's
-/// own LiteDB database instead of Credentials.db - plus a FolderPicker, since the page needs one
-/// injected the way the WPF host supplies it in production. The folder picker is a lambda here, so
-/// no window opens.
+/// A bUnit TestContext subclass wired for MudBlazor (AddMudServices, JSRuntimeMode.Loose), over
+/// the Thunderbird integration's own LiteDB database - plus a FolderPicker, since the page needs
+/// one injected the way the WPF host supplies it in production. The folder picker is a lambda
+/// here, so no window opens.
 type MailAccountsHarness(mailAccountApi: MailAccountApi, folderPicker: FolderPicker, logged: ResizeArray<MyDogsbodyException>) =
     inherit TestContext()
 

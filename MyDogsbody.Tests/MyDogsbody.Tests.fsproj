@@ -13,10 +13,6 @@
     <Compile Include="Domain\MailAccounts\ScanForMailAccountsWorkflowTests.fs" />
     <Compile Include="Domain\MailAccounts\ListMailAccountsWorkflowTests.fs" />
     <Compile Include="Domain\MailAccounts\SelectMailAccountWorkflowTests.fs" />
-    <Compile Include="Domain\Credentials\CredentialsTypesTests.fs" />
-    <Compile Include="Domain\Credentials\AddCredentialWorkflowTests.fs" />
-    <Compile Include="Domain\Credentials\EditCredentialWorkflowTests.fs" />
-    <Compile Include="Domain\Credentials\ListCredentialsWorkflowTests.fs" />
     <Compile Include="Domain\Documents\DocumentsTypesTests.fs" />
     <Compile Include="Domain\Documents\ReadDocumentLinesWorkflowTests.fs" />
     <Compile Include="Domain\Suppliers\SuppliersTypesTests.fs" />
@@ -56,8 +52,10 @@
     <Compile Include="Integrations\Thunderbird\ThunderbirdDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Thunderbird\ThunderbirdEntityMappersTests.fs" />
     <Compile Include="Integrations\Thunderbird\ThunderbirdStoreTests.fs" />
-    <Compile Include="Integrations\Credentials\CredentialsDatabaseContextModuleTests.fs" />
-    <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialTypesTests.fs" />
+    <Compile Include="Integrations\Google\GoogleDatabaseContextModuleTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialStoreTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialCharacterizationTests.fs" />
     <Compile Include="Integrations\Documents\PdfDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\WordDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\PlainTextDocumentReaderTests.fs" />
@@ -77,8 +75,6 @@
     <Compile Include="Database\InvoiceRecordMappersTests.fs" />
     <Compile Include="Database\InvoiceStoreTests.fs" />
     <Compile Include="Database\ScanWindowStoreTests.fs" />
-    <Compile Include="Startup\CredentialApiMappersTests.fs" />
-    <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />
     <Compile Include="Startup\SupplierApiFactoryTests.fs" />
     <Compile Include="Startup\TemplateApiMappersTests.fs" />
@@ -88,10 +84,9 @@
     <Compile Include="Startup\InvoiceApiMappersTests.fs" />
     <Compile Include="Startup\ScanWindowApiFactoryTests.fs" />
     <Compile Include="Startup\InvoiceApiFactoryTests.fs" />
-    <Compile Include="Contracts\ErrorTranslationTests.fs" />
-    <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
-    <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
-    <Compile Include="Contracts\CredentialApiContractTests.fs" />
+    <Compile Include="Contracts\GoogleCredentialDependencyContractTests.fs" />
+    <Compile Include="Contracts\GoogleCredentialPersistedShapeTests.fs" />
+    <Compile Include="Contracts\GoogleCredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\PersistedShapeTests.fs" />
     <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
     <Compile Include="Contracts\ThunderbirdDependencyContractTests.fs" />
@@ -105,13 +100,10 @@
     <Compile Include="Contracts\InvoiceDependencyContractTests.fs" />
     <Compile Include="Contracts\InvoicePersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
-    <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\MailAccountsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\InvoicesModuleCreatorsTests.fs" />
     <Compile Include="UI\Components\MailAccountsComponentsTests.fs" />
-    <Compile Include="E2E\BlazorTestHarness.fs" />
-    <Compile Include="E2E\CredentialsFlowTests.fs" />
     <Compile Include="E2E\SuppliersTestHarness.fs" />
     <Compile Include="E2E\SuppliersFlowTests.fs" />
     <Compile Include="E2E\MailAccountsTestHarness.fs" />
@@ -135,9 +127,8 @@
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
-    <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Documents\MyDogsbody.Integrations.Documents.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Google\MyDogsbody.Integrations.Google.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Startup\MyDogsbody.Startup.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />

@@ -24,10 +24,6 @@
     <Compile Include="MailAccounts\ScanForMailAccountsWorkflow.fs" />
     <Compile Include="MailAccounts\ListMailAccountsWorkflow.fs" />
     <Compile Include="MailAccounts\SelectMailAccountWorkflow.fs" />
-    <Compile Include="Credentials\CredentialsTypes.fs" />
-    <Compile Include="Credentials\AddCredentialWorkflow.fs" />
-    <Compile Include="Credentials\EditCredentialWorkflow.fs" />
-    <Compile Include="Credentials\ListCredentialsWorkflow.fs" />
     <Compile Include="Documents\DocumentsTypes.fs" />
     <Compile Include="Documents\ReadDocumentLinesWorkflow.fs" />
     <Compile Include="Suppliers\SuppliersTypes.fs" />

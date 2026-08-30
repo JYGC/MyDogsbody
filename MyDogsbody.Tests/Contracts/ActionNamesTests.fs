@@ -5,16 +5,13 @@ open System.IO
 open System.Reflection
 open Xunit
 open MyDogsbody.Builders
-open MyDogsbody.Enums
 open MyDogsbody.Exceptions.Types
-open MyDogsbody.Domain.Credentials
 open MyDogsbody.Domain.Documents
-open MyDogsbody.Integrations.Credentials
+open MyDogsbody.Integrations.Google
+open MyDogsbody.Integrations.Google.Database
 open MyDogsbody.Integrations.Documents
 open MyDogsbody.Logging.Repositories
 open MyDogsbody.Logging.Types
-open MyDogsbody.Startup
-open MyDogsbody.UI.Types
 
 // Action strings are $"..."-composed and compiler-unchecked, so a typo is invisible until
 // someone reads the exception log. Before this suite existed two entries were already wrong: one
@@ -28,7 +25,7 @@ let private valueOrFail (result: Result<'T, string>) =
     | Ok value -> value
     | Error reason -> failwith $"Test setup built an invalid value: {reason}"
 
-let private failingCredentialCollection () : Database.Types.CredentialsCollection =
+let private failingGoogleCredentialCollection () : Database.Types.GoogleCredentialsCollection =
     raise (InvalidOperationException "store is gone")
 
 let private failingExceptionCollection () : MyDogsbody.Logging.Database.Types.ExceptionCollection =
@@ -41,42 +38,40 @@ let private actionOf result =
     | Error (ex: MyDogsbodyException) -> ex.ActionName
     | Ok _ -> failwith "Expected Error, but got Ok"
 
-let private aValidCredential: ValidCredential =
+let private aValidGoogleCredential: ValidGoogleCredential =
     {
-        Infrastructure = Google
-        Credentials = CredentialSecret.create "secret" |> valueOrFail
-        ExternalUsername = ExternalUsername.create "person@gmail.com" |> valueOrFail
+        Secret = GoogleCredentialSecret.create "secret" |> valueOrFail
+        Username = GoogleExternalUsername.create "person@gmail.com" |> valueOrFail
     }
 
-let private aValidEdit: ValidCredentialEdit =
+let private aValidGoogleEdit: ValidGoogleCredentialEdit =
     {
-        Id = CredentialId.create "507f1f77bcf86cd799439011" |> valueOrFail
-        Infrastructure = Google
-        Credentials = CredentialSecret.create "secret" |> valueOrFail
-        ExternalUsername = ExternalUsername.create "person@gmail.com" |> valueOrFail
+        Id = GoogleCredentialId.create "507f1f77bcf86cd799439011" |> valueOrFail
+        Secret = GoogleCredentialSecret.create "secret" |> valueOrFail
+        Username = GoogleExternalUsername.create "person@gmail.com" |> valueOrFail
     }
 
 // ---------- each function reports its declared action ----------
 
 [<Fact; Trait("Level", "Contract")>]
-let ``CredentialStore.getAll reports its declared action`` () =
+let ``GoogleCredentialStore.getAll reports its declared action`` () =
     Assert.Equal(
-        ActionNames.MyDogsbody.Integrations.Credentials.CredentialStore.getAll,
-        CredentialStore.getAll handleError failingCredentialCollection () |> actionOf
+        ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.getAll,
+        GoogleCredentialStore.getAll handleError failingGoogleCredentialCollection () |> actionOf
     )
 
 [<Fact; Trait("Level", "Contract")>]
-let ``CredentialStore.insertOne reports its declared action`` () =
+let ``GoogleCredentialStore.insertOne reports its declared action`` () =
     Assert.Equal(
-        ActionNames.MyDogsbody.Integrations.Credentials.CredentialStore.insertOne,
-        CredentialStore.insertOne handleError failingCredentialCollection aValidCredential |> actionOf
+        ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.insertOne,
+        GoogleCredentialStore.insertOne handleError failingGoogleCredentialCollection aValidGoogleCredential |> actionOf
     )
 
 [<Fact; Trait("Level", "Contract")>]
-let ``CredentialStore.updateOne reports its declared action`` () =
+let ``GoogleCredentialStore.updateOne reports its declared action`` () =
     Assert.Equal(
-        ActionNames.MyDogsbody.Integrations.Credentials.CredentialStore.updateOne,
-        CredentialStore.updateOne handleError failingCredentialCollection aValidEdit |> actionOf
+        ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.updateOne,
+        GoogleCredentialStore.updateOne handleError failingGoogleCredentialCollection aValidGoogleEdit |> actionOf
     )
 
 [<Fact; Trait("Level", "Contract")>]
@@ -112,42 +107,6 @@ let ``ExceptionRepository.getAll reports its declared action`` () =
     Assert.Equal(
         ActionNames.MyDogsbody.Logging.ExceptionRepository.getAll,
         ExceptionRepository.getAll handleError failingExceptionCollection () |> actionOf
-    )
-
-[<Fact; Trait("Level", "Contract")>]
-let ``the credential api reports its declared action for each operation`` () =
-    // Arrange - a store that cannot be reached, so every operation fails at the same place and
-    // the action is the only thing distinguishing the three
-    let api = CredentialApiFactory.createCredentialApi handleError failingCredentialCollection
-
-    let aUiCredential: IntegrationCredentialUiTypeWithoutId =
-        {
-            InfrastructureType = InfrastructureType.Google
-            Credentials = "secret"
-            Username = "person@gmail.com"
-        }
-
-    // Assert
-    Assert.Equal(
-        ActionNames.MyDogsbody.Startup.CredentialApi.getAllCredentials,
-        api.GetAllCredentials() |> actionOf
-    )
-
-    Assert.Equal(
-        ActionNames.MyDogsbody.Startup.CredentialApi.addCredential,
-        api.AddCredential aUiCredential |> actionOf
-    )
-
-    Assert.Equal(
-        ActionNames.MyDogsbody.Startup.CredentialApi.editCredential,
-        api.EditCredential
-            {
-                Id = "507f1f77bcf86cd799439011"
-                InfrastructureType = InfrastructureType.Google
-                Credentials = "secret"
-                Username = "person@gmail.com"
-            }
-        |> actionOf
     )
 
 // ---------- every declared action is well formed ----------
@@ -229,14 +188,17 @@ let ``no two bindings declare the same action`` () =
     Assert.True(List.isEmpty duplicates, message)
 
 [<Fact; Trait("Level", "Contract")>]
-let ``no action is still declared under the old Integrations.Pdf module`` () =
-    // Phase 0 of change #4 renamed Integrations.Pdf -> Integrations.Documents. The structural
-    // suite would not notice a leftover .Pdf. entry, so it is asserted directly (task 10.4).
+let ``no action is still declared under a retired module`` () =
+    // Change #4 renamed Integrations.Pdf -> Integrations.Documents; change #5 removed
+    // Integrations.Credentials and Startup.CredentialApi entirely. The structural suite would not
+    // notice a leftover entry under either, so it is asserted directly.
     for name, value in allDeclaredActions () do
         Assert.DoesNotContain(".Integrations.Pdf.", value)
+        Assert.DoesNotContain(".Integrations.Credentials.", value)
+        Assert.DoesNotContain(".CredentialApi.", value)
         Assert.False(name.Contains "+Pdf+", $"{name} is still nested under a Pdf module")
+        Assert.False(name.Contains "+Credentials+", $"{name} is still nested under a Credentials module")
 
-    Assert.Contains(
-        "MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent",
-        allDeclaredActions () |> List.map snd
-    )
+    let declared = allDeclaredActions () |> List.map snd
+    Assert.Contains("MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent", declared)
+    Assert.Contains("MyDogsbody.Integrations.Google.GoogleCredentialStore.getAll", declared)

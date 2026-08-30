@@ -70,7 +70,7 @@ let ``MyDogsbody.Domain declares no PackageReference`` () =
 let ``the domain assembly references no MyDogsbody assembly`` () =
     // Arrange - the .fsproj assertions above cover what is declared; this covers what was
     // actually linked, which is what a workflow can really reach at runtime.
-    let domainAssembly = typeof<MyDogsbody.Domain.Credentials.CredentialError>.Assembly
+    let domainAssembly = typeof<MyDogsbody.Domain.Suppliers.SupplierError>.Assembly
 
     // Act
     let myDogsbodyReferences =

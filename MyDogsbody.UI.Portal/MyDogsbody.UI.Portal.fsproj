@@ -6,19 +6,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="ModuleCreators\CredentialsBrowserModuleCreators.fs" />
     <Compile Include="ModuleCreators\SuppliersBrowserModuleCreators.fs" />
     <Compile Include="ModuleCreators\MailAccountsBrowserModuleCreators.fs" />
     <Compile Include="ModuleCreators\InvoicesModuleCreators.fs" />
     <Compile Include="components\HomeComponents.fs" />
-    <Compile Include="Components\CredentialsComponents.fs" />
     <Compile Include="Components\SuppliersComponents.fs" />
     <Compile Include="Components\MailAccountsComponents.fs" />
     <Compile Include="Components\InvoicesComponents.fs" />
     <Compile Include="Components\ScanWindowsComponents.fs" />
     <Compile Include="Components\SettingsComponents.fs" />
     <Compile Include="Pages\Settings\ExceptionLogsPage.fs" />
-    <Compile Include="Pages\Settings\CredentialsPage.fs" />
     <Compile Include="Pages\Settings\SuppliersPage.fs" />
     <Compile Include="Pages\Settings\MailAccountsPage.fs" />
     <Compile Include="Pages\Settings\ScanWindowsPage.fs" />
@@ -39,7 +36,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj" />
   </ItemGroup>
 

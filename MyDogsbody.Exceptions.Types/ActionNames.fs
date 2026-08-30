@@ -7,7 +7,7 @@
 /// name its own function, and one naming the opposite mapping.
 ///
 /// Domain workflows have no entry. Their errors are discriminated union cases, which need no
-/// string; the only credentials entries below the composition root belong to the store.
+/// string.
 module MyDogsbody.Exceptions.Types.ActionNames
 
 module MyDogsbody =
@@ -19,12 +19,6 @@ module MyDogsbody =
     /// action, so it names the API operation that failed rather than the workflow inside.
     module Startup =
         let private startup = $"{myDogsbody}.Startup"
-
-        module CredentialApi =
-            let private credentialApi = $"{startup}.CredentialApi"
-            let getAllCredentials = $"{credentialApi}.getAllCredentials"
-            let addCredential = $"{credentialApi}.addCredential"
-            let editCredential = $"{credentialApi}.editCredential"
 
         module SupplierApi =
             let private supplierApi = $"{startup}.SupplierApi"
@@ -114,14 +108,14 @@ module MyDogsbody =
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
 
-        module Credentials =
-            let private credentials = $"{integrations}.Credentials"
+        module Google =
+            let private google = $"{integrations}.Google"
 
-            module CredentialStore =
-                let private credentialStore = $"{credentials}.CredentialStore"
-                let getAll = $"{credentialStore}.getAll"
-                let insertOne = $"{credentialStore}.insertOne"
-                let updateOne = $"{credentialStore}.updateOne"
+            module GoogleCredentialStore =
+                let private googleCredentialStore = $"{google}.GoogleCredentialStore"
+                let getAll = $"{googleCredentialStore}.getAll"
+                let insertOne = $"{googleCredentialStore}.insertOne"
+                let updateOne = $"{googleCredentialStore}.updateOne"
 
         module Documents =
             let private documents = $"{integrations}.Documents"
@@ -135,7 +129,7 @@ module MyDogsbody =
         /// MailAccountError directly rather than going through handleError, because their
         /// failures (a locked file, a malformed prefs.js) are expected in the domain's own
         /// terms - see design.md -> "Error-handling approach". ThunderbirdStore is genuine
-        /// LiteDB CRUD, the same shape as CredentialStore, so it keeps the usual pattern.
+        /// LiteDB CRUD, the same shape as GoogleCredentialStore, so it keeps the usual pattern.
         module Thunderbird =
             let private thunderbird = $"{integrations}.Thunderbird"
 
