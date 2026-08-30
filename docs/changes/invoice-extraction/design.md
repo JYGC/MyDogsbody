@@ -635,10 +635,21 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    processing (`loadTemplatesForSupplier` or `upsertInvoice` returning a store failure sets
    `ScanAcc.Fatal` and short-circuits) would otherwise leave every folder's watermark at EOF, so
    the unprocessed messages are never read again — `resumeOffset` resumes from `OffsetReached`
-   whenever the file has only grown. No invoice, no problem, nothing on screen. On the `Fatal`
-   branch the workflow now calls `clearWatermarks accountId` — the same dependency Phase 16 added
-   — and returns the original fatal error regardless of whether the clear succeeded (`Result.mapError
-   (fun _ -> error)`), so a broken store, the usual cause of a fatal error, does not mask itself.
+   whenever the file has only grown. No invoice, no problem, nothing on screen. The workflow now
+   calls `clearWatermarks accountId` — the same dependency Phase 16 added — and returns the
+   original error regardless of whether the clear succeeded (`Result.mapError (fun _ -> error)`),
+   so a broken store, the usual cause of such an error, does not mask itself.
+   **Every abort after `readMailFolder` resets, not only the `ScanAcc.Fatal` one (PR #18 review
+   round 7).** The line that advances the watermarks is `readMailFolder`, so what decides whether
+   a reset is owed is *where the abort is relative to that call*, not which of the aborts it is.
+   Five steps sit after it — `loadSuppliers`, `loadTombstones`, the `Fatal` branch,
+   `saveScanProblems` and `clearScanProblems` — and the first draft of this decision wrapped only
+   the third. A `loadSuppliers` store failure aborted with **every** message unprocessed behind a
+   watermark at EOF, which is the same defect in its worst form; a `saveScanProblems` failure lost
+   the diagnostics for mail that can no longer be re-read, so the problem list stayed empty for it
+   for good. `resettingWatermarksOnError clearWatermarks accountId` is applied to all five, and
+   `readMailFolder`'s own failure deliberately is **not** wrapped — nothing was read, so nothing
+   was advanced.
    **Chosen over deferred-commit** (recording a "last processed" offset separately from "last
    read" and promoting one to the other on success): that needs two offset/cutoff pairs on the
    persisted `ScanWatermarkEntity` and careful "which is authoritative" logic in `resumeOffset`,

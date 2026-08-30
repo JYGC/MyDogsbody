@@ -374,7 +374,9 @@ page never surfaced it. design.md → *Decisions taken* #16.
       `MailAccountApiFactory`), a `runScan mode rawDays` helper, `Scan` = `runScan IncrementalScan`,
       `RescanEverything` = `runScan FullRescan`.
       Tests *(Integration)*: `RescanEverything` with no account is the same readable alert as
-      `Scan`, nothing logged; with a seeded account + watermark row, the row is gone afterward.
+      `Scan`, nothing logged; with a seeded account + watermark row, the row is gone afterward
+      *(the second test was missing when 16.3 was first ticked — added in review round 7, with a
+      `Scan`-leaves-the-row contrast so the assertion cannot pass vacuously)*.
 - [x] **16.4** *(test-first)* `InvoicesModule.RescanEverything: unit -> unit`;
       `InvoicesModuleCreators` wires it through a `scanUsing` helper shared with `scan`.
       Tests: `m.RescanEverything()` calls `InvoiceApi.RescanEverything` for the current window and
@@ -399,6 +401,14 @@ message behind a watermark at EOF — no invoice, no problem, nothing on screen.
       is still `Error (InvoiceStoreFailed …)`; a clean scan → `clearWatermarks` never called
       (`IncrementalScan`); a `clearWatermarks` failure on the fatal path does not replace the
       fatal error.
+- [x] **17.1b** *(test-first — PR #18 review round 7)* **Every** abort after `readMailFolder`
+      resets, not only `ScanAcc.Fatal`: `readMailFolder` is the line that advances the watermarks,
+      so `loadSuppliers`, `loadTombstones`, `saveScanProblems` and `clearScanProblems` abort over
+      the same EOF watermarks. `resettingWatermarksOnError` is applied to all five sites;
+      `readMailFolder`'s own failure is deliberately not wrapped (nothing was read).
+      Tests: one per newly covered site → `clearWatermarks` called with the account id and the
+      original error returned; plus a `clearWatermarks`-also-fails case on the `loadSuppliers`
+      abort. All four were red for the predicted reason (`spy.Calls` empty).
 - [x] **17.2** `InvoiceApiFactory` passes the `clearWatermarksForAccount` adapter (already wired in
       16.3) to `scanForInvoices`.
 - [x] **17.3** Gate: `dotnet build MyDogsbody.sln` clean; `dotnet test` green, zero skips. Record

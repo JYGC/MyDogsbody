@@ -673,3 +673,88 @@ let ``a clearWatermarks failure on the fatal path does not replace the fatal err
     | Error(InvoiceStoreFailed "disk full") -> ()
     | other -> Assert.Fail($"Expected the original Error (InvoiceStoreFailed \"disk full\"), got {other}")
 
+// ---- every OTHER abort after the mailbox was read resets them too ----
+//
+// requirements.md: "WHEN a scan aborts on a fatal error (a store or reader failure, not a
+// per-message problem) THE SYSTEM SHALL leave the selected account's scan watermarks such that the
+// next scan re-reads every message this scan did not finish processing, and SHALL NOT advance them
+// past mail it read but never turned into an invoice or a problem."
+//
+// `readMailFolder` advances every folder's watermark to EOF as part of reading, so the four steps
+// AFTER it - loadSuppliers, loadTombstones, saveScanProblems, clearScanProblems - abort over mail
+// that is already marked "already read". Each is a store failure of exactly the class the
+// ScanAcc.Fatal branch resets for.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a loadSuppliers failure after the mailbox was read resets the watermarks and returns that error`` () =
+    let spy = ClearWatermarksSpy()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            LoadSuppliers = fun () -> Error(SupplierStoreFailed "suppliers unreachable") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed msg) ->
+        Assert.Contains("suppliers unreachable", msg)
+        Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed), got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a loadTombstones failure after the mailbox was read resets the watermarks and returns that error`` () =
+    let spy = ClearWatermarksSpy()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            LoadTombstones = fun () -> Error(InvoiceStoreFailed "tombstones unreachable") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed "tombstones unreachable") ->
+        Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"tombstones unreachable\"), got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a saveScanProblems failure resets the watermarks and returns that error`` () =
+    let spy = ClearWatermarksSpy()
+    let stranger = { acmeMessage "m1" "X" with Sender = "noreply@unknown.test" }
+
+    let deps =
+        { baseDeps [ stranger ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            SaveScanProblems = fun _ -> Error(InvoiceStoreFailed "problem store unreachable") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed "problem store unreachable") ->
+        Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"problem store unreachable\"), got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a clearScanProblems failure resets the watermarks and returns that error`` () =
+    let spy = ClearWatermarksSpy()
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            ClearScanProblems = fun _ -> Error(InvoiceStoreFailed "problem store unreachable") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed "problem store unreachable") ->
+        Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
+    | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"problem store unreachable\"), got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a clearWatermarks failure on the loadSuppliers abort does not replace that error`` () =
+    let spy = ClearWatermarksSpy(Result = Error(MailStoreFailed "the reset failed too"))
+
+    let deps =
+        { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
+            ClearWatermarks = spy.Dependency
+            LoadSuppliers = fun () -> Error(SupplierStoreFailed "suppliers unreachable") }
+
+    match run deps 30 with
+    | Error(InvoiceStoreFailed msg) ->
+        Assert.Contains("suppliers unreachable", msg)
+        Assert.DoesNotContain("the reset failed too", msg)
+    | other -> Assert.Fail($"Expected the original Error (InvoiceStoreFailed), got {other}")
+

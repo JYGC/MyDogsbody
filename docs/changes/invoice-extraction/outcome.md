@@ -5,7 +5,7 @@ Branch `change/invoice-extraction`, cut from `main` at `9b0d4ce`.
 ## Status
 
 **Code complete. Build clean. Suite green at all four levels, zero skips. Phases 0–17 done;
-12.4 and 12.5 measured. In review — PR #18, six review rounds so far.**
+12.4 and 12.5 measured. In review — PR #18, seven review rounds so far.**
 
 **Phases 16–17** were added during PR #18's review (rounds 3 and 6): a folder's watermark advances
 past mail its scan never turned into an invoice, so an ordinary re-scan sees none of it.
@@ -36,16 +36,17 @@ Measured with `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and `--filt
 
 | Level | Count |
 | --- | --- |
-| Unit | 727 |
-| Integration | 271 |
+| Unit | 732 |
+| Integration | 272 |
 | Contract | 297 |
 | E2E | 37 |
-| **Total** | **1332** |
+| **Total** | **1338** |
 
-Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+271**.
+Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+277**.
 Phases 0–15 reached **1294**; PR #18's six review rounds added **+29** (see the round notes below);
 Phases 16–17 (watermark control — "Rescan everything", fatal-abort reset) add a further **+9**
-(6 workflow unit, 1 module-creator unit, 1 factory integration, 1 E2E).
+(6 workflow unit, 1 module-creator unit, 1 factory integration, 1 E2E); round 7 adds **+6**
+(5 workflow unit, 1 factory integration).
 
 ### Known flakes (pre-existing category, not introduced here)
 
@@ -169,6 +170,34 @@ gains `clearWatermarks: ClearWatermarks` (borrowed from the MailAccounts area) a
   churn, for a rare path). Cost: one ~60 s full re-read on the next scan after a fatal error,
   which is the same cost as the first scan ever and only after the store is fixed. `design.md` →
   *Decisions taken* #16 and #17.
+
+### Review round 7 — Phase 17 reset only one of five aborts, and 16.3's integration test was missing
+
+The first cold read of the Phases 16–17 commit (`c568108`). Two findings, both self-found; **0**
+open review comments at the start of the round and 0 at the end.
+
+1. **`readMailFolder`, not `ScanAcc.Fatal`, is the line that advances the watermarks.** Phase 17
+   wrapped only the `Fatal` branch, so the four *other* steps that sit after `readMailFolder` —
+   `loadSuppliers`, `loadTombstones`, `saveScanProblems`, `clearScanProblems` — still aborted over
+   watermarks already at EOF, which is the same defect the phase was written to close.
+   `loadSuppliers` is the worst of the four: it fails with **every** message unprocessed, and the
+   next scan sees none of that mail. `saveScanProblems` is the quietest: the invoices are stored,
+   but the diagnostics are lost and can only be re-derived by reading mail that is now marked
+   "already read", so the problem list stays empty for it for good. requirements.md already
+   covered all of them — "WHEN a scan aborts on a fatal error (a store or reader failure, not a
+   per-message problem) … SHALL NOT advance them past mail it read but never turned into an
+   invoice or a problem" — so this was spec drift as well as a defect. Fixed by
+   `resettingWatermarksOnError`, applied to all five sites; `readMailFolder`'s own failure is
+   deliberately **not** wrapped, because nothing was read. Four failing-first unit tests, each red
+   for the predicted reason (`clearWatermarks` spy empty), plus a fifth locking in that a
+   `clearWatermarks` failure on the new path does not replace the original error.
+2. **Task 16.3's second integration test did not exist** although the task was ticked: "with a
+   seeded account + watermark row, the row is gone afterward". The only behaviour
+   `RescanEverything` adds over `Scan` — that it deletes the account's watermark rows — had no
+   coverage above the domain unit level, so nothing proved the factory's `clearWatermarksForAccount`
+   adapter was bound to the *watermarks* collection at all. Added, with a `Scan`-leaves-the-row
+   contrast in the same test; verified non-vacuous by temporarily wiring `RescanEverything` to
+   `IncrementalScan`, which turns it red.
 
 ## What landed
 
