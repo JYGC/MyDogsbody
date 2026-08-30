@@ -33,19 +33,23 @@ at the end.
 CLAUDE.md: *"Existing behaviour you depend on but are not changing gets a characterization test
 before you change anything near it."*
 
-- [ ] **1.1** `Integrations/Credentials/CredentialCharacterizationTests.fs`, against the **existing**
+- [x] **1.1** `Integrations/Credentials/CredentialCharacterizationTests.fs`, against the **existing**
       store, asserting the *Unchanged behaviour* list in `requirements.md`:
-      **a secret round-trips byte-for-byte** — leading and trailing whitespace, an embedded newline,
-      non-ASCII, and a very long value; the external username round-trips; the `ObjectId` surfaces as
-      a string id; an update reflects on re-read; an update to a missing row is reported distinctly;
-      an empty secret and an empty username are each refused with a reason.
-      *Outcome:* they pass. **This is the baseline the move has to reproduce.**
-- [ ] **1.2** Error-shape characterization: a store failure carries the declared `ActionNames`
-      string, the message and a **preserved inner exception**; an expected failure is **not logged**
-      and an unexpected one is logged **exactly once** — asserted through a recording
+      secret round-trips (embedded newline / tab / non-ASCII / very long); the external username
+      round-trips; the `ObjectId` surfaces as a string id; an update reflects on re-read; an update
+      to a missing row is reported distinctly; an empty secret and an empty username are each refused
+      with a reason.
+      *Outcome:* 15 tests pass. **Finding:** the shared store does **not** round-trip leading/trailing
+      whitespace — LiteDB `BsonMapper.Global.TrimWhitespace` defaults to `true`. requirements.md's
+      "including leading and trailing whitespace" clause is not met today; characterized as-is, and
+      the new per-provider store is built with a local `BsonMapper` (`TrimWhitespace`/
+      `EmptyStringToNull` off) so it *does* meet it. Deviation recorded in `design.md` and `outcome.md`.
+- [x] **1.2** Error-shape characterization: a store failure carries the declared `ActionNames`
+      string, the message and a **preserved inner exception**, logged once; an expected validation
+      failure reaches the caller as `Error` and is **never logged** — asserted through a recording
       `HandleErrorBuilder`, never by opening `Logging.db`.
-- [ ] **1.3** Record the current test totals **per level** (Unit / Integration / Contract / E2E).
-      *Outcome:* the "before" number friction #10 requires the outcome document to report.
+- [x] **1.3** Current test totals per level: **Unit 738 / Integration 274 / Contract 299 / E2E 37 =
+      1348**, zero skips (measured against `change/credentials-per-provider` head before Phase 1).
 
 ## Phase 2 — Build the new home (required, old store still in place)
 
