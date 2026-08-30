@@ -48,7 +48,7 @@ The net is −87, not −(the count of the deleted files): the retired credentia
 coverage). What is genuinely gone is the domain-workflow coverage for a concept that is no longer a
 domain concept.
 
-### Test files deleted (13)
+### Test files deleted (15)
 
 ```
 Domain/Credentials/CredentialsTypesTests.fs          Contracts/CredentialApiContractTests.fs
@@ -58,13 +58,21 @@ Domain/Credentials/ListCredentialsWorkflowTests.fs   Contracts/ErrorTranslationT
 Integrations/Credentials/CredentialStoreTests.fs     Startup/CredentialApiFactoryTests.fs
 Integrations/Credentials/CredentialsDatabaseContextModuleTests.fs   Startup/CredentialApiMappersTests.fs
 UI/ModuleCreators/CredentialsBrowserModuleCreatorsTests.fs
+E2E/CredentialsFlowTests.fs                          E2E/BlazorTestHarness.fs
 ```
 
-Plus `Integrations/Credentials/CredentialCharacterizationTests.fs` — the Phase 1 baseline file,
-deleted in Phase 4 once its assertions had been carried into
-`Integrations/Google/GoogleCredentialCharacterizationTests.fs` (Phase 3).
+The two E2E files are the ones `design.md`'s own list did not end up carrying: it listed
+`CredentialsFlowTests.fs` and expected `BlazorTestHarness.fs` to be **kept**, so when this table
+added `ErrorTranslationTests.fs` (deviation 3) it silently swapped one out and never gained the
+other (deviation 2). Both were deleted; `git diff --name-status main..HEAD -- MyDogsbody.Tests`
+counts **15** deletions.
 
-### Test files edited, not deleted (5)
+Plus `Integrations/Credentials/CredentialCharacterizationTests.fs` — the Phase 1 baseline file,
+added and deleted **within** this change (Phase 1 → Phase 4) once its assertions had been carried
+into `Integrations/Google/GoogleCredentialCharacterizationTests.fs` (Phase 3). It nets to nothing
+in the diff and is not one of the 15.
+
+### Test files edited, not deleted (6)
 
 `Contracts/ActionNamesTests.fs` (now covers `GoogleCredentialStore` + asserts no retired
 `.Integrations.Credentials.` / `.CredentialApi.` entry survives), `Contracts/PersistedShapeTests.fs`
@@ -82,8 +90,8 @@ Integrations/Google/GoogleCredentialStoreTests.fs            (Integration)
 Integrations/Google/GoogleCredentialCharacterizationTests.fs (Integration + Unit)
 Contracts/GoogleCredentialPersistedShapeTests.fs             (Contract)
 Contracts/GoogleCredentialDependencyContractTests.fs         (Contract, shared real+fake suite)
+Contracts/GoogleCredentialBoundaryMapperTests.fs             (Contract, added by review round 1)
 ```
-(6 files; the 7th slot is the transient Phase 1 `CredentialCharacterizationTests.fs`.)
 
 ---
 
@@ -307,3 +315,63 @@ green and two fewer projects exist"*, so they belong with the code that first ca
   needs 24 hex characters — so `"abc"` yields a logged `Error` from the adapter and `Ok None` from
   the fake. Change #6 should either tighten `GoogleCredentialId.create` or add the case to the
   shared suite.
+
+---
+
+## PR review — round 4
+
+One finding, documentation-only; no production code or test changed, so the totals are unchanged
+(1270 passed / 0 failed / 0 skipped; Unit 706 · Integration 270 · Contract 264 · E2E 30).
+
+**Finding (round 4): this document's test-file inventory did not match the diff, and task 6.2
+claims it records "every deleted test file".** `requirements.md` makes that inventory an explicit
+requirement (*"SHALL record in its outcome document the test count before and after, per level, and
+the list of test files deleted"*), and friction #10's whole point is that a change removing tested
+code must say plainly what went rather than letting the total quietly drop. Measured against
+`git diff --name-status main..HEAD -- MyDogsbody.Tests`:
+
+| Section | Claimed | Actual | Was wrong how |
+| --- | --- | --- | --- |
+| deleted | 13 | **15** | omitted `E2E/CredentialsFlowTests.fs` and `E2E/BlazorTestHarness.fs` |
+| edited, not deleted | 5 | **6** | header undercounted the six the prose already names |
+| added | 7 | **7** | listed only 6; the "7th slot" was explained as the transient Phase 1 file, which nets to zero and is already counted under *deleted*. The real 7th is `Contracts/GoogleCredentialBoundaryMapperTests.fs`, added by round 1 |
+
+The two omissions were both at the E2E level — the level this change's own sequencing constraint
+exists to protect — so they were the least useful two to lose. All three sections are corrected
+above; the Phase 5 totals tables are measurements and are left as they were.
+
+### Verified and dropped, not changed
+
+- **The "Before" totals are right.** `1348` looked wrong against `CLAUDE-project.md`'s `1332` at the
+  base commit, so the base suite was actually run from a worktree at `main`: **1348 passed, 0
+  failed, 0 skipped**. The stale number was `CLAUDE-project.md`'s own, and this change already
+  replaced that line with `1270`. Base also carried a 4th warning
+  (`CredentialDependencyContractTests.fs(234,9)` FS0020) that left with the file — confirming the
+  PR's "3 warnings, all pre-existing (this change removed one)".
+- **No stale `bin`/`obj` survives the deleted projects** (`requirements.md` edge case). The three
+  directories are still on disk but are **empty**, and `git ls-files` lists nothing under them.
+- The local `BsonMapper` and the `IDisposable` implementation were re-probed independently and both
+  hold: `BsonMapper.Global.TrimWhitespace` / `EmptyStringToNull` are `true`, the global mapper
+  really does return `"  1//0abc\tDEF   \n"` as `"1//0abc\tDEF"`, and `(context :> IDisposable)
+  .Dispose()` returns normally and releases the file.
+
+### The two deferrals, re-judged from scratch
+
+Both reproduced against the checked-out head, and both still defer — but on a stronger ground than
+"this is a refactor": **the information needed to fix them correctly arrives in change #6.**
+`MyDogsbody.Integrations.Google` is referenced by `MyDogsbody.Tests` and by nothing else, so
+neither path has a caller that can reach it today.
+
+- **`updateOne`** — probe: after the row is deleted, `collection.Update` returns `false` and the
+  store's `|> ignore` discards it. No delete function exists anywhere in the application, so
+  nothing can open the window; and the red-first test the repo mandates would need `ILiteCollection`
+  hand-faked (~40 members) to make `FindById` succeed while `Update` fails. In #6 the same
+  assertion costs three lines at the workflow seam.
+- **The fake/real divergence** — probe: the real adapter returns `Error` with an inner
+  `ArgumentException` **and logs it once**; the fake returns `Ok None`. Worth adding to the #6
+  note: logging is itself the wrong idiom there, since a caller-supplied identifier is expected
+  input and the outer ring's expected-failure convention is an `ApplicationException` inner, which
+  passes through unlogged. The fix is a design choice — tighten `GoogleCredentialId.create` to the
+  store's key shape (couples the type to LiteDB) or make `toObjectId` total and report an
+  unparseable id as `Ok None` (keeps the type opaque) — and which is right depends on where ids
+  come from, which is what #6 establishes.
