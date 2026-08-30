@@ -64,7 +64,13 @@ let private withReal (test: Deps -> unit) =
 
     let deps: Deps =
         { LoadInvoices = fun c -> InvoiceStore.getInvoices handleError conn ctx.GetInvoices c |> Result.mapError toInvoiceError
-          UpsertInvoice = fun i -> InvoiceStore.upsertInvoice handleError conn clock i |> Result.mapError toInvoiceError
+          // The same two-way translation InvoiceApiFactory binds, so the suite exercises what
+          // production actually hands the workflow rather than a simplification of it.
+          UpsertInvoice =
+            fun i ->
+                InvoiceStore.upsertInvoice handleError conn clock i
+                |> Result.mapError (fun ex ->
+                    if InvoiceStore.isMissingSupplier ex then SupplierGone i.SupplierId else toInvoiceError ex)
           LoadTombstones = fun () -> InvoiceStore.getTombstones handleError conn ctx.GetInvoiceTombstones () |> Result.mapError toInvoiceError
           SaveTombstone = fun t -> InvoiceStore.saveTombstone handleError conn t |> Result.mapError toInvoiceError
           RemoveTombstone = fun s r -> InvoiceStore.removeTombstone handleError conn s r |> Result.mapError toInvoiceError
@@ -94,6 +100,11 @@ let private withFake (test: Deps -> unit) =
 
     let key (i: ValidInvoice) = SupplierId.value i.SupplierId, InvoiceReference.value i.Reference
 
+    // withReal seeds exactly one supplier, and the Invoices foreign key refuses a write naming any
+    // other. A fake that accepted every supplier id would be returning Ok where the store returns
+    // SupplierGone - the drift this suite exists to catch.
+    let knownSuppliers = set [ "1" ]
+
     let deps: Deps =
         { LoadInvoices =
             fun cutoff ->
@@ -103,11 +114,14 @@ let private withFake (test: Deps -> unit) =
                 | Some c -> Ok(all |> List.filter (fun i -> i.Invoice.MessageReceivedAt >= ScanCutoff.value c))
           UpsertInvoice =
             fun invoice ->
-                invoices.RemoveAll(fun i -> key i.Invoice = key invoice) |> ignore
-                nextId <- nextId + 1
-                let stored = { Id = InvoiceId.create (string nextId) |> orFail; Invoice = invoice; ScannedAt = DateTime(2026, 6, 1) }
-                invoices.Add stored
-                Ok stored
+                if not (Set.contains (SupplierId.value invoice.SupplierId) knownSuppliers) then
+                    Error(SupplierGone invoice.SupplierId)
+                else
+                    invoices.RemoveAll(fun i -> key i.Invoice = key invoice) |> ignore
+                    nextId <- nextId + 1
+                    let stored = { Id = InvoiceId.create (string nextId) |> orFail; Invoice = invoice; ScannedAt = DateTime(2026, 6, 1) }
+                    invoices.Add stored
+                    Ok stored
           LoadTombstones = fun () -> Ok(List.ofSeq tombstones)
           SaveTombstone =
             fun t ->
@@ -178,6 +192,30 @@ let ``the cutoff filter hides an invoice whose message is older`` (name: string)
         d.UpsertInvoice({ invoice "NEW" with MessageReceivedAt = DateTime(2026, 5, 30) }) |> orFail |> ignore
         let inWindow = d.LoadInvoices(Some(ScanCutoff.ofStartOfDay (DateTime(2026, 5, 1)))) |> orFail
         Assert.Equal<string list>([ "NEW" ], inWindow |> List.map (fun i -> InvoiceReference.value i.Invoice.Reference)))
+
+/// requirements.md: "WHEN a scan finds an invoice whose supplier has since been deleted THE SYSTEM
+/// SHALL report it as a problem rather than storing an invoice with no supplier."
+///
+/// ScanForInvoicesWorkflow.step has a dedicated non-fatal branch for `Error (SupplierGone _)` -
+/// record one problem for that message and carry on - and every other InvoiceError from the upsert
+/// is fatal to the whole scan. So which of the two the dependency returns decides whether one
+/// deleted supplier costs one row or the entire run, and it is exactly the shape a fake must not
+/// invent: this case is what stops the workflow's unit suite being green over a binding that
+/// cannot produce SupplierGone at all.
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``an upsert whose supplier row is gone reports SupplierGone, not an undifferentiated store failure`` (name: string) =
+    run name (fun d ->
+        // supplier 2 is not in the store: withReal seeds only supplier 1, and so does withFake.
+        let orphan = { invoice "INV-ORPHAN" with SupplierId = SupplierId.create "2" |> orFail }
+
+        match d.UpsertInvoice orphan with
+        | Error(SupplierGone id) -> Assert.Equal("2", SupplierId.value id)
+        | Error other -> Assert.Fail($"expected SupplierGone, got {other}")
+        | Ok _ -> Assert.Fail("expected the write to be refused - there is no supplier 2")
+
+        // and nothing was stored for it
+        Assert.Empty(d.LoadInvoices None |> orFail))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]

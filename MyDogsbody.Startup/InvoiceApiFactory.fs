@@ -48,10 +48,21 @@ let createInvoiceApi
             InvoiceStore.getInvoices handleError conn databaseContext.GetInvoices cutoff
             |> Result.mapError toInvoiceError
 
+    /// The one adapter failure this area translates to a NAMED domain case rather than to the
+    /// catch-all: a write refused because the supplier row is gone. `ScanForInvoicesWorkflow.step`
+    /// records `SupplierGone` as that message's problem and carries on, while every other
+    /// InvoiceError from the upsert ends the whole scan - so flattening this one to
+    /// `InvoiceStoreFailed` meant a supplier deleted mid-scan killed the run instead of costing one
+    /// row (requirements.md: "WHEN a scan finds an invoice whose supplier has since been deleted THE
+    /// SYSTEM SHALL report it as a problem rather than storing an invoice with no supplier").
     let upsertInvoice: UpsertInvoice =
         fun invoice ->
             InvoiceStore.upsertInvoice handleError conn getCurrentTime invoice
-            |> Result.mapError toInvoiceError
+            |> Result.mapError (fun ex ->
+                if InvoiceStore.isMissingSupplier ex then
+                    SupplierGone invoice.SupplierId
+                else
+                    toInvoiceError ex)
 
     let deleteFromLedger: DeleteInvoice =
         fun invoiceId ->

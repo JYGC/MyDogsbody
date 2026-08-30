@@ -580,6 +580,23 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    single scan (`matchSupplier` only matches a loaded supplier and the upsert is in the same
    scan); the guard exists for a supplier deleted mid-scan by another process, and reuses an
    existing cause rather than adding a ninth requirements.md did not enumerate.
+
+   **PR #18 round 9: the guard needed a producer, and had none.** `scanForInvoices` reads
+   `loadSuppliers` once at the start and matches every message against that snapshot, so a
+   supplier deleted while the ~60 s scan runs still matches — and the upsert then hits the
+   `Invoices → Suppliers` foreign key. `InvoiceApiFactory` mapped every store failure through
+   `toInvoiceError`, so that arrived as `InvoiceStoreFailed`, which `step` treats as **fatal**:
+   one deleted supplier ended the whole run, discarded every problem gathered so far, and reset
+   the account's watermarks — instead of costing one row. Nothing in production could construct
+   `SupplierGone`; the branch and its unit test were reachable only from tests. Closed by
+   `InvoiceStore.isMissingSupplier` (SQLITE_CONSTRAINT_FOREIGNKEY, extended code 787, walked
+   through the `AggregateException` `runSync` wraps it in) and one branch in the factory's
+   `upsertInvoice`. The extended code, not the primary 19, is what is read: 19 covers unique and
+   check violations too, and calling one of those "the supplier is gone" would record the wrong
+   problem *and* let a genuinely broken write pass as non-fatal. `Invoices` and
+   `InvoiceTombstones` each declare exactly one foreign key, so a 787 on either is unambiguous.
+   The predicate lives in the store because it is SQLite knowledge — swap the store and it goes
+   with it — and returns `bool`, so no domain type reaches the outer ring.
 14. **`MailFolderReader` gets a streaming mbox reader — Phase 14, forced by the Phase 12
    measurement.** The reader change #3 shipped buffered each folder file whole and refused
    anything a Latin1 string cannot hold (~1 GiB); `read`'s `| Error _ -> []` then dropped that

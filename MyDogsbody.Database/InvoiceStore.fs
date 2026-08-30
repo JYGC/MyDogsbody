@@ -47,6 +47,45 @@ let private inTransaction (connection: SqliteConnection) (work: SqliteTransactio
     finally
         connection.Close()
 
+/// SQLITE_CONSTRAINT_FOREIGNKEY - the extended result code SQLite reports for a foreign-key
+/// violation. (The primary code, 19, is SQLITE_CONSTRAINT and covers unique and check violations
+/// too, so it is the extended one that identifies this.)
+[<Literal>]
+let private ForeignKeyViolation = 787
+
+/// Whether a failed write failed because the supplier row it referenced is not there any more.
+///
+/// `Invoices` and `InvoiceTombstones` each declare exactly one foreign key - `SupplierId` - so a
+/// foreign-key violation on a write to either says precisely that and nothing else. The
+/// composition root turns it into the domain's `SupplierGone`, which
+/// `ScanForInvoicesWorkflow.step` records as that one message's problem and carries on past;
+/// requirements.md asks for exactly that - "WHEN a scan finds an invoice whose supplier has since
+/// been deleted THE SYSTEM SHALL report it as a problem rather than storing an invoice with no
+/// supplier."
+///
+/// Without it the violation arrived as an undifferentiated `InvoiceStoreFailed`, which the same
+/// `step` treats as FATAL: one supplier deleted from the suppliers page while a scan was running
+/// (measured at ~60 s, so the window is wide open, and the page stays reachable throughout) ended
+/// the whole run with "Failed to store invoice.", discarded every problem the scan had gathered,
+/// and reset the account's watermarks. The `SupplierGone` branch and its unit test existed from the
+/// start; nothing in production could reach them.
+///
+/// Kept here rather than at the composition root because it is SQLite knowledge: swapping the
+/// store swaps this with it, and the factory's one line stays as it is.
+///
+/// The chain is walked rather than probed at a fixed depth - `runSync` (Async.AwaitTask) wraps the
+/// SqliteException in an AggregateException, so the real one sits two levels down today, and
+/// nothing should depend on it staying there.
+let isMissingSupplier (ex: MyDogsbodyException) : bool =
+    let rec search (candidate: exn) : bool =
+        match candidate with
+        | null -> false
+        | :? SqliteException as sqlite when sqlite.SqliteExtendedErrorCode = ForeignKeyViolation -> true
+        | :? AggregateException as aggregate -> aggregate.InnerExceptions |> Seq.exists search
+        | other -> search other.InnerException
+
+    search ex
+
 // ---------------- invoices ----------------
 
 let getInvoices

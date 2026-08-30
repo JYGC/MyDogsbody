@@ -36,17 +36,18 @@ Measured with `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and `--filt
 
 | Level | Count |
 | --- | --- |
-| Unit | 732 |
-| Integration | 272 |
-| Contract | 297 |
+| Unit | 738 |
+| Integration | 274 |
+| Contract | 299 |
 | E2E | 37 |
-| **Total** | **1338** |
+| **Total** | **1348** |
 
-Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+277**.
+Baseline before this change was **1061** (`thunderbird-account-selection` head), so **+287**.
 Phases 0–15 reached **1294**; PR #18's six review rounds added **+29** (see the round notes below);
 Phases 16–17 (watermark control — "Rescan everything", fatal-abort reset) add a further **+9**
 (6 workflow unit, 1 module-creator unit, 1 factory integration, 1 E2E); round 7 adds **+6**
-(5 workflow unit, 1 factory integration).
+(5 workflow unit, 1 factory integration); round 9 adds **+10** (6 unit, 2 integration, 1 contract
+theory over both implementations).
 
 ### Known flakes (pre-existing category, not introduced here)
 
@@ -198,6 +199,63 @@ open review comments at the start of the round and 0 at the end.
    adapter was bound to the *watermarks* collection at all. Added, with a `Scan`-leaves-the-row
    contrast in the same test; verified non-vacuous by temporarily wiring `RescanEverything` to
    `IncrementalScan`, which turns it red.
+
+### Review round 9 — `SupplierGone` had a branch, a message and a test, and no producer
+
+Round 8 was terminated by an API usage limit part-way through and left an uncommitted, unverified
+diff behind; round 9 re-derived the finding from scratch, reproduced it red at HEAD, and kept it.
+**0** open review comments at the start of the round and 0 at the end.
+
+1. **`InvoiceApiFactory.upsertInvoice` could not produce `SupplierGone`, so the one non-fatal
+   upsert failure was fatal.** `scanForInvoices` reads `loadSuppliers` once and matches every
+   message against that snapshot, so a supplier deleted while the scan runs (12.4 measured a scan
+   at ~60 s) still matches, and the upsert hits the `Invoices → Suppliers` foreign key. The
+   factory mapped every store failure through `toInvoiceError`, so it arrived as
+   `InvoiceStoreFailed` — and `ScanForInvoicesWorkflow.step` has exactly two upsert-failure
+   branches: `SupplierGone` records one problem for that message and carries on, *everything else*
+   sets `ScanAcc.Fatal`. So one deleted supplier ended the whole run, discarded every problem
+   gathered so far, and reset the account's watermarks. requirements.md asks for the opposite:
+   "WHEN a scan finds an invoice whose supplier has since been deleted THE SYSTEM SHALL report it
+   as a problem rather than storing an invoice with no supplier." Spec drift as well as a defect,
+   and the `SupplierGone` branch plus its workflow unit test were reachable only from tests.
+
+   Measured red at HEAD, both implementations of the shared contract suite, before the fix:
+   `real` → `expected SupplierGone, got InvoiceStoreFailed "Failed to store invoice."`;
+   `fake` → `expected the write to be refused - there is no supplier 2` (the fake accepted a
+   supplier id the real store's foreign key refuses — the drift a shared suite exists to catch).
+   Fixed by `InvoiceStore.isMissingSupplier` + one branch in the factory. design.md → *Decisions
+   taken* #13.
+
+2. **The new predicate's true path had no unit coverage** — only the two integration tests, which
+   cannot vary the exception shape. `isMissingSupplier` is a new pure function and CLAUDE.md asks
+   for the success path in isolation, so five unit cases were added over hand-built exception
+   chains: a violation at three depths, a **unique** violation (extended 2067, primary 19 — the
+   same primary code) staying false, and one where the foreign-key violation is not the first
+   entry in an `AggregateException`. Verified non-vacuous by mutation: reading `SqliteErrorCode =
+   19` instead of the extended code turns exactly the unique-violation case red, and deleting the
+   `AggregateException` branch turns exactly the sibling case red. (The three depth cases are
+   shape documentation, not discriminating — `AggregateException.InnerException` is
+   `InnerExceptions[0]`, so the generic chain walk already covers a single-inner aggregate.)
+
+**E2E for finding 1 is deliberately absent, and that is a harness gap, not an oversight.** The
+defect needs the supplier row to exist when `loadSuppliers` runs and to be gone when
+`upsertInvoice` runs — an interleaving inside one `InvoiceApi.Scan` call, which the black-box
+bUnit harness (`withInvoicesHarness`) has no seam to produce. The workflow half is covered at
+Unit, the binding half at Contract against the real store.
+
+**Deferred, out of scope — the main database's single shared `SqliteConnection` is not safe under
+the concurrent use this change makes reachable.** `DatabaseContextSetup.createDatabaseContext`
+constructs one `SqliteConnection` per process and every store function does `Open()` … `Close()`
+on that one instance, so two overlapping operations corrupt each other's transaction state. A
+throwaway probe (two threads, 40 upserts each, same `DatabaseContext`) failed **80 of 80** with
+`SQLite Error 1: 'cannot rollback - no transaction is active'`. It is **pre-existing** — the same
+shape as `SupplierStore` and `TemplateStore` from changes #1 and #2 — but this change widens the
+window from "a double-clicked Save" to "any main-database write during a ~60 s background scan",
+since every module creator runs its work through `Async.Start` and the settings pages stay live
+throughout. Fixing it means changing how the main database hands out connections (a fresh one per
+call, or a serialising lock) and touches every store above it, so it wants its own change folder —
+suggested `docs/changes/main-database-connection-sharing/` as a bugfix — rather than a review
+round.
 
 ## What landed
 

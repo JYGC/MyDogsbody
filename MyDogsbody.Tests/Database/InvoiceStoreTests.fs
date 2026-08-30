@@ -153,6 +153,97 @@ let ``scan problems are written, replaced per message, and cleared`` () =
         InvoiceStore.clearScanProblems handleError ctx.GetDatabaseConnection [ SourceMessageId.create "m1" |> orFail ] |> orFail
         Assert.Empty(InvoiceStore.getScanProblems handleError ctx.GetDatabaseConnection ctx.GetScanProblems () |> orFail))
 
+[<Fact; Trait("Level", "Integration")>]
+let ``an upsert naming a supplier that is not there is refused, and isMissingSupplier says so`` () =
+    withLedger (fun ctx ->
+        // supplier 2 was never inserted - the Invoices foreign key refuses the write
+        let orphan = { invoice "INV-ORPHAN" 10m with SupplierId = SupplierId.create "2" |> orFail }
+
+        match InvoiceStore.upsertInvoice handleError ctx.GetDatabaseConnection clock orphan with
+        | Error ex ->
+            Assert.Equal(ActionNames.MyDogsbody.Database.InvoiceStore.upsertInvoice, ex.ActionName)
+            Assert.Equal("Failed to store invoice.", ex.Message)
+            Assert.True(InvoiceStore.isMissingSupplier ex, "the foreign-key violation should be identified as a missing supplier")
+        | Ok _ -> Assert.Fail("expected the write to be refused")
+
+        Assert.Empty(InvoiceStore.getInvoices handleError ctx.GetDatabaseConnection ctx.GetInvoices None |> orFail))
+
+[<Fact; Trait("Level", "Integration")>]
+let ``isMissingSupplier is false for a store failure that is not a foreign-key violation`` () =
+    withLedger (fun ctx ->
+        // a real infrastructure failure: the table is gone, SQLite error 1, not a constraint
+        let connection = ctx.GetDatabaseConnection()
+        connection.Open()
+        use drop = connection.CreateCommand()
+        drop.CommandText <- "DROP TABLE Invoices;"
+        drop.ExecuteNonQuery() |> ignore
+        connection.Close()
+
+        match InvoiceStore.upsertInvoice handleError ctx.GetDatabaseConnection clock (invoice "INV-1" 10m) with
+        | Error ex ->
+            Assert.False(InvoiceStore.isMissingSupplier ex, "a missing table is not a missing supplier")
+            Assert.NotNull ex.InnerException
+        | Ok _ -> Assert.Fail("expected Error"))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``isMissingSupplier is false for a failure with no SQLite exception under it at all`` () =
+    let boom () : SqliteConnection = raise (InvalidOperationException "connection is down")
+
+    match InvoiceStore.upsertInvoice handleError boom clock (invoice "INV-1" 10m) with
+    | Error ex -> Assert.False(InvoiceStore.isMissingSupplier ex)
+    | Ok _ -> Assert.Fail("expected Error")
+
+/// SQLITE_CONSTRAINT_FOREIGNKEY / SQLITE_CONSTRAINT_UNIQUE. Both share primary code 19
+/// (SQLITE_CONSTRAINT), which is exactly why isMissingSupplier reads the EXTENDED one - a unique
+/// violation on (SupplierId, Reference) is a different fault with a different remedy, and calling
+/// it "the supplier is gone" would record the wrong problem and let a broken write pass as
+/// non-fatal.
+let private foreignKeyViolation () =
+    SqliteException("FOREIGN KEY constraint failed", 19, 787)
+
+let private uniqueViolation () =
+    SqliteException("UNIQUE constraint failed", 19, 2067)
+
+/// The chain walk, with no database: the store's own error path is asserted by the two
+/// integration tests above, but the walking itself has to hold for any depth and any wrapper -
+/// runSync's Async.AwaitTask puts the real exception inside an AggregateException today and
+/// nothing should depend on it staying exactly there.
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("directly under the MyDogsbodyException", 0)>]
+[<InlineData("inside an AggregateException - the runSync shape", 1)>]
+[<InlineData("two wrappers down", 2)>]
+let ``isMissingSupplier finds a foreign-key violation at any depth`` (_shape: string) (depth: int) =
+    let wrapped: exn =
+        match depth with
+        | 0 -> foreignKeyViolation ()
+        | 1 -> AggregateException("one", foreignKeyViolation ()) :> exn
+        | _ -> AggregateException("outer", AggregateException("inner", foreignKeyViolation ())) :> exn
+
+    let ex = MyDogsbodyException(ActionNames.MyDogsbody.Database.InvoiceStore.upsertInvoice, "Failed to store invoice.", wrapped)
+
+    Assert.True(InvoiceStore.isMissingSupplier ex)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``isMissingSupplier is false for a constraint violation that is not the foreign key`` () =
+    let ex =
+        MyDogsbodyException(
+            ActionNames.MyDogsbody.Database.InvoiceStore.upsertInvoice,
+            "Failed to store invoice.",
+            AggregateException("one", uniqueViolation ())
+        )
+
+    Assert.False(InvoiceStore.isMissingSupplier ex)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``isMissingSupplier sees the violation even when a sibling in the AggregateException does not match`` () =
+    let aggregate =
+        AggregateException("two", [| uniqueViolation () :> exn; foreignKeyViolation () :> exn |])
+
+    let ex =
+        MyDogsbodyException(ActionNames.MyDogsbody.Database.InvoiceStore.upsertInvoice, "Failed to store invoice.", aggregate)
+
+    Assert.True(InvoiceStore.isMissingSupplier ex)
+
 // ============================ 7.2 Unit - error paths ============================
 
 [<Fact; Trait("Level", "Unit")>]
