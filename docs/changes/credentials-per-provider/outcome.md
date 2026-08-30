@@ -197,13 +197,18 @@ module as `MyDogsbody.Infrastructure.Google.GoogleCalendar` — is resolved. The
 | `MyDogsbody.UI.Portal` `.fsproj` | Exactly one `ProjectReference`. |
 | `MyDogsbody/MainWindow.xaml.cs` | Untouched (`git status` clean for `MyDogsbody/`). |
 
-### Task 5.7 — running the app — is manual coverage
+### Task 5.7 — running the app — manual coverage, performed
 
-Driving the real WPF `BlazorWebView` window is out of the suite's scope (the established convention).
-The change was **not** verified by launching the app. What *is* verified: the WPF host
-(`MyDogsbody.csproj`) builds clean; `Startup.fs` no longer constructs a `Credentials.db` context or
-registers `CredentialApi` (code inspection + the `Startup.fs` diff); `Shell.fs` no longer routes
-`/settings/credentials`; `SettingsComponents.fs` no longer renders the Credentials nav entry. A
-manual pass (open the app, confirm every remaining settings page renders, confirm no Credentials
-entry in the nav, confirm no `Credentials.db` appears in the working directory) is recommended
-before merge but was not performed in this session.
+Driving the real WPF `BlazorWebView` window is out of the suite's scope (the established
+convention), so this was a manual pass. `dotnet run --project MyDogsbody/MyDogsbody.csproj`:
+
+- The app launched and closed cleanly — exit 0, no stack trace. A missing `CredentialApi`
+  registration or a `TypeInitializationException` in `Startup` (the module opens its databases the
+  moment anything touches it) would have thrown; nothing did.
+- It created `MyDogsbody.db` and `Thunderbird.db` in the working directory (the repo root) and
+  **no `Credentials.db`** — not at the root, not under `bin\`. `Logging.db` was not created either,
+  which means nothing was logged as an exception during the run.
+- The settings navigation listed Suppliers / Mail accounts / Scan windows / Logs → Exceptions, with
+  **no Credentials entry**. Every remaining page (`/`, `/settings`, `/settings/suppliers`,
+  `/settings/mail-accounts`, `/settings/scan-windows`, `/settings/exceptionlogs`, `/invoices`)
+  rendered without an error boundary or `MudAlert`.

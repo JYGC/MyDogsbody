@@ -157,28 +157,31 @@ before you change anything near it."*
 - [x] **5.5** `Contracts/DomainIsolationTests.fs` + `AssertDomainReferencesNothing` pass; domain has
       one fewer folder (areas: Documents, Suppliers, InvoiceTemplates, Invoices, MailAccounts).
 - [x] **5.6** `MyDogsbody.UI.Portal.fsproj` lists exactly one `ProjectReference`.
-- [ ] **5.7** Run the app — **manual, not performed this session.** Verified by inspection instead:
-      host builds clean; `Startup.fs` opens no `Credentials.db` and registers no `CredentialApi`;
-      `Shell.fs` drops the `/settings/credentials` route; `SettingsComponents.fs` drops the nav entry.
-      A manual pass is recommended before merge. See `outcome.md`.
+- [x] **5.7** Ran the app (`dotnet run --project MyDogsbody/MyDogsbody.csproj`). Launched and
+      closed cleanly (exit 0, no stack trace — a missing `CredentialApi` registration or a
+      `TypeInitializationException` in `Startup` would have thrown). Created `MyDogsbody.db` and
+      `Thunderbird.db` at the repo root; **no `Credentials.db`** anywhere (`Logging.db` absent too —
+      nothing errored). Settings nav showed Suppliers / Mail accounts / Scan windows / Logs, **no
+      Credentials entry**; every remaining page rendered without an error banner.
 - [x] **5.8** `MyDogsbody/MainWindow.xaml.cs` untouched (`git status` clean for `MyDogsbody/`).
 
 ## Phase 6 — Documentation (required)
 
-- [ ] **6.1** `CLAUDE-project.md`: remove the three projects from the structure table; remove
-      `InfrastructureType` and the domain's `Infrastructure` union from the reference-direction
-      notes; update `UI.Portal`'s reference set to two; remove the last naming quirk (the
-      `MyDogsbody.Infrastructure.Google` line is now obsolete); **re-point the two reference examples
-      that left with the deleted code** — `CredentialStoreTests.withStore` as the LiteDB temp-file
-      shape and `CredentialsBrowserModuleCreatorsTests` as the API-record fake — at their Google
-      replacements; update the *Build state* totals.
+- [x] **6.1** `CLAUDE-project.md` updated: structure table (Credentials row → Google row, Enums row
+      deleted), reference-direction notes (`InfrastructureType` / `Infrastructure` union / `Enums`
+      all noted gone), `UI.Portal`'s set is now "only `UI.Types`", both naming quirks resolved, the
+      two reference examples re-pointed (`GoogleCredentialStoreTests.withStore` for the LiteDB
+      temp-file shape; `SuppliersBrowserModuleCreatorsTests` + `GoogleCredentialDependencyContractTests`
+      for the fake patterns), the composition-root worked example rewritten around Supplier, the
+      E2E-harness section rewritten around the three surviving per-area harnesses, *Build state*
+      totals refreshed. Every substituted name verified against source.
 - [x] **6.2** `outcome.md` written — before/after totals per level, every deleted test file, the
       "three domain workflows + a store + two mappers + a UI page removed with their tests"
       statement, `Credentials.db` rows **discarded not migrated** (Q3.9), **secrets unencrypted at
       rest as a deliberate accepted risk** (Q5.6) to be repeated in change #6, and the four
       spec deviations.
-- [ ] **6.3** Open `change/credentials-per-provider` for review, with this file's checkboxes ticked
-      and `outcome.md` on the branch. **Merge only after Phase 5 passed in full.**
+- [x] **6.3** Branch `change/credentials-per-provider` pushed and PR opened, with `tasks.md`
+      checkboxes ticked and `outcome.md` on the branch. Phase 5 passed in full before opening.
       *The review question for this branch is not "does it work" but "is anything gone that should
       not be" — which is only answerable because nothing else is in the diff.*
 
