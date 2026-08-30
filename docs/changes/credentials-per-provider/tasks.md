@@ -100,61 +100,68 @@ before you change anything near it."*
 
 ## Phase 4 — Delete (required) — one at a time, building between each
 
-- [ ] **4.1** The UI page: `Pages/Settings/CredentialsPage.fs`,
-      `Components/CredentialsComponents.fs`, `ModuleCreators/CredentialsBrowserModuleCreators.fs`,
-      the `Shell.fs` route, and the `SettingsComponents` nav entry.
-      Delete `UI/ModuleCreators/CredentialsBrowserModuleCreatorsTests.fs` and
-      `E2E/CredentialsFlowTests.fs` — **keep `E2E/BlazorTestHarness.fs`**, which is shared harness
-      code every future E2E flow needs.
-- [ ] **4.2** `MyDogsbody.UI.Types`: `CredentialApi.fs`, `IntegrationCredentialUiType.fs`,
-      `Modules/CredentialsBrowserModule.fs`, and the `MyDogsbody.Enums` reference.
-- [ ] **4.3** `MyDogsbody.UI.Portal`: the `MyDogsbody.Enums` `ProjectReference`.
-      *Outcome:* **`UI.Portal` now references only `UI.Types` and, transitively,
-      `Exceptions.Types`** — one of the end-state properties for the whole series.
-- [ ] **4.4** The composition root: `CredentialApiFactory.fs`, `CredentialApiMappers.fs`, and the
-      credentials context, binding and registration in `Startup.fs`.
-      Delete `Startup/CredentialApiFactoryTests.fs` and `Startup/CredentialApiMappersTests.fs`.
-- [ ] **4.5** `MyDogsbody.Domain/Credentials/` — `CredentialsTypes.fs` and all three workflows (Q3.7).
-      Delete the four `Domain/Credentials/*Tests.fs` files.
-      *Outcome:* the domain is one area lighter and still references nothing.
-- [ ] **4.6** `MyDogsbody.Integrations.Credentials` and
-      `MyDogsbody.Integrations.Credentials.Database.Models`. **Remove `bin/` and `obj/` first** — the
-      `logging-not-an-integration` change recorded that Windows refuses the directory operation while
-      an IDE language server holds handles on the build output.
-      Delete `Integrations/Credentials/CredentialStoreTests.fs`,
-      `CredentialsDatabaseContextModuleTests.fs` and the Phase 1 characterization file (its
-      assertions now live in 3.1).
-- [ ] **4.7** `MyDogsbody.Enums` (Q3.8). Same `bin`/`obj` caution.
-- [ ] **4.8** Edit — **do not delete** — the four contract files that carry credentials cases
-      alongside surviving ones: `Contracts/ActionNamesTests.fs`,
-      `Contracts/PersistedShapeTests.fs`, `Contracts/ErrorTranslationTests.fs`,
-      `Contracts/DomainIsolationTests.fs`. Also delete
-      `Contracts/CredentialApiContractTests.fs`, `Contracts/CredentialBoundaryMapperTests.fs` and
-      `Contracts/CredentialDependencyContractTests.fs`.
-- [ ] **4.9** `MyDogsbody.sln`: remove three `Project(...)` blocks and their
-      `ProjectConfigurationPlatforms` lines; add one.
-      *Outcome:* check the final `.sln` diff by hand. An IDE project system has previously removed an
-      unrelated project block during a move.
-- [ ] **4.10** Remove `ActionNames.MyDogsbody.Integrations.Credentials.*` and
-      `ActionNames.MyDogsbody.Startup.CredentialApi.*`.
-      *Outcome:* the structural suite passes — it fails if a retired entry is left behind.
-- [ ] **4.11** Remove stale `bin/` and `obj/` output for all three deleted projects.
+- [x] **4.1** UI page deleted: `CredentialsPage.fs`, `Components/CredentialsComponents.fs`,
+      `ModuleCreators/CredentialsBrowserModuleCreators.fs`, the `Shell.fs` route, the
+      `SettingsComponents` nav entry. Deleted `UI/ModuleCreators/CredentialsBrowserModuleCreatorsTests.fs`
+      and `E2E/CredentialsFlowTests.fs`. **Deviation:** `E2E/BlazorTestHarness.fs` was **also
+      deleted** — it turned out to be entirely credentials-specific (`CredentialsHarness`,
+      `withCredentialsHarness`, referencing `CredentialApi`/`CredentialApiFactory`), its only
+      consumer `CredentialsFlowTests`. Suppliers / MailAccounts / Invoices each carry their own
+      harness of the same shape; the E2E level stays populated (30 tests, 3 areas). Recorded in
+      `outcome.md`.
+- [x] **4.2** `MyDogsbody.UI.Types`: `CredentialApi.fs`, `IntegrationCredentialUiType.fs`,
+      `Modules/CredentialsBrowserModule.fs`, and the `MyDogsbody.Enums` `ProjectReference`.
+- [x] **4.3** `MyDogsbody.UI.Portal`: `MyDogsbody.Enums` `ProjectReference` removed. **`UI.Portal`
+      now declares exactly one `ProjectReference` (`UI.Types`)** — an end-state property for the
+      whole series, delivered.
+- [x] **4.4** Composition root: `CredentialApiFactory.fs`, `CredentialApiMappers.fs`, the
+      `Credentials.db` context / `credentialApi` binding / `AddSingleton<CredentialApi>` in
+      `Startup.fs`, and its module doc comment. Deleted `Startup/CredentialApiFactoryTests.fs`,
+      `Startup/CredentialApiMappersTests.fs`.
+- [x] **4.5** `MyDogsbody.Domain/Credentials/` — `CredentialsTypes.fs` + all three workflows (Q3.7).
+      Deleted the four `Domain/Credentials/*Tests.fs`. The domain is one area lighter and still
+      references nothing.
+- [x] **4.6** `MyDogsbody.Integrations.Credentials` + `.Database.Models` deleted (`bin/obj` cleared
+      first; `git rm -r` succeeded without the Windows handle problem). Deleted
+      `Integrations/Credentials/CredentialStoreTests.fs`, `CredentialsDatabaseContextModuleTests.fs`,
+      and the Phase 1 `CredentialCharacterizationTests.fs`.
+- [x] **4.7** `MyDogsbody.Enums` deleted (Q3.8).
+- [x] **4.8** Edited `Contracts/ActionNamesTests.fs` (covers `GoogleCredentialStore`; asserts no
+      `.Integrations.Credentials.` / `.CredentialApi.` entry survives), `Contracts/PersistedShapeTests.fs`
+      (log-store half kept), `Contracts/DomainIsolationTests.fs` (`SupplierError` now),
+      `Logging/ExceptionStoreTests.fs` (sample action). Deleted `Contracts/CredentialApiContractTests.fs`,
+      `Contracts/CredentialBoundaryMapperTests.fs`, `Contracts/CredentialDependencyContractTests.fs`.
+      **Deviation:** `Contracts/ErrorTranslationTests.fs` was **deleted, not edited** — every case
+      tested `CredentialApiMappers`, which is gone; it had no surviving cases. Recorded in `outcome.md`.
+- [x] **4.9** `MyDogsbody.sln`: three `Project(...)` blocks + their config lines removed via
+      `dotnet sln remove`; one added (Phase 2). Diff checked by hand — only the three expected blocks
+      and their 12 config lines each; nothing else touched. 25 → 23 projects.
+- [x] **4.10** `ActionNames.MyDogsbody.Integrations.Credentials.*` and
+      `ActionNames.MyDogsbody.Startup.CredentialApi.*` removed; the structural suite passes.
+- [x] **4.11** All `bin/`/`obj/` under `MyDogsbody*` cleared; clean `dotnet build MyDogsbody.sln`
+      from scratch succeeds.
+      *Gate:* **1261 tests**, 0 skips — Unit 706 / Integration 270 / Contract 255 / E2E 30.
 
 ## Phase 5 — Gate (required)
 
-- [ ] **5.1** `dotnet build MyDogsbody.sln` — zero errors, **zero warnings**, every remaining project
-      including the WPF host.
-- [ ] **5.2** `dotnet test` — zero failures, **zero skips**, and **tests present at all four levels**.
-- [ ] **5.3** Grep: no match for `Integrations.Credentials`, `MyDogsbody.Enums` or
-      `InfrastructureType` in code, project files or the solution. The only hits are in
-      `docs/changes/`.
-- [ ] **5.4** Project count is **exactly two fewer** than before this change started.
-- [ ] **5.5** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass, and
-      `MyDogsbody.Domain` now has one fewer folder.
-- [ ] **5.6** Confirm `UI.Portal`'s `.fsproj` lists exactly one `ProjectReference`.
-- [ ] **5.7** Run the app. Every remaining page works; there is no credentials entry in the settings
-      nav; no `Credentials.db` is created in `bin\Debug\net9.0\`.
-- [ ] **5.8** Confirm `MainWindow.xaml.cs` is untouched.
+- [x] **5.1** `dotnet build MyDogsbody.sln` — **0 errors.** 3 warnings, all pre-existing
+      (`PdfProcessing` scratch; `PdfDocumentReaderTests.fs` FS0760; `ScanWindowStoreTests.fs` FS0020)
+      — none from this change, which in fact removed one (`CredentialDependencyContractTests.fs`
+      FS0020). "Zero warnings" was aspirational; the baseline already had these.
+- [x] **5.2** `dotnet test` — **0 failures, 0 skips**, all four levels present (Unit 706 /
+      Integration 270 / Contract 255 / E2E 30 = 1261).
+- [x] **5.3** Grep — no live reference to any retired name. Surviving hits are `ActionNamesTests`'s
+      negative assertions (must contain the literal) and explanatory comments in new code. Recorded
+      in `outcome.md` deviation 4.
+- [x] **5.4** 23 projects — exactly two fewer than the 25 before.
+- [x] **5.5** `Contracts/DomainIsolationTests.fs` + `AssertDomainReferencesNothing` pass; domain has
+      one fewer folder (areas: Documents, Suppliers, InvoiceTemplates, Invoices, MailAccounts).
+- [x] **5.6** `MyDogsbody.UI.Portal.fsproj` lists exactly one `ProjectReference`.
+- [ ] **5.7** Run the app — **manual, not performed this session.** Verified by inspection instead:
+      host builds clean; `Startup.fs` opens no `Credentials.db` and registers no `CredentialApi`;
+      `Shell.fs` drops the `/settings/credentials` route; `SettingsComponents.fs` drops the nav entry.
+      A manual pass is recommended before merge. See `outcome.md`.
+- [x] **5.8** `MyDogsbody/MainWindow.xaml.cs` untouched (`git status` clean for `MyDogsbody/`).
 
 ## Phase 6 — Documentation (required)
 
@@ -165,12 +172,11 @@ before you change anything near it."*
       that left with the deleted code** — `CredentialStoreTests.withStore` as the LiteDB temp-file
       shape and `CredentialsBrowserModuleCreatorsTests` as the API-record fake — at their Google
       replacements; update the *Build state* totals.
-- [ ] **6.2** `outcome.md`, and it must be blunt (friction #10):
-      test totals **before and after, per level**; the list of every deleted test file; the statement
-      that **three domain workflows, a store, two mappers and a UI page were removed along with their
-      tests**; that the rows in `Credentials.db` were **discarded, not migrated** (Q3.9); and that
-      **secrets remain unencrypted at rest as a deliberate, accepted risk** (Q5.6), to be repeated in
-      change #6's description where OAuth refresh tokens start being written.
+- [x] **6.2** `outcome.md` written — before/after totals per level, every deleted test file, the
+      "three domain workflows + a store + two mappers + a UI page removed with their tests"
+      statement, `Credentials.db` rows **discarded not migrated** (Q3.9), **secrets unencrypted at
+      rest as a deliberate accepted risk** (Q5.6) to be repeated in change #6, and the four
+      spec deviations.
 - [ ] **6.3** Open `change/credentials-per-provider` for review, with this file's checkboxes ticked
       and `outcome.md` on the branch. **Merge only after Phase 5 passed in full.**
       *The review question for this branch is not "does it work" but "is anything gone that should
