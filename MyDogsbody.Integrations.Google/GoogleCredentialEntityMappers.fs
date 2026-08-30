@@ -4,9 +4,9 @@
 /// Pure - no I/O, no handleError, no LiteDB calls. GoogleCredentialStore does the talking; this
 /// file only translates, so it can be asserted field-for-field without a database.
 ///
-/// There is no InfrastructureType here and there is no toInfrastructureType / fromInfrastructureType
-/// pair: the retired shared store needed a discriminator because one collection held every
-/// provider's rows. This collection holds only Google's, so the database is the provider.
+/// There is no provider discriminator here and no enum-translation pair: the retired shared store
+/// needed one because a single collection held every provider's rows. This collection holds only
+/// Google's, so the database is the provider.
 module MyDogsbody.Integrations.Google.GoogleCredentialEntityMappers
 
 open LiteDB

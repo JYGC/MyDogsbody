@@ -29,7 +29,7 @@ let private withLogStore (test: (unit -> MyDogsbody.Logging.Database.Types.Excep
 let private anEntry: ExceptionLogEntry =
     {
         Message = "Failed to insert new credential."
-        ActionName = ActionNames.MyDogsbody.Integrations.Credentials.CredentialStore.insertOne
+        ActionName = ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.insertOne
         ExceptionDetails = "System.InvalidOperationException: disk gone"
         CreatedDate = DateTime(2026, 8, 5, 14, 30, 0)
     }

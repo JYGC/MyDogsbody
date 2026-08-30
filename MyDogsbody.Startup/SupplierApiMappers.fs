@@ -17,12 +17,11 @@ open MyDogsbody.UI.Types
 
 /// UI string -> domain union.
 ///
-/// Returns Result rather than failing loudly the way CredentialApiMappers.toInfrastructure does.
-/// That mapper is handed InfrastructureType, a C# enum the UI can only produce declared members
-/// of; this one is handed a plain string, so an unrecognised value is reachable input rather than
-/// an impossible one. SupplierApi promises Result<_, MyDogsbodyException>, and raising here broke
-/// that promise in the one place nothing catches it - the UI calls the API from Async.Start, so
-/// the exception surfaced as neither an alert nor a log entry.
+/// Returns Result rather than failing loudly: this mapper is handed a plain string, so an
+/// unrecognised value is reachable input rather than an impossible one. SupplierApi promises
+/// Result<_, MyDogsbodyException>, and raising here broke that promise in the one place nothing
+/// catches it - the UI calls the API from Async.Start, so the exception surfaced as neither an
+/// alert nor a log entry.
 let private toMatcherKind (kind: string) : Result<MatcherKind, string> =
     match kind with
     | "Sender" -> Ok Sender

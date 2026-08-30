@@ -7,7 +7,7 @@ open MyDogsbody.Exceptions.Types
 /// application at startup, and a test substitutes it by building a record literal.
 ///
 /// A write to GetAccounts' backing store reloads on the next GetAccounts call - the UI decides
-/// when to reload, same shape as CredentialApi/SupplierApi.
+/// when to reload, same shape as SupplierApi.
 type MailAccountApi =
     {
         GetProfileRoot: unit -> Result<string option, MyDogsbodyException>

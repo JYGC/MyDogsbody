@@ -13,8 +13,8 @@ open MyDogsbody.Database.Migrations
 open MyDogsbody.Startup
 open MyDogsbody.UI.Types
 
-/// Same shape as E2E/BlazorTestHarness.fs's CredentialsHarness, over the main SQLite database
-/// instead of Credentials.db.
+/// A bUnit TestContext subclass wired for MudBlazor (AddMudServices, JSRuntimeMode.Loose), over
+/// the main SQLite database. Each E2E area carries its own harness of this shape.
 type SuppliersHarness(supplierApi: SupplierApi, logged: ResizeArray<MyDogsbodyException>) =
     inherit TestContext()
 

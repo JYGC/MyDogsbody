@@ -31,7 +31,6 @@ type Shell() =
             HomePage.getDefaultRoute()
             HomePage.getRoute()
             SettingsPage.getRoute()
-            CredentialsPage.getRoute()
             SuppliersPage.getRoute()
             MailAccountsPage.getRoute()
             ScanWindowsPage.getRoute()
