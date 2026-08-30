@@ -1,10 +1,10 @@
 /// The top mapping point: domain type <-> MyDogsbody.UI.Types record, plus the translation
 /// between the two error types.
 ///
-/// A deliberate cost, same as CredentialApiMappers: a workflow's StoredSupplier could be handed
-/// to the UI directly, saving this file - but that would put MyDogsbody.Domain in UI.Portal's
-/// reference graph. Keeping the UI on its own records is what makes the domain unreachable from
-/// the screen rather than merely unused there.
+/// A deliberate cost: a workflow's StoredSupplier could be handed to the UI directly, saving
+/// this file - but that would put MyDogsbody.Domain in UI.Portal's reference graph. Keeping the
+/// UI on its own records is what makes the domain unreachable from the screen rather than merely
+/// unused there.
 ///
 /// Total functions with no module-level bindings, so a test reaches them without Startup.fs
 /// opening a database.

@@ -212,3 +212,45 @@ convention), so this was a manual pass. `dotnet run --project MyDogsbody/MyDogsb
   **no Credentials entry**. Every remaining page (`/`, `/settings`, `/settings/suppliers`,
   `/settings/mail-accounts`, `/settings/scan-windows`, `/settings/exceptionlogs`, `/invoices`)
   rendered without an error boundary or `MudAlert`.
+
+---
+
+## PR review — round 1
+
+One finding, fixed in a single commit; the Phase 5 tables above are left as the historical
+record of what Phase 5 measured.
+
+**Finding (reviewer): the new bottom boundary mapper had no field-for-field contract test.**
+`GoogleCredentialEntityMappers.fs` is new code in this change and is *the* bottom mapping point of
+the Google integration, but its only coverage was transitive, through `GoogleCredentialStore` and
+the persisted-shape / dependency-contract suites. CLAUDE.md is explicit — *"Every mapper at a ring
+boundary is asserted field-for-field in both directions, with deliberate renames asserted as
+renames"* and *"Adding … a boundary mapper … means adding its contract test in the same change."*
+The retired `Contracts/CredentialBoundaryMapperTests.fs` had exactly this for `CredentialEntityMappers`;
+its bottom-mapper half was not carried over (only its `InfrastructureType` half was genuinely
+obsolete).
+
+Fix: added `Contracts/GoogleCredentialBoundaryMapperTests.fs` (Contract, 9 cases) — `toNewEntity`
+and `toStoredCredential` field-for-field, both `toStoredCredential` null-property `Error` branches,
+`applyEdit` (identifier preserved), `toObjectId`, a byte-for-byte pure round trip, and the two
+deliberate renames asserted as renames (integration `Secret` / `Username` ⇄ persisted
+`Credentials` / `ExternalUsername`). The mapper was already correct — verified by probe before the
+test was written — so these lock in behaviour rather than fixing a bug.
+
+Also scrubbed two comments that named symbols this change deleted: `MyDogsbody.Domain/Result.fs`
+(`CredentialError` → `SupplierError`, an illustrative type) and `MyDogsbody.Startup/SupplierApiMappers.fs`
+(dropped a `same as CredentialApiMappers` cross-reference — the same file's other `CredentialApiMappers`
+mention was already removed by this change, this one was missed).
+
+### Totals after round 1
+
+| Level | Phase 5 gate | After round 1 | Δ (round 1) |
+| --- | --- | --- | --- |
+| Unit | 706 | 706 | — |
+| Integration | 270 | 270 | — |
+| Contract | 255 | 264 | +9 |
+| E2E | 30 | 30 | — |
+| **Total** | **1261** | **1270** | **+9** |
+
+Build: 0 errors, same 3 pre-existing warnings. `dotnet test`: 1270 passed, 0 failed, 0 skipped.
+Project count unchanged at 23; `MyDogsbody/MainWindow.xaml.cs` still untouched.

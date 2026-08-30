@@ -4,7 +4,7 @@ namespace MyDogsbody.Domain
 ///
 /// This exists because MyDogsbody.Builders.HandleErrorBuilder cannot serve the centre: its
 /// Bind returns Result&lt;_, MyDogsbodyException&gt; and its TryWith handler returns one, so its
-/// error type is pinned rather than generic - it could never bind a Result&lt;_, CredentialError&gt;.
+/// error type is pinned rather than generic - it could never bind a Result&lt;_, SupplierError&gt;.
 /// It also lives in a project the domain is not allowed to reference.
 ///
 /// So this is that builder with two things taken out: the writeLog constructor parameter, and
