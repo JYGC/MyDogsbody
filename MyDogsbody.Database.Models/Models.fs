@@ -59,3 +59,54 @@ type TemplateFieldRuleRecord = {
     HintKind: string
     HintText: string option
 }
+
+// --- change #4: the ledger ---
+
+/// Amount is TEXT (exact decimal, InvariantCulture); IssueDate / DueDate are TEXT yyyy-MM-dd and
+/// nullable (Q1.10); MessageReceivedAt and ScannedAt are TEXT ISO 8601.
+[<CLIMutable>]
+type InvoiceRecord = {
+    Id: int
+    SupplierId: int
+    TemplateId: int
+    Reference: string
+    Amount: string
+    Currency: string
+    IssueDate: string option
+    DueDate: string option
+    SourceMessageId: string
+    MessageReceivedAt: string
+    ScannedAt: string
+}
+
+/// Cause names the ScanProblemCause union case; Detail holds its payload (unit-separator joined
+/// where the case carries several values); SupplierId is the "primary" supplier when the cause
+/// names exactly one, NULL otherwise. See InvoiceRecordMappers for the encoding.
+[<CLIMutable>]
+type ScanProblemRecord = {
+    Id: int
+    SourceMessageId: string
+    SupplierId: int option
+    Sender: string
+    Subject: string
+    ReceivedAt: string
+    Cause: string
+    Detail: string option
+    RecordedAt: string
+}
+
+[<CLIMutable>]
+type InvoiceTombstoneRecord = {
+    Id: int
+    SupplierId: int
+    Reference: string
+    DeletedAt: string
+}
+
+[<CLIMutable>]
+type ScanWindowRecord = { Id: int; Days: int }
+
+/// The single settings row. SelectedScanWindowDays is a NUMBER (design decision 6), nullable -
+/// NULL means nothing chosen yet.
+[<CLIMutable>]
+type InvoiceSettingsRecord = { Id: int; SelectedScanWindowDays: int option }

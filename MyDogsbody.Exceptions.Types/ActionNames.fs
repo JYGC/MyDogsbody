@@ -42,6 +42,24 @@ module MyDogsbody =
             let reorderTemplates = $"{templateApi}.reorderTemplates"
             let testTemplate = $"{templateApi}.testTemplate"
 
+        module InvoiceApi =
+            let private invoiceApi = $"{startup}.InvoiceApi"
+            let scan = $"{invoiceApi}.scan"
+            let rescanEverything = $"{invoiceApi}.rescanEverything"
+            let getInvoices = $"{invoiceApi}.getInvoices"
+            let deleteInvoice = $"{invoiceApi}.deleteInvoice"
+            let getProblems = $"{invoiceApi}.getProblems"
+            let getTombstones = $"{invoiceApi}.getTombstones"
+            let undeleteInvoice = $"{invoiceApi}.undeleteInvoice"
+
+        module ScanWindowApi =
+            let private scanWindowApi = $"{startup}.ScanWindowApi"
+            let getScanWindows = $"{scanWindowApi}.getScanWindows"
+            let addScanWindow = $"{scanWindowApi}.addScanWindow"
+            let deleteScanWindow = $"{scanWindowApi}.deleteScanWindow"
+            let getSelectedScanWindow = $"{scanWindowApi}.getSelectedScanWindow"
+            let selectScanWindow = $"{scanWindowApi}.selectScanWindow"
+
         module MailAccountApi =
             let private mailAccountApi = $"{startup}.MailAccountApi"
             let getProfileRoot = $"{mailAccountApi}.getProfileRoot"
@@ -73,6 +91,26 @@ module MyDogsbody =
             let deleteOne = $"{templateStore}.deleteOne"
             let reorder = $"{templateStore}.reorder"
 
+        module InvoiceStore =
+            let private invoiceStore = $"{database}.InvoiceStore"
+            let getInvoices = $"{invoiceStore}.getInvoices"
+            let upsertInvoice = $"{invoiceStore}.upsertInvoice"
+            let deleteInvoice = $"{invoiceStore}.deleteInvoice"
+            let getTombstones = $"{invoiceStore}.getTombstones"
+            let saveTombstone = $"{invoiceStore}.saveTombstone"
+            let removeTombstone = $"{invoiceStore}.removeTombstone"
+            let getScanProblems = $"{invoiceStore}.getScanProblems"
+            let saveScanProblems = $"{invoiceStore}.saveScanProblems"
+            let clearScanProblems = $"{invoiceStore}.clearScanProblems"
+
+        module ScanWindowStore =
+            let private scanWindowStore = $"{database}.ScanWindowStore"
+            let getScanWindows = $"{scanWindowStore}.getScanWindows"
+            let saveScanWindow = $"{scanWindowStore}.saveScanWindow"
+            let deleteScanWindow = $"{scanWindowStore}.deleteScanWindow"
+            let getSelectedScanWindow = $"{scanWindowStore}.getSelectedScanWindow"
+            let saveSelectedScanWindow = $"{scanWindowStore}.saveSelectedScanWindow"
+
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
 
@@ -85,11 +123,11 @@ module MyDogsbody =
                 let insertOne = $"{credentialStore}.insertOne"
                 let updateOne = $"{credentialStore}.updateOne"
 
-        module Pdf =
-            let private pdf = $"{integrations}.Pdf"
+        module Documents =
+            let private documents = $"{integrations}.Documents"
 
             module PdfDocumentReader =
-                let private pdfDocumentReader = $"{pdf}.PdfDocumentReader"
+                let private pdfDocumentReader = $"{documents}.PdfDocumentReader"
                 let readContent = $"{pdfDocumentReader}.readContent"
 
         /// Only ThunderbirdStore's functions appear here - ThunderbirdFolderScanner,

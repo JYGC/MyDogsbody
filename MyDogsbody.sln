@@ -35,7 +35,7 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.UI.Portal", "MyD
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.UI.Types", "MyDogsbody.UI.Types\MyDogsbody.UI.Types.fsproj", "{787363AE-7C9E-4A0D-8C2B-18DF048843F3}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Integrations.Pdf", "MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj", "{CB71DFF3-AED5-4C91-83DE-BADA9469B468}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Integrations.Documents", "MyDogsbody.Integrations.Documents\MyDogsbody.Integrations.Documents.fsproj", "{CB71DFF3-AED5-4C91-83DE-BADA9469B468}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MyDogsbody.Logging", "MyDogsbody.Logging\MyDogsbody.Logging.fsproj", "{49E2F6B3-AC0D-4C77-8943-88802608A98B}"
 EndProject

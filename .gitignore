@@ -3,3 +3,6 @@ bin/
 .vs/
 .vscode/
 .fake
+# Runtime databases - created relative to the process working directory by dotnet run / MeasureScan.
+# CLAUDE-project.md documents that these land at the repo root; none of them belong in git.
+*.db

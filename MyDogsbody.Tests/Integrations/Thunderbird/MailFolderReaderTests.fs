@@ -45,76 +45,221 @@ let private freshTempDirectory () =
     Directory.CreateDirectory dir |> ignore
     dir
 
-// ---------- 4.0 bufferSpan: the two size guards, exercised without a file ----------
+// ---------- 4.0 the streaming primitives, exercised without a real folder file ----------
 
-/// `bufferSpan` is pure, so every value the guards turn on is reachable here directly - including
-/// the ones no committed fixture could carry. The over-limit decision reached production untested
-/// once already, and the negative-span one crashed out of the whole API call.
-let private oneByteOverTheLimit = int64 MaxBufferableBytes + 1L
-
-/// The constant is a hard runtime ceiling, not a taste. `splitIntoMessages` turns the whole
-/// buffered span into a Latin1 string, and .NET caps a string at 1,073,741,791 chars - the 2 GB
-/// object-size limit at two bytes per char, which is HALF what `Array.MaxLength` allows. Asking
-/// for one char more is rejected by the runtime on the size alone, so this costs nothing to
-/// assert and pins the constant to the ceiling it was chosen from: if a future runtime lowers
-/// that ceiling, this fails here rather than as an OutOfMemoryException in production.
+/// `MaxBufferableBytes` is a hard runtime ceiling, not a taste: every step past the raw bytes
+/// works on a Latin1 string, and .NET caps a string at 1,073,741,791 chars - the 2 GB object-size
+/// limit at two bytes per char, HALF what `Array.MaxLength` allows. `classifySegment` and the
+/// count pass both skip a segment larger than this instead of turning it into text; this pins the
+/// constant to the ceiling it was chosen from, so a future runtime that lowered it would fail
+/// here rather than as an OutOfMemoryException in production.
 [<Fact; Trait("Level", "Unit")>]
-let ``the buffer limit is the largest string .NET can build, so one byte more could not be turned into text`` () =
+let ``the segment ceiling is the largest string .NET can build, so one byte more could not be turned into text`` () =
     Assert.Throws<OutOfMemoryException>(Action(fun () -> String('a', MaxBufferableBytes + 1) |> ignore)) |> ignore
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan buffers the whole file when nothing has been read yet`` () =
-    Assert.Equal(Ok(0L, 1000), bufferSpan 1000L 0L)
+let ``normalizeStartOffset keeps a stored offset that is inside the file`` () =
+    Assert.Equal(400L, normalizeStartOffset 1000L 400L)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan buffers only what follows a stored offset inside the file`` () =
-    Assert.Equal(Ok(400L, 600), bufferSpan 1000L 400L)
+let ``normalizeStartOffset keeps an offset at exactly the end of the file`` () =
+    Assert.Equal(1000L, normalizeStartOffset 1000L 1000L)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan buffers nothing when the stored offset is exactly the end of the file`` () =
-    Assert.Equal(Ok(1000L, 0), bufferSpan 1000L 1000L)
+let ``normalizeStartOffset keeps zero`` () =
+    Assert.Equal(0L, normalizeStartOffset 1000L 0L)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan buffers nothing for an empty file`` () =
-    Assert.Equal(Ok(0L, 0), bufferSpan 0L 0L)
+let ``normalizeStartOffset restarts at zero when the stored offset lies past the end of the file`` () =
+    // The file cannot contain what the watermark claims - a folder that grew between the size
+    // measurement and the open, then was compacted. Re-reading a message is recoverable; seeking
+    // past EOF is not.
+    Assert.Equal(0L, normalizeStartOffset 1000L 1500L)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan restarts at zero when the stored offset lies past the end of the file`` () =
-    // Not an error: the file cannot contain what the watermark claims, and re-reading a message
-    // is recoverable where a negative-length allocation is not.
-    Assert.Equal(Ok(0L, 1000), bufferSpan 1000L 1500L)
+let ``normalizeStartOffset restarts at zero for a negative stored offset`` () =
+    Assert.Equal(0L, normalizeStartOffset 1000L -1L)
+
+// -- resumeOffset --
+//
+// The decision in front of every incremental read. Pure, so every branch is asserted here without
+// a file; the integration tests in 4.4 and 4.4a then prove readFolder actually obeys it.
+
+let private mtime = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc)
+let private scannedAt = DateTime(2026, 8, 6)
+
+let private watermarkOf size offset cutoff : FolderWatermark =
+    { SizeBytes = size; ModifiedAt = mtime; OffsetReached = offset; CutoffReached = cutoff }
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan restarts at zero for a negative stored offset`` () =
-    Assert.Equal(Ok(0L, 1000), bufferSpan 1000L -1L)
+let ``resumeOffset restarts at zero when there is no watermark at all`` () =
+    Assert.Equal(0L, resumeOffset scannedAt 1000L mtime None)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan accepts a span of exactly the limit`` () =
-    Assert.Equal(Ok(0L, MaxBufferableBytes), bufferSpan (int64 MaxBufferableBytes) 0L)
+let ``resumeOffset resumes when the file is unchanged and the cutoff is the same`` () =
+    Assert.Equal(400L, resumeOffset scannedAt 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan reports a span one byte past the limit, naming both sizes`` () =
-    Assert.Equal(
-        Error
-            $"The folder has {oneByteOverTheLimit} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
-        bufferSpan oneByteOverTheLimit 0L
-    )
-
-/// `Array.MaxLength` is what the guard used to be set to, and it is nearly twice the limit - a
-/// span that size was accepted, buffered, and then killed the process converting it to text.
-[<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan reports a span of the largest array, which is far past the limit`` () =
-    Assert.Equal(
-        Error
-            $"The folder has {int64 Array.MaxLength} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
-        bufferSpan (int64 Array.MaxLength) 0L
-    )
+let ``resumeOffset resumes when the file has grown and the cutoff is the same`` () =
+    Assert.Equal(400L, resumeOffset scannedAt 2000L (mtime.AddSeconds 5.0) (Some(watermarkOf 1000L 400L scannedAt)))
 
 [<Fact; Trait("Level", "Unit")>]
-let ``bufferSpan measures the span from the stored offset, so an already-mostly-read large folder still reads`` () =
-    // The span, not the file, is what has to fit an array: a 3 GB folder read up to 2 GB has
-    // 1 GB left, and refusing it because the file is large would stop an incremental read dead.
-    Assert.Equal(Ok(2_000_000_000L, 1_000_000_000), bufferSpan 3_000_000_000L 2_000_000_000L)
+let ``resumeOffset restarts at zero when the file has shrunk`` () =
+    Assert.Equal(0L, resumeOffset scannedAt 500L (mtime.AddSeconds 5.0) (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset restarts at zero when the cutoff has moved earlier, because the window widened`` () =
+    // The bytes before the offset were passed over at the recorded cutoff without their bodies
+    // being parsed. A cutoff a month earlier is asking for exactly those messages.
+    let widened = scannedAt.AddDays -30.0
+    Assert.Equal(0L, resumeOffset widened 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset resumes when the cutoff has moved later, because the window narrowed`` () =
+    // Narrowing asks for a subset of what has already been read - nothing in the file is new to it.
+    let narrowed = scannedAt.AddDays 7.0
+    Assert.Equal(400L, resumeOffset narrowed 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset resumes when the same window slides forward a day`` () =
+    // The ordinary second scan: the same N-day window a day later puts the cutoff one day LATER,
+    // which is not a widening. This is the 5.3 s warm scan the 12.4 measurement recorded.
+    Assert.Equal(400L, resumeOffset (scannedAt.AddDays 1.0) 1000L mtime (Some(watermarkOf 1000L 400L scannedAt)))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``resumeOffset restarts at zero for a watermark recorded before the cutoff was stored`` () =
+    // DateTime.MinValue is what CutoffTicks = 0 decodes to. It means "not recorded", NOT "scanned
+    // with no cutoff" - reading it the other way would suppress the re-read forever.
+    Assert.Equal(0L, resumeOffset scannedAt 1000L mtime (Some(watermarkOf 1000L 400L DateTime.MinValue)))
+
+// -- segmentStartOffsets --
+
+let private bytesOf (s: string) = System.Text.Encoding.Latin1.GetBytes s
+
+[<Fact; Trait("Level", "Unit")>]
+let ``segmentStartOffsets finds offset zero when the buffer opens with a From line`` () =
+    Assert.Equal<int list>([ 0 ], segmentStartOffsets (bytesOf "From a@b Mon\nMessage-ID: <1>\n\nbody\n"))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``segmentStartOffsets finds a From line preceded by an LF blank line`` () =
+    let bytes = bytesOf "From a@b Mon\n\nbody one\n\nFrom c@d Tue\n\nbody two\n"
+    let offsets = segmentStartOffsets bytes
+    Assert.Equal(2, offsets.Length)
+    Assert.Equal(0, offsets.Head)
+    Assert.Equal("From c@d Tue\n\nbody two\n", System.Text.Encoding.Latin1.GetString(bytes.[offsets.[1] ..]))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``segmentStartOffsets finds a From line preceded by a CRLF blank line`` () =
+    let bytes = bytesOf "From a@b Mon\r\n\r\nbody one\r\n\r\nFrom c@d Tue\r\n\r\nbody two\r\n"
+    let offsets = segmentStartOffsets bytes
+    Assert.Equal(2, offsets.Length)
+    Assert.Equal("From c@d Tue\r\n\r\nbody two\r\n", System.Text.Encoding.Latin1.GetString(bytes.[offsets.[1] ..]))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``segmentStartOffsets ignores a mbox-quoted From line in a body`` () =
+    // ">From ..." is how the mbox writer escapes a body line that began with "From ".
+    Assert.Equal<int list>([ 0 ], segmentStartOffsets (bytesOf "From a@b Mon\n\nquote:\n\n>From the sender\n\nmore\n"))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``segmentStartOffsets ignores a From line that is not preceded by a blank line`` () =
+    // A "From " opening a line but with the previous line non-blank is not a boundary.
+    Assert.Equal<int list>([ 0 ], segmentStartOffsets (bytesOf "From a@b Mon\n\nregards\nFrom the accounts team\n"))
+
+[<Fact; Trait("Level", "Unit")>]
+let ``segmentStartOffsets does not treat a leading LF-From as a boundary - that is the fold's job`` () =
+    // The blank line's predecessor is not visible in this buffer, so the structural scan cannot
+    // know "\nFrom " is a boundary. foldMboxSegments trims the seam instead.
+    Assert.Equal<int list>([], segmentStartOffsets (bytesOf "\nFrom a@b Mon\n\nbody\n"))
+
+// -- foldMboxSegments --
+
+/// Runs the fold over an in-memory stream, collecting (absoluteStartOffset, text, isLast) per
+/// segment. `chunkSize` is deliberately tiny so a few hundred bytes cross many chunk boundaries.
+let private foldToList (chunkSize: int) (maxMessageBytes: int) (fromOffset: int64) (content: string) =
+    use stream = new MemoryStream(bytesOf content)
+    let collected = ResizeArray<int64 * string * bool>()
+
+    foldMboxSegments
+        chunkSize
+        maxMessageBytes
+        stream
+        fromOffset
+        (fun () start bytes isLast ->
+            collected.Add(start, System.Text.Encoding.Latin1.GetString bytes, isLast))
+        ()
+
+    List.ofSeq collected
+
+let private twoMessages =
+    "From a@b Mon Jan 05 09:00:00 2026\nMessage-ID: <a>\n\nbody of a\n"
+    + "\n"
+    + "From c@d Tue Jan 06 10:00:00 2026\nMessage-ID: <c>\n\nbody of c\n"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``foldMboxSegments emits each message once, the last flagged, with exact offsets`` () =
+    let segments = foldToList 16 100_000 0L twoMessages
+
+    Assert.Equal(2, segments.Length)
+    let (start0, text0, last0) = segments.[0]
+    let (start1, text1, last1) = segments.[1]
+    Assert.Equal(0L, start0)
+    Assert.False last0
+    Assert.StartsWith("From a@b", text0)
+    Assert.EndsWith("body of a\n\n", text0) // the segment carries the trailing blank line
+    Assert.Equal(int64 (bytesOf text0).Length, start1)
+    Assert.True last1
+    Assert.StartsWith("From c@d", text1)
+    Assert.EndsWith("body of c\n", text1)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``foldMboxSegments gives the same segments whatever the chunk size`` () =
+    let atOne = foldToList 1 100_000 0L twoMessages |> List.map (fun (s, t, _) -> s, t)
+    let atThree = foldToList 3 100_000 0L twoMessages |> List.map (fun (s, t, _) -> s, t)
+    let atHuge = foldToList 100_000 100_000 0L twoMessages |> List.map (fun (s, t, _) -> s, t)
+    Assert.Equal<(int64 * string) list>(atHuge, atOne)
+    Assert.Equal<(int64 * string) list>(atHuge, atThree)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``foldMboxSegments resuming from a watermark trims a leading LF seam and reports file-absolute offsets`` () =
+    // A watermark after the first message sits just past the blank separator line the first
+    // segment carried. What remains is "\nFrom c@d...", and the leading "\n" must not become part
+    // of message c.
+    let resumeAt = int64 (twoMessages.IndexOf("\nFrom c@d"))
+    let segments = foldToList 8 100_000 resumeAt twoMessages
+
+    let (start, text, isLast) = Assert.Single segments
+    Assert.Equal(resumeAt + 1L, start)
+    Assert.True isLast
+    Assert.StartsWith("From c@d", text)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``foldMboxSegments resuming exactly at a From boundary keeps the whole message`` () =
+    let resumeAt = int64 (twoMessages.IndexOf("From c@d"))
+    let segments = foldToList 8 100_000 resumeAt twoMessages
+
+    let (start, text, _) = Assert.Single segments
+    Assert.Equal(resumeAt, start)
+    Assert.StartsWith("From c@d", text)
+    Assert.EndsWith("body of c\n", text)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``foldMboxSegments emits an oversized boundary-less segment once, then resumes at the next real boundary`` () =
+    // maxMessageBytes is 40, and the first "message" has no second boundary for far longer than
+    // that: it is emitted once (the caller skips it) and the fold byte-scans forward to "From c@d".
+    let content =
+        "From a@b Mon\nMessage-ID: <a>\n\n"
+        + String('x', 400)
+        + "\n\nFrom c@d Tue\nMessage-ID: <c>\n\nbody of c\n"
+
+    let segments = foldToList 16 40 0L content
+
+    // the last segment is the real second message, intact
+    let (_, lastText, lastFlag) = List.last segments
+    Assert.True lastFlag
+    Assert.StartsWith("From c@d", lastText)
+    Assert.EndsWith("body of c\n", lastText)
+    // and message c is emitted exactly once
+    Assert.Equal(1, segments |> List.filter (fun (_, t, _) -> t.StartsWith "From c@d") |> List.length)
 
 // ---------- 4.1 opening and message boundaries ----------
 
@@ -736,6 +881,112 @@ let ``readFolder re-reads the whole folder when the modification time is inconsi
     finally
         Directory.Delete(tempDir, true)
 
+// ---------- 4.4a a widened window against an unchanged file ----------
+//
+// The watermark says "resume at OffsetReached" from the file's size and mtime alone. Those are
+// unchanged by the user picking a LONGER scan window - and everything before the offset that
+// predated the previous, narrower cutoff was skipped without ever being parsed. So a resume
+// answers "nothing new" for mail the wider window is precisely asking for: the user widens 7 days
+// to 180, presses "Scan now", waits, and gets an empty result with nothing on screen saying the
+// older mail was never read. requirements.md -> "WHEN a user asks to scan ... THE SYSTEM SHALL
+// read the mailbox for the current window", and outcome.md's own 12.4 table calls a window widen
+// a "full re-read (watermarks cleared)" - which nothing in the scan path did.
+
+/// Two messages far enough apart that one cutoff includes both and another only the later.
+let private datedMessage (messageId: string) (envelopeDate: string) (dateHeader: string) =
+    $"From sender@example.com {envelopeDate}\n"
+    + $"Message-ID: <{messageId}>\n"
+    + "From: sender@example.com\n"
+    + "To: me@example.com\n"
+    + $"Subject: Invoice {messageId}\n"
+    + $"Date: {dateHeader}\n"
+    + "Content-Type: text/plain; charset=utf-8\n\n"
+    + $"Body of {messageId}\n\n"
+
+let private januaryAndAugust =
+    datedMessage "old-jan@example.com" "Thu Jan 15 10:00:00 2026" "Thu, 15 Jan 2026 10:00:00 +0000"
+    + datedMessage "recent-aug@example.com" "Wed Aug 20 10:00:00 2026" "Wed, 20 Aug 2026 10:00:00 +0000"
+
+let private idsOf (result: Result<MailMessage list, MailAccountError>) =
+    match result with
+    | Ok messages -> messages |> List.map (fun m -> m.SourceMessageId) |> List.sort
+    | Error error -> failwith $"Expected Ok, but got Error: {error}"
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder re-reads the whole folder when the cutoff has widened, and returns the older messages the narrower one skipped`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Widened")
+        File.WriteAllText(path, januaryAndAugust)
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        // A narrow window: only the August message qualifies, and the offset still advances to
+        // EOF because the January message was read past, not stopped at.
+        let narrow = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 1))
+        let first = readFolder load save testAccountId (folder "Widened") tempDir Mbox narrow
+        Assert.Equal<string list>([ "<recent-aug@example.com>" ], idsOf first)
+
+        // The user widens the window and presses "Scan now". The file is byte-identical, so the
+        // size/mtime watermark alone would say "nothing new" - but the wider cutoff is asking for
+        // exactly the message the narrow one skipped.
+        let wide = ScanCutoff.ofStartOfDay (DateTime(2025, 1, 1))
+        let second = readFolder load save testAccountId (folder "Widened") tempDir Mbox wide
+
+        Assert.Equal<string list>(
+            [ "<old-jan@example.com>"; "<recent-aug@example.com>" ],
+            idsOf second
+        )
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder still resumes from the watermark when the cutoff has narrowed, so a shorter window costs no re-read`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Narrowed")
+        File.WriteAllText(path, januaryAndAugust)
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        let wide = ScanCutoff.ofStartOfDay (DateTime(2025, 1, 1))
+        Assert.Equal<string list>(
+            [ "<old-jan@example.com>"; "<recent-aug@example.com>" ],
+            idsOf (readFolder load save testAccountId (folder "Narrowed") tempDir Mbox wide)
+        )
+
+        // Narrowing asks for a SUBSET of what has already been read, so there is nothing new in
+        // the file for it - the resume must stand. (Which invoices are shown for the shorter
+        // window is the ledger's filter, not the reader's.)
+        let narrow = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 1))
+        Assert.Empty(idsOf (readFolder load save testAccountId (folder "Narrowed") tempDir Mbox narrow))
+    finally
+        Directory.Delete(tempDir, true)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder resumes from the watermark when the same window is scanned again a day later`` () =
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "SameWindow")
+        File.WriteAllText(path, januaryAndAugust)
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        // The ordinary case: the same N-day window scanned on two consecutive days. The cutoff
+        // SLIDES FORWARD, so it is never earlier than the recorded one and the resume stands -
+        // this is the 5.3 s second scan the 12.4 measurement recorded, and widening must not
+        // turn it into a 60 s one.
+        let day1 = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 10))
+        readFolder load save testAccountId (folder "SameWindow") tempDir Mbox day1 |> ignore
+
+        let day2 = ScanCutoff.ofStartOfDay (DateTime(2026, 8, 11))
+        Assert.Empty(idsOf (readFolder load save testAccountId (folder "SameWindow") tempDir Mbox day2))
+    finally
+        Directory.Delete(tempDir, true)
+
 // ---------- 4.4b CRLF messages ----------
 
 /// RFC 5322 mandates CRLF, and a message stored exactly as it arrived over IMAP/SMTP keeps it.
@@ -932,6 +1183,9 @@ let ``readFolder re-reads the whole folder when the stored offset lies past the 
                 SizeBytes = 1L
                 ModifiedAt = File.GetLastWriteTimeUtc path
                 OffsetReached = length + 500L
+                // The same cutoff this test reads with, so the resume path is the one exercised -
+                // the subject here is the stale OFFSET, not the cutoff check in front of it.
+                CutoffReached = ScanCutoff.value noCutoff
             }
 
         match readFolder load save testAccountId (folder "StaleOffset") tempDir Mbox noCutoff with
@@ -943,55 +1197,63 @@ let ``readFolder re-reads the whole folder when the stored offset lies past the 
     finally
         Directory.Delete(tempDir, true)
 
-// ---------- 4.4d a folder too large to buffer in one pass ----------
+// ---------- 4.4d a folder larger than one streaming chunk ----------
+//
+// The reader used to buffer a folder whole and refuse anything over ~1 GiB (a Latin1 string
+// cannot hold more), which `read`'s `| Error _ -> []` then dropped silently on every scan -
+// invoice-extraction's Phase 12 measurement found a 2 GB Gmail INBOX contributing zero messages.
+// The reader now streams `MailFolderReader.StreamChunkBytes` at a time, so a folder of any size
+// reads in bounded memory and there is no per-folder ceiling to report.
 
-/// A file of `sizeBytes` whose bytes are never written: NTFS records the length without zeroing
-/// the clusters, so this costs single-digit milliseconds and no measurable I/O. That is what
-/// makes the over-limit guards testable at all - round 2 added one and shipped it untested,
-/// stating a fixture that large could not be committed, which is true of a *committed* fixture
-/// but not of one the test makes and deletes.
-let private withOversizedFolder (test: string -> string -> unit) =
+/// A real multi-message mbox several streaming chunks in size. Built, not committed - a fixture
+/// this big does not belong in git - and small messages so the row count is easy to assert.
+let private manyMessagesMbox (count: int) =
+    let sb = System.Text.StringBuilder()
+
+    for i in 1..count do
+        if i > 1 then sb.Append('\n') |> ignore
+        sb.Append(lfMessage $"bulk-{i}@example.com" $"Message {i}") |> ignore
+
+    sb.ToString()
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder reads every message of a folder that spans several streaming chunks`` () =
     let tempDir = freshTempDirectory ()
 
     try
-        let path = Path.Combine(tempDir, "Oversized")
+        // ~16000 messages * ~290 bytes ~= 4.6 MB, past the 4 MB streaming chunk with a message
+        // straddling the boundary.
+        let messageCount = 16000
+        let path = Path.Combine(tempDir, "Bulk")
+        File.WriteAllText(path, manyMessagesMbox messageCount)
+        Assert.True(FileInfo(path).Length > int64 MailFolderReader.StreamChunkBytes)
 
-        (use stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write)
-         // One byte past what this reader can buffer, so the guard is exercised at its boundary
-         // rather than somewhere comfortably beyond it. This size matters: rounds 2 and 3 set
-         // the guard at `Array.MaxLength`, nearly twice the real ceiling, so a folder of exactly
-         // this many bytes sailed past it - `countMessages` answered `Ok 0` and `readFolder`
-         // threw an uncaught OutOfMemoryException out of the whole API, which are precisely the
-         // two defects those rounds reported as closed.
-         stream.SetLength(int64 MaxBufferableBytes + 1L))
+        let load, save, store = inMemoryWatermarkStore ()
 
-        test tempDir path
+        match readFolder load save testAccountId (folder "Bulk") tempDir Mbox noCutoff with
+        | Ok messages ->
+            Assert.Equal(messageCount, messages.Length)
+            Assert.Equal("<bulk-1@example.com>", messages.Head.SourceMessageId)
+            Assert.Equal($"<bulk-{messageCount}@example.com>", (List.last messages).SourceMessageId)
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
+
+        // The whole file was consumed, so the watermark is the whole file length.
+        Assert.Equal(
+            FileInfo(path).Length,
+            store.[(MailAccountId.value testAccountId, "Bulk")].OffsetReached
+        )
     finally
         Directory.Delete(tempDir, true)
 
 [<Fact; Trait("Level", "Integration")>]
-let ``readFolder reports a folder too large to buffer in one pass rather than throwing`` () =
-    withOversizedFolder (fun tempDir path ->
-        let load, save, store = inMemoryWatermarkStore ()
+let ``countMessages counts every message of a folder that spans several streaming chunks`` () =
+    let tempDir = freshTempDirectory ()
 
-        match readFolder load save testAccountId (folder "Oversized") tempDir Mbox noCutoff with
-        | Error(MailFolderUnreadable(reportedPath, reason)) ->
-            Assert.Equal(path, reportedPath)
+    try
+        let messageCount = 16000
+        let path = Path.Combine(tempDir, "Bulk")
+        File.WriteAllText(path, manyMessagesMbox messageCount)
 
-            Assert.Equal(
-                $"The folder has {int64 MaxBufferableBytes + 1L} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
-                reason
-            )
-        | Error other -> Assert.Fail($"Expected MailFolderUnreadable, but got Error: {other}")
-        | Ok messages -> Assert.Fail($"Expected Error, but got Ok with {messages.Length} messages")
-
-        // Nothing was read, so nothing may claim to have been: a watermark written here would
-        // make the next scan resume past bytes this reader never saw.
-        Assert.False(store.ContainsKey(MailAccountId.value testAccountId, "Oversized")))
-
-[<Fact; Trait("Level", "Integration")>]
-let ``countMessages reports a folder too large to buffer rather than silently counting it as zero`` () =
-    withOversizedFolder (fun tempDir path ->
         let account: DiscoveredMailAccount =
             {
                 Id = testAccountId
@@ -999,27 +1261,39 @@ let ``countMessages reports a folder too large to buffer rather than silently co
                 DisplayName = "Test"
                 EmailAddresses = []
                 StoreFormat = Mbox
-                StoreDirectory = tempDir
                 StoreDirectoryExists = true
-                Folders = [ folder "Oversized" ]
+                StoreDirectory = tempDir
+                Folders = [ folder "Bulk" ]
                 CachedMessageCount = None
             }
 
         let lookupAccount: LookupAccount = fun _ -> Ok(Some account)
 
-        match countMessages lookupAccount testAccountId with
-        | Error(MailFolderUnreadable(reportedPath, reason)) ->
-            Assert.Equal(path, reportedPath)
+        Assert.Equal(Ok messageCount, countMessages lookupAccount testAccountId)
+    finally
+        Directory.Delete(tempDir, true)
 
-            Assert.Equal(
-                $"The folder has {int64 MaxBufferableBytes + 1L} bytes still to read, more than this reader can buffer in one pass ({MaxBufferableBytes} bytes).",
-                reason
-            )
-        | Error other -> Assert.Fail($"Expected MailFolderUnreadable, but got Error: {other}")
-        | Ok count ->
-            Assert.Fail(
-                $"Expected Error, but got Ok {count} - a folder that could not be read was counted as if it held that many messages"
-            ))
+[<Fact; Trait("Level", "Integration")>]
+let ``readFolder returns no messages for a large boundary-less file rather than throwing or hanging`` () =
+    // A sparse file: NTFS records the length without zeroing the clusters, so this is
+    // single-digit milliseconds to create. All-zero bytes hold no "From " boundary, so the
+    // streaming reader finds no messages - the point is that it does so in bounded memory and
+    // bounded time rather than reporting the folder unreadable or dying converting it to text.
+    let tempDir = freshTempDirectory ()
+
+    try
+        let path = Path.Combine(tempDir, "Garbage")
+
+        (use stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write)
+         stream.SetLength(int64 MailFolderReader.StreamChunkBytes * 6L + 17L))
+
+        let load, save, _ = inMemoryWatermarkStore ()
+
+        match readFolder load save testAccountId (folder "Garbage") tempDir Mbox noCutoff with
+        | Ok messages -> Assert.Empty messages
+        | Error error -> Assert.Fail($"Expected Ok [], but got Error: {error}")
+    finally
+        Directory.Delete(tempDir, true)
 
 // ---------- 4.4e the watermark through the REAL store, not only an in-memory one ----------
 

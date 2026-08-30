@@ -13,6 +13,11 @@
     <Compile Include="Migrations\Migration_20260810000001_MakeSupplierNameIndexCaseInsensitive.fs" />
     <Compile Include="Migrations\Migration_20260810000002_CreateInvoiceTemplatesTable.fs" />
     <Compile Include="Migrations\Migration_20260810000003_CreateTemplateFieldRulesTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000004_CreateInvoicesTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000005_CreateScanProblemsTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000006_CreateInvoiceTombstonesTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000007_CreateScanWindowsTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000008_CreateInvoiceSettingsTable.fs" />
     <Compile Include="MigrationSetup.fs" />
     <None Include="INSTALL.md" />
   </ItemGroup>

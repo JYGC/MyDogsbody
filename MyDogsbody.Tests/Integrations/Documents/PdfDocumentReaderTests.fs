@@ -1,4 +1,4 @@
-module MyDogsbody.Tests.Integrations.Pdf.PdfDocumentReaderTests
+module MyDogsbody.Tests.Integrations.Documents.PdfDocumentReaderTests
 
 open System
 open System.IO
@@ -9,7 +9,7 @@ open UglyToad.PdfPig.Core
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Domain.Documents
-open MyDogsbody.Integrations.Pdf
+open MyDogsbody.Integrations.Documents
 
 /// Records what the builder was asked to log, so the unlogged-failure idiom can be asserted.
 let private recordingHandleError () =
@@ -55,7 +55,7 @@ let ``readContent returns Error without logging when the file does not exist`` (
     // Assert
     match actual with
     | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Pdf.PdfDocumentReader.readContent, ex.ActionName)
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, ex.ActionName)
         Assert.Equal($"PDF file does not exist: {missingPath}", ex.Message)
         Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
         Assert.Empty logged
@@ -74,7 +74,7 @@ let ``readContent returns Error and logs when the file is not a readable PDF`` (
         // Assert
         match actual with
         | Error ex ->
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Pdf.PdfDocumentReader.readContent, ex.ActionName)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, ex.ActionName)
             Assert.Equal("Failed to extract content from PDF.", ex.Message)
             Assert.NotNull ex.InnerException
             // Unexpected failure: this one is logged.
@@ -127,3 +127,67 @@ let ``readContent returns no words for a PDF with an empty page`` () =
         | Ok content -> Assert.Empty content.Words
         | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
     )
+
+// --- change #4, task 1.3: readText, the same adapter now satisfying ReadDocumentText ---
+//
+// readText returns DocumentError directly (no handleError, no ActionName) - see the change's
+// design.md -> "Action names". readContent above is deliberately left in its outer-ring shape.
+
+open MyDogsbody.Tests.Fixtures
+
+let private source (fileName: string) (bytes: byte[]) : DocumentSource =
+    { Format = Pdf; Name = fileName; Content = bytes }
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readText returns the PDF's text as lines, each tagged with a block`` () =
+    // Arrange - a real PDF written top-down
+    let pdf = DocumentFixtures.pdfWithText [ "Invoice Number 7422"; "Amount Due 100.00"; "Due Date 1 March 2026" ]
+
+    // Act
+    let actual = PdfDocumentReader.readText (source "invoice.pdf" pdf)
+
+    // Assert - every field of the success output
+    match actual with
+    | Ok lines ->
+        Assert.Equal<string list>(
+            [ "Invoice Number 7422"; "Amount Due 100.00"; "Due Date 1 March 2026" ],
+            lines |> List.map (fun line -> line.Text)
+        )
+        // A block index is assigned to every line, non-negative and non-decreasing top-to-bottom.
+        Assert.All(lines, fun line -> Assert.True(line.BlockIndex >= 0))
+        let blocks = lines |> List.map (fun line -> line.BlockIndex)
+        Assert.Equal<int list>(blocks |> List.sort, blocks)
+    | Error err -> Assert.Fail($"Expected Ok, but got Error: {err}")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readText reports DocumentHasNoTextLayer for a scanned-image PDF`` () =
+    // Arrange - a page with nothing on it stands in for a scanned image (1.6% of measured PDFs).
+    let pdf = DocumentFixtures.pdfWithNoTextLayer ()
+
+    // Act
+    let actual = PdfDocumentReader.readText (source "scan.pdf" pdf)
+
+    // Assert - no OCR is attempted; this exact cause is returned
+    Assert.Equal(Error DocumentHasNoTextLayer, actual)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``readText reports DocumentUnreadable for a file that is not a PDF`` () =
+    // Arrange - 3.7% of measured PDFs would not open at all
+    let notPdf = DocumentFixtures.unopenablePdf ()
+
+    // Act
+    let actual = PdfDocumentReader.readText (source "broken.pdf" notPdf)
+
+    // Assert
+    match actual with
+    | Error (DocumentUnreadable message) -> Assert.False(System.String.IsNullOrWhiteSpace message)
+    | other -> Assert.Fail($"Expected Error (DocumentUnreadable _), got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``readText reports DocumentUnreadable for zero bytes`` () =
+    // requirements.md edge case: an empty attachment is unreadable, not "text that matched nothing"
+    let actual = PdfDocumentReader.readText (source "empty.pdf" [||])
+
+    match actual with
+    | Error (DocumentUnreadable _) -> ()
+    | other -> Assert.Fail($"Expected Error (DocumentUnreadable _), got {other}")

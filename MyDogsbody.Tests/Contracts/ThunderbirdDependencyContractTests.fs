@@ -1,4 +1,4 @@
-module MyDogsbody.Tests.Contracts.ThunderbirdDependencyContractTests
+﻿module MyDogsbody.Tests.Contracts.ThunderbirdDependencyContractTests
 
 open System
 open System.IO
@@ -321,7 +321,8 @@ let ``LoadWatermark returns None when nothing has been saved`` (implementation: 
 let ``a saved watermark is visible to a later load, and ClearWatermarks removes it`` (implementation: string) =
     withWatermarkImplementation implementation (fun deps ->
         let id = MailAccountId.create "a" |> valueOrFail
-        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L }
+        let watermark: FolderWatermark =
+            { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L; CutoffReached = DateTime(2026, 8, 1) }
 
         deps.Save id "INBOX" watermark |> okOrFail "Save"
         Assert.Equal(Some watermark, deps.Load id "INBOX" |> okOrFail "Load")
@@ -343,7 +344,8 @@ let ``a watermark carrying a filesystem modification time round trips it exactly
         // the one subset that survives a lossy store unchanged, so the fake and the real adapter
         // agreed over a difference that only production ever sees.
         let modifiedAt = DateTime(2026, 8, 20, 9, 30, 0, DateTimeKind.Utc).AddTicks 1234L
-        let watermark: FolderWatermark = { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L }
+        let watermark: FolderWatermark =
+            { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L; CutoffReached = DateTime(2026, 8, 1) }
 
         deps.Save id "INBOX" watermark |> okOrFail "Save"
 

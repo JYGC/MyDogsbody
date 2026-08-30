@@ -740,18 +740,18 @@ are that same race.
   table now shows, remain unbuilt.
 - **O.3** Letting the user override the folder exclusions (Trash/Deleted/Junk/Sent/Drafts).
 - **O.4** Detecting a profile being written by a different Thunderbird version.
-- **O.5** **Streaming the mbox reader.** requirements.md → *Edge cases* asks that a large message be
-  read "without loading the whole folder into memory", and `readMboxFile` still buffers the whole
-  span. Rounds 2, 3 and 4 added and then correctly sized a guard so an over-large folder is
-  reported rather than crashing or counting zero (round 2 finding 4, round 3 finding 2, round 4
-  finding 1), but the requirement itself needs a streaming line reader that keeps exact byte
-  offsets. That is a design change, not a defect fix, and wants its own change folder. **Until it
-  lands, an account holding a folder over `MailFolderReader.MaxBufferableBytes` — 1,073,741,791
-  bytes, about 1.0 GiB — cannot be counted or read at all**, and *Count messages* fails for the
-  whole account rather than under-reporting it. Rounds 2 and 3 stated that threshold as "~2 GiB";
-  it is half that, because the span becomes a string and a .NET string cannot exceed the 2 GB
-  object-size ceiling. The measured profile has a 2.5 GB mbox, so this is not hypothetical at
-  either figure.
+- **O.5** **Streaming the mbox reader.** ✅ **Done in `invoice-extraction` Phase 14** — forced there
+  by that change's Phase 12 measurement, which found the maintainer's invoice mail sitting in a
+  2.0 GB INBOX this reader dropped silently. requirements.md → *Edge cases* asks that a large
+  message be read "without loading the whole folder into memory", and `readMboxFile` used to buffer
+  the whole span. Rounds 2, 3 and 4 added and then correctly sized a guard so an over-large folder
+  was reported rather than crashing or counting zero (round 2 finding 4, round 3 finding 2, round 4
+  finding 1) — a deliberate regression, since *Count messages* then failed for the whole account
+  rather than under-reporting it, and any folder over `MailFolderReader.MaxBufferableBytes`
+  (1,073,741,791 bytes ≈ 1.0 GiB — half the "~2 GiB" rounds 2–3 stated, because the span becomes a
+  .NET string) could not be counted or read at all. Phase 14 replaced the whole-span buffer with
+  `foldMboxSegments`, which streams `StreamChunkBytes` (4 MiB) at a time keeping exact byte offsets;
+  `MaxBufferableBytes` is now a per-segment ceiling only, and there is no per-folder limit.
 - **O.6** **Maildir folders record no watermark.** `MailFolderReader.readFolder` consults and
   updates a watermark on the mbox branch only. requirements.md → *Incremental scanning* is written
   unconditionally, but its three fields — file size, modification time and *offset reached* — are

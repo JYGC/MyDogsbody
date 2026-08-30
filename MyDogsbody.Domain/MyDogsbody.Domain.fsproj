@@ -49,6 +49,16 @@
     <Compile Include="Invoices\MatchSupplierWorkflow.fs" />
     <Compile Include="Invoices\ApplyTemplateWorkflow.fs" />
     <Compile Include="Invoices\SelectTemplateWorkflow.fs" />
+    <Compile Include="Invoices\ResolveScanWindowWorkflow.fs" />
+    <Compile Include="Invoices\ValidateInvoiceWorkflow.fs" />
+    <Compile Include="Invoices\ScanMessageWorkflow.fs" />
+    <Compile Include="Invoices\ScanForInvoicesWorkflow.fs" />
+    <Compile Include="Invoices\DeleteInvoiceWorkflow.fs" />
+    <Compile Include="Invoices\UndeleteInvoiceWorkflow.fs" />
+    <Compile Include="Invoices\AddScanWindowWorkflow.fs" />
+    <Compile Include="Invoices\DeleteScanWindowWorkflow.fs" />
+    <Compile Include="Invoices\ListScanWindowsWorkflow.fs" />
+    <Compile Include="Invoices\SelectScanWindowWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">

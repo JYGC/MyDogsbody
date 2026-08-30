@@ -172,6 +172,11 @@ let ``a store failure reaches the UI as an Error and is written to the log exact
             GetSupplierMatchers = fun () -> failwith "not used"
             GetInvoiceTemplates = fun () -> failwith "not used"
             GetTemplateFieldRules = fun () -> failwith "not used"
+            GetInvoices = fun () -> failwith "not used"
+            GetScanProblems = fun () -> failwith "not used"
+            GetInvoiceTombstones = fun () -> failwith "not used"
+            GetScanWindows = fun () -> failwith "not used"
+            GetInvoiceSettings = fun () -> failwith "not used"
             Dispose = fun () -> ()
         }
 

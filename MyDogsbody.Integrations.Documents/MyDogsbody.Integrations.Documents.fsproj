@@ -11,10 +11,16 @@
       ReadDocumentContent; the line grouping it used to wrap is now a domain workflow.
     -->
     <Compile Include="PdfDocumentReader.fs" />
+    <Compile Include="WordDocumentReader.fs" />
+    <Compile Include="PlainTextDocumentReader.fs" />
+    <Compile Include="EmailBodyReader.fs" />
+    <Compile Include="DocumentReaders.fs" />
   </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="PdfPig" Version="0.1.11" />
+        <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
+        <PackageReference Include="HtmlAgilityPack" Version="1.11.39" />
     </ItemGroup>
 
     <ItemGroup>

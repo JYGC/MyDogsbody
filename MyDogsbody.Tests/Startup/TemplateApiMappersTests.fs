@@ -478,6 +478,18 @@ let ``every InvoiceError case produces a sentence that never quotes the placehol
             DateUnparseable(IssueDate, "31/02/2026", "d MMM yyyy")
             DueDateOutOfRange(templateId, DateTime(9999, 12, 31), 30)
             RuleTimedOut(templateId, Reference)
+            // change #4
+            InvoiceReferenceInvalid "   "
+            AmountInvalid "9e99"
+            CurrencyInvalid ""
+            SupplierGone supplierId
+            ScanWindowInvalid "A scan window must be at least one day."
+            ScanWindowAlreadyExists 14
+            CannotDeleteLastScanWindow
+            ScanWindowNotFound 45
+            InvoiceNotFound
+            NoAccountSelected
+            InvoiceStoreFailed "The ledger could not be reached."
         ]
 
     let declaredCases =
@@ -589,6 +601,18 @@ let ``toFailingField names the field every apply-time error is about`` () =
             DateUnparseable(IssueDate, "31/02/2026", "d MMM yyyy"), Some IssueDate
             DueDateOutOfRange(templateId, DateTime(9999, 12, 31), 30), Some DueDate
             RuleTimedOut(templateId, Reference), Some Reference
+            // change #4: the validation cases name a field; scan/store/window cases name none.
+            InvoiceReferenceInvalid "  ", Some Reference
+            AmountInvalid "9e99", Some Amount
+            CurrencyInvalid "", Some Currency
+            SupplierGone supplierId, None
+            ScanWindowInvalid "bad", None
+            ScanWindowAlreadyExists 14, None
+            CannotDeleteLastScanWindow, None
+            ScanWindowNotFound 45, None
+            InvoiceNotFound, None
+            NoAccountSelected, None
+            InvoiceStoreFailed "boom", None
         ]
 
     let declaredCases = Reflection.FSharpType.GetUnionCases(typeof<InvoiceError>) |> Array.length

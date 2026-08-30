@@ -61,12 +61,15 @@ reading and rescans are incremental.
         ▲
  Database   InvoiceStore.fs · ScanWindowStore.fs · their record mappers
         ▲
- Migrations 20260809000005 Invoices          …0006 ScanProblems
-            …0007 InvoiceTombstones          …0008 ScanWindows (+ seed)
-            …0009 InvoiceSettings
+ Migrations 20260810000004 Invoices          …0005 ScanProblems
+            …0006 InvoiceTombstones          …0007 ScanWindows (+ seed)
+            …0008 InvoiceSettings
 ```
 
-**Reserved migration timestamps for this change: `20260809000005`–`20260809000009`.**
+**Reserved migration timestamps for this change: `20260810000004`–`20260810000008`.**
+*(Renumbered from the originally reserved `20260809000005`–`…0009` per
+[background → *Migration timestamps, reserved across the series*](../invoice-to-calendar/background.md#migration-timestamps-reserved-across-the-series)
+— change #1's `20260810000001` and change #2's `…0002`–`…0003` sort above the old block.)*
 
 ### `Integrations.Pdf` becomes `Integrations.Documents`
 
@@ -238,33 +241,50 @@ offer, so emptying the list is refused in the domain rather than handled downstr
 let scanForInvoices
     (getCurrentTime: GetCurrentTime)
     (loadSelectedMailAccount: LoadSelectedMailAccount)
+    (clearWatermarks: ClearWatermarks)          // Phase 16/17 — FullRescan pre-clear, fatal reset
     (readMailFolder: ReadMailFolder)
     (readDocumentText: ReadDocumentText)
     (loadSuppliers: LoadSuppliers)
     (loadTemplatesForSupplier: LoadTemplatesForSupplier)
     (loadTombstones: LoadTombstones)
-    (upsertInvoices: UpsertInvoices)
+    (upsertInvoice: UpsertInvoice)               // per-invoice, not the batch this block first drew (decision 10)
     (saveScanProblems: SaveScanProblems)
     (clearScanProblems: ClearScanProblems)
+    (mode: ScanMode)                             // Phase 16 — IncrementalScan | FullRescan
     (window: ScanWindowDays)
     : Result<ScanResult, InvoiceError>
 ```
 
 Note how much of it is calls to the pure workflows from change #2 — that is the shape to aim for.
 The cutoff arithmetic is a **private pure function in this file**, so "180 days back from 5 January"
-is a unit test with a fixed clock and no mail store anywhere near it.
+is a unit test with a fixed clock and no mail store anywhere near it. `clearWatermarks` and `mode`
+are decisions 16 and 17 — a `FullRescan` clears the account's watermarks before reading, and any
+scan that aborts on a fatal error clears them on the way out so the next scan re-reads.
 
 ### Migrations
 
 | Timestamp | Name | Creates |
 | --- | --- | --- |
-| `…0005` | `CreateInvoicesTable` | `Invoices(Id, SupplierId FK, TemplateId FK, Reference, Amount, Currency, IssueDate NULL, DueDate NULL, SourceMessageId, ScannedAt)` + **unique index on `(SupplierId, Reference)`** |
-| `…0006` | `CreateScanProblemsTable` | `ScanProblems(Id, SourceMessageId, SupplierId NULL, Sender, Subject, ReceivedAt, Cause, Detail, RecordedAt)` + index on `SourceMessageId` |
-| `…0007` | `CreateInvoiceTombstonesTable` | `InvoiceTombstones(Id, SupplierId FK, Reference, DeletedAt)` + unique index on `(SupplierId, Reference)` |
-| `…0008` | `CreateScanWindowsTable` | `ScanWindows(Id, Days)` + unique index on `Days`, **and `Insert.IntoTable` for 7, 14, 30, 90, 180** |
-| `…0009` | `CreateInvoiceSettingsTable` | `InvoiceSettings(Id INTEGER PK CHECK(Id = 1), SelectedScanWindowDays INTEGER NULL)` |
+| `…0004` | `CreateInvoicesTable` | `Invoices(Id, SupplierId FK cascade, TemplateId **no FK**, Reference, Amount, Currency, IssueDate NULL, DueDate NULL, SourceMessageId, MessageReceivedAt, ScannedAt)` + **unique index on `(SupplierId, Reference)`** |
+| `…0005` | `CreateScanProblemsTable` | `ScanProblems(Id, SourceMessageId, SupplierId NULL, Sender, Subject, ReceivedAt, Cause, Detail, RecordedAt)` + index on `SourceMessageId` |
+| `…0006` | `CreateInvoiceTombstonesTable` | `InvoiceTombstones(Id, SupplierId FK, Reference, DeletedAt)` + unique index on `(SupplierId, Reference)` |
+| `…0007` | `CreateScanWindowsTable` | `ScanWindows(Id, Days)` + unique index on `Days`, **and `Insert.IntoTable` for 7, 14, 30, 90, 180** |
+| `…0008` | `CreateInvoiceSettingsTable` | `InvoiceSettings(Id INTEGER PK CHECK(Id = 1), SelectedScanWindowDays INTEGER NULL)` |
 
-**`…0008` is a new precedent in this repository** (friction #17): every migration so far creates
+**`…0004`'s `TemplateId` deliberately carries no foreign key.** It was written as a second
+`ON DELETE CASCADE` alongside `SupplierId`, and PR #18's third review round measured what that
+costs: deleting one template removed every invoice that template had produced (2 invoices → 1,
+against the real migrations). No tombstone is written for a cascade, so those ledger rows go
+silently and cannot be recovered — and the ledger is the thing this change exists to keep.
+`TemplateId` is *provenance*, not a relationship: requirements.md asks only that an invoice
+"record which template produced it", and nothing joins the two — `InvoiceRecordMappers` reads the
+column straight back into an opaque `TemplateId`, and `InvoiceUiType` carries no template at all.
+`invoice-templates` requirements.md asks that deleting a template remove "it and its rules", not
+the ledger rows it once produced. So the column is treated exactly as `ScanProblems.SupplierId` is
+in `…0005`, and for the reason stated there. `SupplierId` keeps its cascade: the domain carries
+`SupplierGone` for precisely that case, and an invoice with no supplier has no name to render.
+
+**`…0007` is a new precedent in this repository** (friction #17): every migration so far creates
 schema and nothing else. The alternatives are worse — `Startup.fs` checking on each launch whether it
 ought to write five rows is runtime schema management by another name, and hard-coding them in a
 component is the thing this whole change is undoing. `Insert.IntoTable` in `Up`, matching
@@ -285,11 +305,12 @@ exists rather than the code assuming 14 is present.
 InvoicesPage          InvoiceApi           ScanForInvoicesWorkflow          adapters
   │ window changed        │                        │
   ├─ SelectScanWindow ───►│ persist                │
-  ├─ Scan days ──────────►├───────────────────────►│
+  ├─ Scan days ──────────►├───────────────────────►│   (RescanEverything ⇒ mode = FullRescan)
   │                       │                        ├─ getCurrentTime() .Date .AddDays(-days)
   │                       │                        │     → ScanCutoff        ← pure, fixed-clock tested
   │                       │                        ├─ loadSelectedMailAccount
   │                       │                        │     None → NoAccountSelected, STOP
+  │                       │                        ├─ mode = FullRescan? → clearWatermarks account  (Phase 16)
   │                       │                        ├─ readMailFolder account cutoff ──────► mbox
   │                       │                        │     (cutoff applied on HEADERS; 6.2 GB in scope)
   │                       │                        ├─ loadSuppliers · loadTombstones
@@ -307,7 +328,8 @@ InvoicesPage          InvoiceApi           ScanForInvoicesWorkflow          adap
   │                       │                        │   ├ ValidateInvoiceWorkflow
   │                       │                        │   └ tombstoned key? → SKIP silently
   │                       │                        │
-  │                       │                        ├─ upsertInvoices  (natural key → update, not add)
+  │                       │                        ├─ upsertInvoice   (natural key → update, not add)
+  │                       │                        │     any fatal store error ⇒ clearWatermarks account, return that error  (Phase 17)
   │                       │                        ├─ saveScanProblems
   │                       │                        └─ clearScanProblems for messages that now succeeded
   │◄─ ScanResult { Invoices; Problems } ───────────┤
@@ -376,16 +398,28 @@ rescan and the diagnostic is gone before you look.
 ### Action names
 
 ```
-ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent / readText
-                                             .WordDocumentReader.readText
-                                             .PlainTextDocumentReader.readText
-                                             .EmailBodyReader.readText
+ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent
 ActionNames.MyDogsbody.Database.InvoiceStore.*  /  .ScanWindowStore.*
 ActionNames.MyDogsbody.Startup.InvoiceApi.*     /  .ScanWindowApi.*
 ```
 
-`ActionNames.MyDogsbody.Integrations.Pdf.*` is **renamed** to `.Documents.*`. The structural suite
-will catch any entry left behind.
+`ActionNames.MyDogsbody.Integrations.Pdf.*` is **renamed** to `.Documents.*` (only the existing
+`PdfDocumentReader.readContent` entry). The structural suite will catch any entry left behind.
+
+**The four `readText` readers carry no `ActionName` and return `Result<TextLine list, DocumentError>`
+directly** — the `MailFolderReader` precedent this section's own error table leans on. Every outcome
+a reader can produce is a domain fact a person could name: a scanned-image PDF
+(`DocumentHasNoTextLayer`), a file that will not open (`DocumentUnreadable`), a format with no
+reader (`DocumentFormatUnsupported`). A `handleError`/`MyDogsbodyException` shape would flatten
+those three into one wrapped exception the composition root could not tell apart, and none of them
+is the "infrastructure collapsed" case that shape exists for. An unexpected library crash is caught
+by a catch-all and mapped to `DocumentUnreadable ex.Message`. `readContent` keeps its existing
+outer-ring shape untouched (task 1.3) — it predates this convention and feeds a workflow this change
+does not wire.
+
+*(This is a departure from the design's original Action-names block, which speculatively listed a
+`readText` entry per reader. Recorded here per background.md's instruction to state disagreements
+with the decision record in the change's own `design.md`.)*
 
 ---
 
@@ -483,6 +517,28 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
 3. **A partly unreadable message still yields an invoice.** `ScanMessageWorkflow` returns a
    `ScannedMessage` **and** a list of problem causes rather than a `Result`, so one corrupt
    attachment out of two does not lose the invoice in the other.
+   *Reporting rule, decided in implementation:* when a message yields **no** invoice,
+   `ScanForInvoicesWorkflow.processMessage` records the first attachment cause in preference to the
+   conclusion it would otherwise reach. An unreadable attachment or an unsupported format is a fact
+   *about the message*, where every other cause is a conclusion about the template, and it is
+   recorded nowhere else — this list is the only place it exists. Consulting it only on the
+   "no supplier matched" branch left `AttachmentUnreadable` and `FormatUnsupported` — two of the
+   eight causes requirements.md asks to be distinguishable — unreachable for a **configured**
+   supplier, and the `.doc`/`.xlsx` naming that requirements.md asks for ("SHALL NOT silently
+   skip it", "answered from data") never happened. Two measured wrong diagnostics came out of it:
+   `RuleFoundNothing(acme, acme-t1, "Reference")` — word for word what requirements.md forbids
+   ("WHEN an attachment is empty or zero bytes THE SYSTEM SHALL report it as unreadable **rather
+   than as text that matched nothing**") — and, worse, `NoTemplateMatched` for a supplier that
+   *has* a PDF template, because `SelectTemplateWorkflow` filters out every template whose
+   `DocumentPart` the message does not carry and an unreadable attachment is not among the
+   message's parts. That second one is why the preference covers the whole `selectTemplate` branch
+   rather than only the value-extraction cases: it tells the one correctly-configured supplier to
+   go and add a template that is already there, and `outcome.md`'s 12.5 run recorded
+   `NoTemplateMatched` twice against the real mailbox. Two boundaries are deliberate: *several suppliers
+   matched* keeps its own cause, because it is decided before a template is tried and the matchers
+   must be narrowed whatever the attachment turned out to be; and a message that **did** yield an
+   invoice records nothing, because a scan keeps one problem row per message and `clearScanProblems`
+   removes the rows of messages that succeeded.
 4. **Problems are cleared per source message, not wholesale.** A scan clears only the rows for
    messages it processed and which now succeed. A narrower window must not silently erase the
    diagnostics for messages outside it.
@@ -497,8 +553,127 @@ That was the condition Q1.9 was accepted under, and this is where it is settled.
    setting, so whatever it does becomes the habit.**
 8. **The scan reads the account the user selected in change #3, and refuses with a named error when
    none is selected.** Not a silent empty result.
-9. **`EmailBodyReader` prefers HTML** — the correction *Finding 5* makes to Q1.13. Multipart
-   selection is the reader's job, so a template never has to know which alternative it got.
+9. **`EmailBodyReader` prefers HTML** — the correction *Finding 5* makes to Q1.13. A template
+   never has to know which alternative it got. *Mechanism, decided in implementation:* change #3's
+   `MailFolderReader` already did the MIME work and hands over `BodyText` and `BodyHtml`
+   separately. `ScanMessageWorkflow` picks — HTML if present (`DocumentSource` with
+   `Format = EmailBody`, routed to `EmailBodyReader`), otherwise the plain text (`Format = PlainText`,
+   routed to `PlainTextDocumentReader`). This keeps the single `ReadDocumentText` dependency the
+   workflow table shows: `EmailBodyReader` only ever parses HTML — deriving block boundaries from
+   `<tr>`/`<td>`/`<p>` structure and stripping markup where there is none — and the trivial
+   "which alternative exists" choice is a one-line `Option.orElse` in the workflow, not multipart
+   parsing. `EmailBodyReader` takes `HtmlAgilityPack` (offline-cached 1.11.39); it is the only
+   project that does.
+10. **`UpsertInvoice` is per-invoice, not `UpsertInvoices` batch** (implementation). "Continue past
+   a failure and report per row" needs each row's constraint failure to become one message's
+   problem; a batch that fails atomically cannot say which row. A rescan of an overlapping window
+   still updates rather than duplicates — each per-row upsert is upsert-on-natural-key.
+11. **`ScanResult` carries what *this scan* did**, not a reload: `Invoices` = the rows upserted
+   this run (which, since a scan of window N reads every message in window N, is every in-window
+   invoice), `Problems` = the problems recorded this run. The page's full view comes from
+   `InvoiceApi.GetInvoices` / `GetProblems` separately.
+12. **"Two invoices from one message" is a store-layer property, verified in Phase 7.** The
+   engine (`selectTemplate`) produces one `ExtractedInvoice` per message; the `Invoices` table's
+   key is `(SupplierId, Reference)`, not `SourceMessageId`, so two rows *can* share a source
+   message id — 7.2 asserts that against the real store.
+13. **`SupplierGone` maps to the `NoSupplierMatched` problem cause.** It is unreachable in a
+   single scan (`matchSupplier` only matches a loaded supplier and the upsert is in the same
+   scan); the guard exists for a supplier deleted mid-scan by another process, and reuses an
+   existing cause rather than adding a ninth requirements.md did not enumerate.
+
+   **PR #18 round 9: the guard needed a producer, and had none.** `scanForInvoices` reads
+   `loadSuppliers` once at the start and matches every message against that snapshot, so a
+   supplier deleted while the ~60 s scan runs still matches — and the upsert then hits the
+   `Invoices → Suppliers` foreign key. `InvoiceApiFactory` mapped every store failure through
+   `toInvoiceError`, so that arrived as `InvoiceStoreFailed`, which `step` treats as **fatal**:
+   one deleted supplier ended the whole run, discarded every problem gathered so far, and reset
+   the account's watermarks — instead of costing one row. Nothing in production could construct
+   `SupplierGone`; the branch and its unit test were reachable only from tests. Closed by
+   `InvoiceStore.isMissingSupplier` (SQLITE_CONSTRAINT_FOREIGNKEY, extended code 787, walked
+   through the `AggregateException` `runSync` wraps it in) and one branch in the factory's
+   `upsertInvoice`. The extended code, not the primary 19, is what is read: 19 covers unique and
+   check violations too, and calling one of those "the supplier is gone" would record the wrong
+   problem *and* let a genuinely broken write pass as non-fatal. `Invoices` and
+   `InvoiceTombstones` each declare exactly one foreign key, so a 787 on either is unambiguous.
+   The predicate lives in the store because it is SQLite knowledge — swap the store and it goes
+   with it — and returns `bool`, so no domain type reaches the outer ring.
+14. **`MailFolderReader` gets a streaming mbox reader — Phase 14, forced by the Phase 12
+   measurement.** The reader change #3 shipped buffered each folder file whole and refused
+   anything a Latin1 string cannot hold (~1 GiB); `read`'s `| Error _ -> []` then dropped that
+   folder silently on every scan. The 12.4/12.5 measurement run (`MeasureScan`) hit it head-on:
+   the maintainer's invoice mail lives in a 2.0 GB Gmail INBOX (`imap.googlemail-1.com/INBOX`,
+   `outpost597100@gmail.com`), which contributed **zero** messages with nothing on screen — a
+   direct violation of Q1.5 ("never silent, never fatal to the scan") that made the feature
+   unable to see the invoices it exists to extract. The fix (`foldMboxSegments`) streams the file
+   `StreamChunkBytes` (4 MiB) at a time, emitting one message segment at a time in memory bounded
+   by that chunk plus one in-progress message; `bufferSpan` / `splitIntoMessages` / `processSegment`
+   are gone, replaced by `segmentStartOffsets` (a byte-scan for `From ` boundaries), `foldMboxSegments`
+   and `normalizeStartOffset`. `MaxBufferableBytes` survives as a **per-segment** ceiling only. A
+   single segment larger than `MaxMessageBytes` (128 MiB — a corrupt file or a mis-split, never a
+   real email) is emitted once for the caller to skip, then the reader byte-scans forward to the
+   next real boundary rather than accumulating without limit. Watermarks, the torn-final-message
+   rule, the false-`From `-boundary rule and the CRLF handling are all unchanged; the resume seam
+   (a watermark landing one byte before a `\nFrom ` blank line) is trimmed in `foldMboxSegments`.
+   `countMessages` no longer over-counts a non-last fragment with no header/body separator — it
+   now counts a segment iff it has a separator, matching what `read` returns.
+15. **A window change reloads; a scan is explicit — Phase 15, settled by the Phase 12 measurement.**
+   Q1.9 ("changing the window rescans immediately") was accepted on the written condition that if
+   a window change cost seconds, an explicit Refresh would replace it. The measurement put a full
+   scan at **~60 s whatever the window** — 58 s at 180 days, 63 s at 730 — because the cost is
+   reading every folder of every account, not the cutoff. So `InvoicesModuleCreators.selectWindow`
+   now persists the choice and calls `loadLedger` (`GetInvoices` / `GetProblems` for the new
+   window — no `InvoiceApi.Scan`); `deleteInvoice` likewise reloads (the row is hard-deleted, so
+   `GetInvoices` already omits it). `InvoiceApi.Scan` is reached only by the initial load, the new
+   **"Scan now"** button (`InvoicesComponents.windowPicker`, disabled while busy), and
+   `undeleteInvoice` (only a scan can restore a hard-deleted row — `UndeleteInvoiceWorkflow` says
+   so). `InvoicesModule` already carried a stubbed `Rescan` for exactly this. "Narrowing hides, it
+   does not forget" now holds by construction: the store keeps every invoice, the window is a
+   read filter.
+16. **`scanForInvoices` takes a `ScanMode` and a `clearWatermarks` dependency — Phase 16, PR #18
+   review.** A folder's watermark records how far it was read; `MailFolderReader.resumeOffset`
+   skips a message older than the cutoff *before parsing its body*, so a folder scanned once — even
+   with no supplier configured — advances to EOF having extracted nothing, and every later scan
+   answers "nothing new" for that mail. A reviewer opening `/invoices` before configuring a
+   supplier, then adding one, never sees that supplier's invoices: the exact class round 2 fixed
+   for a *widened window*, here for a *changed configuration*. The recovery already existed —
+   `MailAccountApi.ClearWatermarks` per account, on the mail-accounts page — but the invoices page
+   never surfaced it. Rather than a second workflow wrapping `scanForInvoices`, the workflow gains
+   `mode: ScanMode` (`IncrementalScan | FullRescan` — a choice type, not a bool: CLAUDE.md's
+   coding style) and `clearWatermarks: ClearWatermarks` (borrowed from the MailAccounts area, the
+   same way `loadSelectedMailAccount` already is). `FullRescan` calls `clearWatermarks accountId`
+   after the account is resolved and before `readMailFolder`; `IncrementalScan` does not.
+   `InvoiceApi` gains `RescanEverything`, wired to `FullRescan`; `Scan` stays `IncrementalScan`.
+   The UI adds a "Rescan everything" button beside "Scan now". `ScanMode` never crosses the
+   `InvoiceApi` boundary (it is `UI.Types`, which cannot see the domain) — the factory picks the
+   mode, the UI picks the API member.
+17. **A fatal scan resets the selected account's watermarks — Phase 17, PR #18 review round 6.**
+   `MailFolderReader.readFolder` saves each folder's watermark as part of `read`, which
+   `scanForInvoices` calls *before* it processes a single message. A fatal error part-way through
+   processing (`loadTemplatesForSupplier` or `upsertInvoice` returning a store failure sets
+   `ScanAcc.Fatal` and short-circuits) would otherwise leave every folder's watermark at EOF, so
+   the unprocessed messages are never read again — `resumeOffset` resumes from `OffsetReached`
+   whenever the file has only grown. No invoice, no problem, nothing on screen. The workflow now
+   calls `clearWatermarks accountId` — the same dependency Phase 16 added — and returns the
+   original error regardless of whether the clear succeeded (`Result.mapError (fun _ -> error)`),
+   so a broken store, the usual cause of such an error, does not mask itself.
+   **Every abort after `readMailFolder` resets, not only the `ScanAcc.Fatal` one (PR #18 review
+   round 7).** The line that advances the watermarks is `readMailFolder`, so what decides whether
+   a reset is owed is *where the abort is relative to that call*, not which of the aborts it is.
+   Five steps sit after it — `loadSuppliers`, `loadTombstones`, the `Fatal` branch,
+   `saveScanProblems` and `clearScanProblems` — and the first draft of this decision wrapped only
+   the third. A `loadSuppliers` store failure aborted with **every** message unprocessed behind a
+   watermark at EOF, which is the same defect in its worst form; a `saveScanProblems` failure lost
+   the diagnostics for mail that can no longer be re-read, so the problem list stayed empty for it
+   for good. `resettingWatermarksOnError clearWatermarks accountId` is applied to all five, and
+   `readMailFolder`'s own failure deliberately is **not** wrapped — nothing was read, so nothing
+   was advanced.
+   **Chosen over deferred-commit** (recording a "last processed" offset separately from "last
+   read" and promoting one to the other on success): that needs two offset/cutoff pairs on the
+   persisted `ScanWatermarkEntity` and careful "which is authoritative" logic in `resumeOffset`,
+   which is materially more surface — and more persisted-shape churn in the same PR that already
+   added `CutoffTicks` — for a rare path. The cost of the reset is one full re-read (~60 s) on the
+   next scan after a fatal error; since a fatal error means the store was unreachable, no scan
+   succeeds until it is fixed, and one full re-read then is the same cost as the first scan ever.
 
 ---
 

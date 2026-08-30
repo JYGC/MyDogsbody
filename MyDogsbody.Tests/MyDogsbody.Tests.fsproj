@@ -38,7 +38,14 @@
     <Compile Include="Domain\Invoices\MatchSupplierWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ApplyTemplateWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\SelectTemplateWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ResolveScanWindowWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ValidateInvoiceWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ScanMessageWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ScanForInvoicesWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\DeleteInvoiceWorkflowTests.fs" />
+    <Compile Include="Domain\Invoices\ScanWindowWorkflowsTests.fs" />
     <Compile Include="Fixtures\ThunderbirdFixturePaths.fs" />
+    <Compile Include="Fixtures\DocumentFixtures.fs" />
     <Compile Include="Fixtures\MeasuredTemplates.fs" />
     <Compile Include="Fixtures\MeasuredTemplatesTests.fs" />
     <Compile Include="Contracts\DomainIsolationTests.fs" />
@@ -51,17 +58,25 @@
     <Compile Include="Integrations\Thunderbird\ThunderbirdStoreTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialsDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
-    <Compile Include="Integrations\Pdf\PdfDocumentReaderTests.fs" />
+    <Compile Include="Integrations\Documents\PdfDocumentReaderTests.fs" />
+    <Compile Include="Integrations\Documents\WordDocumentReaderTests.fs" />
+    <Compile Include="Integrations\Documents\PlainTextDocumentReaderTests.fs" />
+    <Compile Include="Integrations\Documents\EmailBodyReaderTests.fs" />
+    <Compile Include="Integrations\Documents\DocumentReadersTests.fs" />
     <Compile Include="Logging\ExceptionStoreTests.fs" />
     <Compile Include="Database\MigrationTestHelpers.fs" />
     <Compile Include="Database\MigrationsTests.fs" />
     <Compile Include="Database\SupplierMigrationsTests.fs" />
     <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
+    <Compile Include="Database\InvoiceMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
     <Compile Include="Database\TemplateRecordMappersTests.fs" />
     <Compile Include="Database\TemplateStoreTests.fs" />
     <Compile Include="Database\SupplierStoreTests.fs" />
+    <Compile Include="Database\InvoiceRecordMappersTests.fs" />
+    <Compile Include="Database\InvoiceStoreTests.fs" />
+    <Compile Include="Database\ScanWindowStoreTests.fs" />
     <Compile Include="Startup\CredentialApiMappersTests.fs" />
     <Compile Include="Startup\CredentialApiFactoryTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />
@@ -70,6 +85,9 @@
     <Compile Include="Startup\TemplateApiFactoryTests.fs" />
     <Compile Include="Startup\MailAccountApiMappersTests.fs" />
     <Compile Include="Startup\MailAccountApiFactoryTests.fs" />
+    <Compile Include="Startup\InvoiceApiMappersTests.fs" />
+    <Compile Include="Startup\ScanWindowApiFactoryTests.fs" />
+    <Compile Include="Startup\InvoiceApiFactoryTests.fs" />
     <Compile Include="Contracts\ErrorTranslationTests.fs" />
     <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
@@ -82,10 +100,15 @@
     <Compile Include="Contracts\MailAccountApiContractTests.fs" />
     <Compile Include="Contracts\ThunderbirdPersistedShapeTests.fs" />
     <Compile Include="Contracts\MessageNormalizationContractTests.fs" />
+    <Compile Include="Contracts\GetCurrentTimeContractTests.fs" />
+    <Compile Include="Contracts\DocumentReaderContractTests.fs" />
+    <Compile Include="Contracts\InvoiceDependencyContractTests.fs" />
+    <Compile Include="Contracts\InvoicePersistedShapeTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\CredentialsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\MailAccountsBrowserModuleCreatorsTests.fs" />
+    <Compile Include="UI\ModuleCreators\InvoicesModuleCreatorsTests.fs" />
     <Compile Include="UI\Components\MailAccountsComponentsTests.fs" />
     <Compile Include="E2E\BlazorTestHarness.fs" />
     <Compile Include="E2E\CredentialsFlowTests.fs" />
@@ -93,12 +116,15 @@
     <Compile Include="E2E\SuppliersFlowTests.fs" />
     <Compile Include="E2E\MailAccountsTestHarness.fs" />
     <Compile Include="E2E\MailAccountsFlowTests.fs" />
+    <Compile Include="E2E\InvoicesTestHarness.fs" />
+    <Compile Include="E2E\InvoicesFlowTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="bunit" Version="1.40.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
     <PackageReference Include="LiteDB" Version="5.0.21" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="MudBlazor" Version="8.13.0" />
@@ -111,7 +137,7 @@
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
-    <ProjectReference Include="..\MyDogsbody.Integrations.Pdf\MyDogsbody.Integrations.Pdf.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Documents\MyDogsbody.Integrations.Documents.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Startup\MyDogsbody.Startup.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />

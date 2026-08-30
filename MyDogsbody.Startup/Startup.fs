@@ -99,6 +99,16 @@ let private thunderbirdDatabaseContext =
 let mailAccountApi: MailAccountApi =
     MailAccountApiFactory.createMailAccountApi handleError thunderbirdDatabaseContext
 
+/// The real clock, exactly as friction #15's contract suite documents it: DateTime.Now, Kind
+/// Local. No workflow reads it directly - it arrives as the GetCurrentTime dependency.
+let private getCurrentTime () = DateTime.Now
+
+let invoiceApi: InvoiceApi =
+    InvoiceApiFactory.createInvoiceApi handleError getCurrentTime mainDatabaseContext thunderbirdDatabaseContext
+
+let scanWindowApi: ScanWindowApi =
+    ScanWindowApiFactory.createScanWindowApi handleError mainDatabaseContext
+
 /// The host's entire share of the wiring. Every registration is expressed here, in F#, so
 /// MainWindow.xaml.cs states which services exist without stating how they are built.
 let registerServices (services: IServiceCollection) : IServiceCollection =
@@ -107,3 +117,5 @@ let registerServices (services: IServiceCollection) : IServiceCollection =
         .AddSingleton<SupplierApi>(supplierApi)
         .AddSingleton<TemplateApi>(templateApi)
         .AddSingleton<MailAccountApi>(mailAccountApi)
+        .AddSingleton<InvoiceApi>(invoiceApi)
+        .AddSingleton<ScanWindowApi>(scanWindowApi)

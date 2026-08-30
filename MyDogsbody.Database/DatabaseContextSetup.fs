@@ -11,6 +11,11 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let supplierMatchersTableName = "SupplierMatchers"
     let invoiceTemplatesTableName = "InvoiceTemplates"
     let templateFieldRulesTableName = "TemplateFieldRules"
+    let invoicesTableName = "Invoices"
+    let scanProblemsTableName = "ScanProblems"
+    let invoiceTombstonesTableName = "InvoiceTombstones"
+    let scanWindowsTableName = "ScanWindows"
+    let invoiceSettingsTableName = "InvoiceSettings"
 
     OptionTypes.register()
 
@@ -26,6 +31,11 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let supplierMatchersTable = table'<SupplierMatcherRecord> supplierMatchersTableName
     let invoiceTemplatesTable = table'<InvoiceTemplateRecord> invoiceTemplatesTableName
     let templateFieldRulesTable = table'<TemplateFieldRuleRecord> templateFieldRulesTableName
+    let invoicesTable = table'<InvoiceRecord> invoicesTableName
+    let scanProblemsTable = table'<ScanProblemRecord> scanProblemsTableName
+    let invoiceTombstonesTable = table'<InvoiceTombstoneRecord> invoiceTombstonesTableName
+    let scanWindowsTable = table'<ScanWindowRecord> scanWindowsTableName
+    let invoiceSettingsTable = table'<InvoiceSettingsRecord> invoiceSettingsTableName
 
     {
         GetDatabaseConnection = fun () -> databaseConnection
@@ -35,5 +45,10 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
         GetSupplierMatchers = fun () -> supplierMatchersTable
         GetInvoiceTemplates = fun () -> invoiceTemplatesTable
         GetTemplateFieldRules = fun () -> templateFieldRulesTable
+        GetInvoices = fun () -> invoicesTable
+        GetScanProblems = fun () -> scanProblemsTable
+        GetInvoiceTombstones = fun () -> invoiceTombstonesTable
+        GetScanWindows = fun () -> scanWindowsTable
+        GetInvoiceSettings = fun () -> invoiceSettingsTable
         Dispose = fun () -> databaseConnection.Dispose()
     }

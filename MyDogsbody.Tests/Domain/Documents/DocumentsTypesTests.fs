@@ -38,3 +38,66 @@ let ``DocumentPath.create does not require the file to exist`` () =
 
     // Assert
     Assert.True(Result.isOk actual)
+
+// --- change #4: the second reading capability, declared beside ReadDocumentContent ---
+
+[<Fact; Trait("Level", "Unit")>]
+let ``DocumentSource carries the bytes, name and format it was built from`` () =
+    // Arrange - a plain carrier: an attachment lives inside a multi-GB mbox and must not be
+    // spilled to a temp file to be read (Q1.11). No validation here; a reader reports what it
+    // cannot read.
+    let bytes = [| 1uy; 2uy; 3uy |]
+
+    // Act
+    let source = { Format = Pdf; Name = "invoice-7422.pdf"; Content = bytes }
+
+    // Assert
+    Assert.Equal(Pdf, source.Format)
+    Assert.Equal("invoice-7422.pdf", source.Name)
+    Assert.Same(bytes, source.Content)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``DocumentFormatUnsupported names the format that arrived`` () =
+    // The measured mailbox carries 114 .xlsx against 1 .docx; the problem row must say which
+    // format, so the question of building a reader for it can later be answered from data.
+    let error = DocumentFormatUnsupported "xlsx"
+
+    match error with
+    | DocumentFormatUnsupported format -> Assert.Equal("xlsx", format)
+    | other -> Assert.Fail($"Expected DocumentFormatUnsupported, got {other}")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``DocumentHasNoTextLayer is a distinct cause from DocumentUnreadable`` () =
+    // A scanned-image PDF (1.6% of the measured PDFs) is a different diagnostic from a file that
+    // will not open at all (3.7%): one might warrant OCR later, the other is simply broken.
+    Assert.NotEqual<DocumentError>(DocumentHasNoTextLayer, DocumentUnreadable "boom")
+
+// --- task 1.7: the reader is chosen by filename extension, never by declared content type ---
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("invoice.pdf", "Pdf")>]
+[<InlineData("INVOICE.PDF", "Pdf")>]
+[<InlineData("2026 statement.PdF", "Pdf")>]
+[<InlineData("invoice.docx", "Word")>]
+[<InlineData("invoice.doc", "Word")>]
+[<InlineData("body.txt", "PlainText")>]
+[<InlineData("notes.text", "PlainText")>]
+let ``DocumentFormat.ofFileName maps a known extension to its format`` (fileName: string) (expected: string) =
+    match DocumentFormat.ofFileName fileName with
+    | Ok format -> Assert.Equal(expected, string format)
+    | Error other -> Assert.Fail($"Expected Ok {expected}, got Error {other}")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("statement.xlsx", "xlsx")>]
+[<InlineData("archive.zip", "zip")>]
+[<InlineData("image.PNG", "png")>]
+let ``DocumentFormat.ofFileName returns the lower-cased extension for a format with no reader`` (fileName: string) (expected: string) =
+    // The measured mailbox holds 114 .xlsx against 1 .docx - the problem row must name the format.
+    Assert.Equal(Error expected, DocumentFormat.ofFileName fileName)
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("attachment-with-no-extension")>]
+[<InlineData("")>]
+[<InlineData(null)>]
+let ``DocumentFormat.ofFileName returns "none" when there is no extension`` (fileName: string) =
+    Assert.Equal(Error "none", DocumentFormat.ofFileName fileName)

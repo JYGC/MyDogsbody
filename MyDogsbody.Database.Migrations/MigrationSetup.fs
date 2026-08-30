@@ -44,3 +44,13 @@ let rollbackAll (connectionString: string) =
         runner.RollbackToVersion 0L
     finally
         (serviceProvider :> IDisposable).Dispose()
+
+/// Walks Down() back to (and including the state after) the given migration version - so a test
+/// can exercise one migration's Down() without dropping every table before it. Also test-only.
+let rollbackToVersion (connectionString: string) (version: int64) =
+    let serviceProvider, runner = buildRunner connectionString
+
+    try
+        runner.RollbackToVersion version
+    finally
+        (serviceProvider :> IDisposable).Dispose()

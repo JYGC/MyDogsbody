@@ -88,9 +88,12 @@ WHEN a scan runs THE SYSTEM SHALL pass the computed cutoff to the mail reader so
 WHEN a scan reads a message THE SYSTEM SHALL flatten it and its attachments to text, match a supplier, apply that supplier's templates in order, validate the result, and store it.
 WHEN a scan encounters a message that yields no invoice THE SYSTEM SHALL record the reason against that message and **continue** — never silent, never fatal to the scan.
 WHEN a scan completes THE SYSTEM SHALL return both the invoices found and the problems recorded, as two lists.
-WHEN a user changes the scan window THE SYSTEM SHALL rescan immediately.
+WHEN a user changes the scan window THE SYSTEM SHALL persist the choice and reload the stored ledger for that window, and SHALL NOT read the mailbox again. *(Phase 15: the Phase 12 measurement put a full scan at ~60 s whatever the window — the cost is reading every folder, not the cutoff — so the immediate rescan of the earlier draft is dropped.)*
+WHEN a user asks to scan (the explicit "Scan now", and the initial page load) THE SYSTEM SHALL read the mailbox for the current window and refresh the ledger from the result.
+WHEN a user asks to "Rescan everything" THE SYSTEM SHALL discard the selected account's scan watermarks and read every scannable folder in full for the current window, then refresh the ledger. *(Phase 16: watermarks record how far each folder was read; a folder read before a supplier or template existed advanced to the end of the file with nothing extracted, and an ordinary "Scan now" resumes from there and sees none of that mail. This is the manual escape hatch — "Clear watermarks" on the mail-accounts page already exists per account, but the invoices page never surfaced it.)*
+WHEN a scan aborts on a fatal error (a store or reader failure, not a per-message problem) THE SYSTEM SHALL leave the selected account's scan watermarks such that the next scan re-reads every message this scan did not finish processing, and SHALL NOT advance them past mail it read but never turned into an invoice or a problem. *(Phase 17: the mail reader advances a folder's watermark as soon as it has read the folder, before any message is processed; a fatal error part-way through processing would otherwise strand every unprocessed message behind a watermark that says "already read".)*
 WHEN a scan runs THE SYSTEM SHALL NOT block the user interface.
-WHEN a scan is measured against the real mail store THE SYSTEM SHALL have its duration recorded in the change description — if changing the window costs seconds, an explicit Refresh button comes back in place of the immediate rescan.
+WHEN a scan is measured against the real mail store THE SYSTEM SHALL have its duration recorded in the change description — if changing the window costs seconds, an explicit Refresh button comes back in place of the immediate rescan. *(Measured at ~60 s; the Refresh button — "Scan now" — is Phase 15.)*
 
 ---
 
@@ -150,8 +153,10 @@ WHEN this change is complete THE SYSTEM SHALL still have exactly **two** mapping
 WHEN a user navigates to `/invoices` THE SYSTEM SHALL display the scan-window picker, the invoice table, and the number of invoices and the window they fall in, stated above the table.
 WHEN the scan-window picker is rendered THE SYSTEM SHALL render whatever windows the store holds, and SHALL hold no list of its own — adding a sixth window is done on screen and takes effect without a rebuild.
 WHEN the picker is rendered THE SYSTEM SHALL open on the resolved remembered choice, never on a literal value written into a component.
-WHEN a user changes the window THE SYSTEM SHALL persist the choice and then rescan, so the table shows what was actually scanned rather than what the picker was holding.
-WHEN the window is narrowed THE SYSTEM SHALL hide invoices outside it and SHALL NOT delete them — narrowing hides, it does not forget.
+WHEN a user changes the window THE SYSTEM SHALL persist the choice and reload the stored ledger for that window (Phase 15 — not a mailbox scan; see the *Scanning* section).
+WHEN the `/invoices` page is rendered THE SYSTEM SHALL show a "Scan now" control that reads the mailbox for the current window, disabled while a scan or reload is in flight.
+WHEN the `/invoices` page is rendered THE SYSTEM SHALL show a "Rescan everything" control that discards the selected account's watermarks and reads every folder in full, disabled while a scan or reload is in flight.
+WHEN the window is narrowed THE SYSTEM SHALL hide invoices outside it and SHALL NOT delete them — narrowing hides, it does not forget; widening the window again brings them back with no scan.
 WHEN an invoice has no due date THE SYSTEM SHALL show it greyed with the reason it cannot go on a calendar.
 WHEN a user deletes an invoice THE SYSTEM SHALL ask for confirmation, then delete it and reload.
 WHEN a user opens the problems view THE SYSTEM SHALL list the messages that yielded nothing, with sender, subject, date and cause.
@@ -180,7 +185,7 @@ WHEN the document readers are tested THE SYSTEM SHALL run against committed fixt
 WHEN the ledger is tested THE SYSTEM SHALL run against a real SQLite database in a fresh temp file per test with the schema built by the migration runner.
 WHEN each migration is added THE SYSTEM SHALL have `Up`/`Down` tests, and the seeding migration SHALL have a test that `Down()` removes the seeded rows.
 WHEN a dependency function type is published THE SYSTEM SHALL have one shared contract suite run against the real adapter **and** every fake.
-WHEN the invoices flow is complete THE SYSTEM SHALL have an E2E test covering a scan producing invoices, a window change rescanning, a per-row delete producing a tombstone, an un-delete, and a problem row appearing for a message that yields nothing.
+WHEN the invoices flow is complete THE SYSTEM SHALL have an E2E test covering a scan producing invoices, a window change that filters the ledger without a scan, "Scan now" reading the mailbox, a per-row delete producing a tombstone, an un-delete, and a problem row appearing for a message that yields nothing.
 WHEN a test is added THE SYSTEM SHALL tag it with its level.
 
 ### Specific proofs this change owes
@@ -190,6 +195,8 @@ WHEN an invoice is deleted and a covering window is rescanned THE SYSTEM SHALL N
 WHEN a tombstone is removed and a covering window is rescanned THE SYSTEM SHALL restore it.
 WHEN a scan runs twice within one day THE SYSTEM SHALL compute the same cutoff both times.
 WHEN a message produces a problem and its template is later fixed THE SYSTEM SHALL clear the problem row on the next scan of a covering window.
+WHEN "Rescan everything" runs THE SYSTEM SHALL clear the selected account's watermarks before reading, and an ordinary scan SHALL NOT.
+WHEN a scan aborts on a fatal error after reading the mailbox THE SYSTEM SHALL reset the selected account's watermarks, and a scan that completes SHALL NOT.
 
 ### Gate
 
@@ -205,6 +212,7 @@ WHEN a scan finds an invoice whose supplier has since been deleted THE SYSTEM SH
 WHEN an attachment is empty or zero bytes THE SYSTEM SHALL report it as unreadable rather than as text that matched nothing.
 WHEN an attachment is very large THE SYSTEM SHALL read it without loading the whole folder into memory.
 WHEN a supplier's payment term changes THE SYSTEM SHALL apply the new term on the next scan and update the derived due dates of invoices it rescans; invoices outside the window are unaffected until they are rescanned.
+WHEN a supplier or template is configured after the invoices page has already scanned once THE SYSTEM SHALL let the user reach that supplier's mail with "Rescan everything" — an ordinary scan resumes from watermarks that were advanced past it, and the mail is not re-read until the watermarks are discarded.
 WHEN a template changes THE SYSTEM SHALL leave existing invoices alone; the next scan of a covering window updates them through the natural key.
 WHEN a scan window is deleted while it is the selected one THE SYSTEM SHALL fall back on the next page load rather than failing.
 WHEN two scans run concurrently THE SYSTEM SHALL not corrupt the ledger — the unique index is the backstop.
