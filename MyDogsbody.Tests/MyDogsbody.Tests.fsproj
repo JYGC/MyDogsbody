@@ -58,6 +58,7 @@
     <Compile Include="Database\SupplierMigrationsTests.fs" />
     <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
+    <Compile Include="Database\SqliteConnectionPoolingTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
     <Compile Include="Database\TemplateRecordMappersTests.fs" />
     <Compile Include="Database\TemplateStoreTests.fs" />

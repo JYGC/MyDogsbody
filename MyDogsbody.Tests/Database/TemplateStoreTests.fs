@@ -37,7 +37,7 @@ let private sampleRules =
 /// hand-written DDL, so this doubles as a check that the migrations produce a usable schema.
 let private withDatabase (test: DatabaseContext -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
 
@@ -45,9 +45,7 @@ let private withDatabase (test: DatabaseContext -> unit) =
         test context
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
-        Assert.False(File.Exists databaseFilePath)
+        try File.Delete databaseFilePath with _ -> ()
 
 let private okOrFail label result =
     match result with

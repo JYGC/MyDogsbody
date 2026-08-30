@@ -22,7 +22,7 @@ let private valueOrFail (result: Result<'T, string>) =
 
 let private withMigratedDatabase (test: DatabaseContext -> string -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
 
@@ -30,8 +30,7 @@ let private withMigratedDatabase (test: DatabaseContext -> string -> unit) =
         test context connectionString
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 let private columnNames (connectionString: string) (tableName: string) =
     use connection = new SqliteConnection(connectionString)

@@ -3,7 +3,6 @@ module MyDogsbody.Tests.Contracts.SupplierDependencyContractTests
 open System
 open System.IO
 open Xunit
-open Microsoft.Data.Sqlite
 open MyDogsbody.Builders
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Database
@@ -52,7 +51,7 @@ type private SupplierDependencies =
 
 let private withRealDependencies (test: SupplierDependencies -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
 
@@ -93,8 +92,7 @@ let private withRealDependencies (test: SupplierDependencies -> unit) =
             }
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 // ---------- the in-memory fake the workflow unit tests use ----------
 

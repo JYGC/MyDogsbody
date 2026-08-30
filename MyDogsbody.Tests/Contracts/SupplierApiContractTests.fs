@@ -3,7 +3,6 @@ module MyDogsbody.Tests.Contracts.SupplierApiContractTests
 open System
 open System.IO
 open Xunit
-open Microsoft.Data.Sqlite
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Database
@@ -21,7 +20,7 @@ let private handleError = HandleErrorBuilder (fun _ -> ())
 
 let private withRealApi (test: SupplierApi -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
 
@@ -29,8 +28,7 @@ let private withRealApi (test: SupplierApi -> unit) =
         test (SupplierApiFactory.createSupplierApi handleError context)
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 // ---------- the in-memory fake ----------
 

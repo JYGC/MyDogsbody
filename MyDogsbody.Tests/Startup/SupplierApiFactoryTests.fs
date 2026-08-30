@@ -3,7 +3,6 @@ module MyDogsbody.Tests.Startup.SupplierApiFactoryTests
 open System
 open System.IO
 open Xunit
-open Microsoft.Data.Sqlite
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Database
@@ -17,7 +16,7 @@ let private handleError = HandleErrorBuilder (fun _ -> ())
 /// the file deleted - no test reaches Startup.Startup.
 let private withApi (test: SupplierApi -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
     let api = SupplierApiFactory.createSupplierApi handleError context
@@ -26,8 +25,7 @@ let private withApi (test: SupplierApi -> unit) =
         test api
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 let private aSupplier: SupplierUiTypeWithoutId =
     { Name = "Acme"; PaymentTermDays = 30; Matchers = [ { Kind = "Domain"; Value = "acme.example" } ] }
@@ -145,7 +143,7 @@ let ``a validation failure is never written to the log`` () =
     let logged = ResizeArray<MyDogsbodyException>()
     let recordingHandleError = HandleErrorBuilder logged.Add
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
     let api = SupplierApiFactory.createSupplierApi recordingHandleError context
@@ -155,8 +153,7 @@ let ``a validation failure is never written to the log`` () =
         Assert.Empty logged
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 [<Fact; Trait("Level", "Integration")>]
 let ``a store failure reaches the UI as an Error and is written to the log exactly once`` () =
