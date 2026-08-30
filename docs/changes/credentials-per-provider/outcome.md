@@ -254,3 +254,56 @@ mention was already removed by this change, this one was missed).
 
 Build: 0 errors, same 3 pre-existing warnings. `dotnet test`: 1270 passed, 0 failed, 0 skipped.
 Project count unchanged at 23; `MyDogsbody/MainWindow.xaml.cs` still untouched.
+
+---
+
+## PR review — rounds 2 and 3
+
+Round 2 found nothing and pushed nothing. Round 3 re-read the whole diff cold and found **one**
+finding, documentation-only; no production code or test changed, so the totals above are unchanged
+(1270 passed / 0 failed / 0 skipped; Unit 706 · Integration 270 · Contract 264 · E2E 30).
+
+**Finding (round 3): `CLAUDE-project.md`'s reference-direction bullet stated a rule this change
+falsified.** It read *"Integrations reference `Domain` and implement the function types it
+declares"* — unconditionally. After this change `MyDogsbody.Integrations.Google` is a real
+integration with a store and **no `Domain` reference**, which is the deliberate consequence of
+Q3.7 (a credential is not a domain concept, so there is no function type for it to satisfy).
+Task 6.1 claimed the reference-direction bullets were updated; this one was missed, leaving the
+repo's governing instruction file asserting a rule one of its three integrations breaks — an
+invitation for the next change to "fix" it by adding a reference the design deliberately omits.
+The bullet now says which integrations reference `Domain`, which does not, and why.
+
+### Verified and rebutted, not changed
+
+Each of these was reproduced against the checked-out head before being dropped:
+
+- **The local `BsonMapper` (deviation 1) is sound.** Probed directly: `BsonMapper.Global` really
+  does have `TrimWhitespace = true` / `EmptyStringToNull = true`, and serialising
+  `"  1//0abc\tDEF   \n"` through it returns `"1//0abc\tDEF"` — the retired store did silently
+  trim every secret. A local mapper with both switches off returns the input byte-for-byte.
+- **Deleting `E2E/BlazorTestHarness.fs` (deviation 2) was forced, not optional.** The file declared
+  `CredentialsHarness` / `withCredentialsHarness` / `withUnreachableStoreHarness` over
+  `CredentialApi`, `CredentialApiFactory` and `CredentialsDatabaseContextModule` — three deleted
+  projects — and its only consumer was `CredentialsFlowTests.fs`. Nothing shared survived it.
+- **Deleting `Contracts/ErrorTranslationTests.fs` (deviation 3) lost nothing.** All nine cases
+  exercised `CredentialApiMappers.toMyDogsbodyException` / `toCredentialError`; zero surviving
+  cases, contrary to what task 4.8 assumed.
+- **`GoogleDatabaseContext`'s `IDisposable` implementation does not self-recurse.** `this.Dispose()`
+  inside the interface member resolves to the record's `Dispose` *field*, not the explicit
+  interface method — probed: the field runs exactly once.
+- Every retired name's surviving grep hit is a negative assertion or an explanatory comment
+  (deviation 4), and the three deleted project directories left on disk are empty.
+
+### Deferred to change #6 — flagged, not fixed here
+
+Both are behaviour carried over verbatim from the retired store, with no caller today. Changing
+either would be a behaviour change inside a change whose success criterion is *"the suite is still
+green and two fewer projects exist"*, so they belong with the code that first calls the store:
+
+- **`GoogleCredentialStore.updateOne` ignores `collection.Update`'s `bool`.** If the row vanishes
+  between `FindById` and `Update`, the caller gets `Ok (Some …)` for a write that did not land.
+- **The dependency contract suite's fake and the real adapter diverge on a malformed identifier.**
+  `GoogleCredentialId.create` accepts any non-whitespace string, but the real adapter's `toObjectId`
+  needs 24 hex characters — so `"abc"` yields a logged `Error` from the adapter and `Ok None` from
+  the fake. Change #6 should either tighten `GoogleCredentialId.create` or add the case to the
+  shared suite.
