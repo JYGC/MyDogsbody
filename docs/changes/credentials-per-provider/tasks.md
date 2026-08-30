@@ -53,40 +53,50 @@ before you change anything near it."*
 
 ## Phase 2 — Build the new home (required, old store still in place)
 
-- [ ] **2.1** Create `MyDogsbody.Integrations.Google.Database.Models` (C#, net9.0) with
-      `GoogleCredential` — `Id`, `Credentials`, `ExternalUsername`. **No discriminator.**
-      *Outcome:* property names carried across from the retired entity, minus the enum.
-- [ ] **2.2** `MyDogsbody.Integrations.Google` references it, `MyDogsbody.Builders` and
-      `MyDogsbody.Exceptions.Types`.
-- [ ] **2.3** Correct the module name: `MyDogsbody.Infrastructure.Google.GoogleCalendar` →
-      `MyDogsbody.Integrations.Google.*`. **This is the change that first makes the project real, so
-      it is the change that fixes the last naming quirk.**
-- [ ] **2.4** *(test-first)* `GoogleCredential.fs` — the constrained types, in the **integration**,
-      not the domain.
-      Tests: one accepted and one rejected value per rule with the reason asserted.
-- [ ] **2.5** *(test-first)* `Database/GoogleDatabaseContextModule.fs` — `GetCredentialCollection`
-      and `Dispose`, with a `BsonMapper.Global.ToDocument` warm-up before returning.
-      Tests *(Integration)*: a context over a temp database can be disposed and **the file then
-      deletes successfully**; the warm-up runs.
-      *Note:* change #6 adds `GetAccountCollection` to this same record.
-- [ ] **2.6** *(test-first)* `GoogleCredentialStore.fs` — `getAll`, `insertOne`, `updateOne`. Outer
-      ring: `handleError` first, dependencies next, input last, `Result<_, MyDogsbodyException>` out.
-      *Depends on:* 2.5, 2.4.
-- [ ] **2.7** `ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.*` — three entries.
-- [ ] **2.8** Gate: build clean, suite green. **Both stores now exist and both are tested.**
+- [x] **2.1** Created `MyDogsbody.Integrations.Google.Database.Models` (C#, net9.0) with
+      `GoogleCredential` — `Id`, `Credentials`, `ExternalUsername`. **No discriminator.** No
+      `MyDogsbody.Enums` reference.
+- [x] **2.2** `MyDogsbody.Integrations.Google` references the new Models project,
+      `MyDogsbody.Builders`, `MyDogsbody.Exceptions.Types` and the `LiteDB` package. No `Domain`.
+- [x] **2.3** Module name corrected: `MyDogsbody.Infrastructure.Google.GoogleCalendar` →
+      `MyDogsbody.Integrations.Google.GoogleCalendar`. Last of the old naming, gone.
+- [x] **2.4** `GoogleCredentialTypes.fs` (named for the `*Types.fs` convention, not the sketch's
+      `GoogleCredential.fs` which collides with the C# class name) — `GoogleCredentialSecret`,
+      `GoogleExternalUsername`, `GoogleCredentialId`, `ValidGoogleCredential`,
+      `ValidGoogleCredentialEdit`, `StoredGoogleCredential`. In the **integration**, not the domain.
+      Reason strings identical to the retired store's. Tests: accept + reject-per-rule with the
+      reason asserted.
+- [x] **2.5** `Database/GoogleDatabaseContextModule.fs` — `GetCredentialCollection` + `Dispose`,
+      warm-up before returning. **Deviation:** a *local* `BsonMapper` (not `BsonMapper.Global`)
+      with `TrimWhitespace`/`EmptyStringToNull` off — so a secret round-trips byte-for-byte incl.
+      whitespace (see Phase 1 finding), and the store is off the documented global first-use race.
+      Plus `Database/Types/GoogleDatabaseContext.fs` (`GoogleCredentialsCollection`, the record).
+      Also `GoogleCredentialEntityMappers.fs` — the bottom mapper (no `InfrastructureType` pair).
+      Tests *(Integration)*: round-trips; Dispose lets the file delete (asserted without try/with);
+      whitespace preserved; warm-up complete before return.
+- [x] **2.6** `GoogleCredentialStore.fs` — `getAll` / `insertOne` / `updateOne`, `handleError`
+      first, collection getter next, input last, `Result<_, MyDogsbodyException>` out. Messages
+      identical to the retired store's. Tests *(Integration)*: full CRUD + error shape.
+- [x] **2.7** `ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.{getAll,insertOne,updateOne}`.
+- [x] **2.8** Gate: `dotnet build MyDogsbody.sln` clean (1 pre-existing warning), suite green —
+      **1391 tests** (1348 + 15 characterization + 28 Google), 0 skips. Both stores exist and both
+      are tested.
 
 ## Phase 3 — Re-point (required) — the moment the move becomes provable
 
-- [ ] **3.1** Copy the Phase 1 characterization assertions into
-      `Integrations/Google/GoogleCredentialCharacterizationTests.fs`, retargeted at the **new** store.
-      *Outcome:* every assertion that passed against the old store passes against the new one —
-      **especially the byte-for-byte secret**, which is the one failure that would otherwise stay
-      invisible until an API call failed for an unrelated-looking reason.
-      *Depends on:* 2.6, 1.1, 1.2.
-- [ ] **3.2** Persisted-shape test for `GoogleCredential` — assert the stored document's **field
-      names**, not just the round-tripped object.
-- [ ] **3.3** Contract suite for the credential store, run against the real adapter and every fake.
-- [ ] **3.4** Gate: build clean, suite green.
+- [x] **3.1** `Integrations/Google/GoogleCredentialCharacterizationTests.fs` — the Phase 1
+      assertions retargeted at the **new** store. Every one carries over **except** the
+      whitespace-trim characterization: the new store does *not* trim, so a secret round-trips
+      byte-for-byte — which is what the requirement actually wants. Called out in the file and in
+      `outcome.md`.
+- [x] **3.2** `Contracts/GoogleCredentialPersistedShapeTests.fs` — asserts the stored document's
+      field names (`_id`, `Credentials`, `ExternalUsername`), that `Username`/`InfrastructureType`/
+      `Infrastructure`/`Provider` are **not** present, that the collection is named `Credentials`
+      and is the only one, and that surrounding whitespace is persisted intact.
+- [x] **3.3** `Contracts/GoogleCredentialDependencyContractTests.fs` — the three store operations
+      as a shared `[<Theory>]` suite over the real adapter and an in-memory fake, so change #6's
+      fake cannot drift.
+- [x] **3.4** Gate: build clean, suite green — **1426 tests**, 0 skips.
 
 ## Phase 4 — Delete (required) — one at a time, building between each
 

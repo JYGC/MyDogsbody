@@ -59,6 +59,10 @@
     <Compile Include="Integrations\Credentials\CredentialsDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialStoreTests.fs" />
     <Compile Include="Integrations\Credentials\CredentialCharacterizationTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialTypesTests.fs" />
+    <Compile Include="Integrations\Google\GoogleDatabaseContextModuleTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialStoreTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialCharacterizationTests.fs" />
     <Compile Include="Integrations\Documents\PdfDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\WordDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\PlainTextDocumentReaderTests.fs" />
@@ -93,6 +97,8 @@
     <Compile Include="Contracts\CredentialBoundaryMapperTests.fs" />
     <Compile Include="Contracts\CredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\CredentialApiContractTests.fs" />
+    <Compile Include="Contracts\GoogleCredentialDependencyContractTests.fs" />
+    <Compile Include="Contracts\GoogleCredentialPersistedShapeTests.fs" />
     <Compile Include="Contracts\PersistedShapeTests.fs" />
     <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
     <Compile Include="Contracts\ThunderbirdDependencyContractTests.fs" />
@@ -139,6 +145,7 @@
     <ProjectReference Include="..\MyDogsbody.Enums\MyDogsbody.Enums.csproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Credentials\MyDogsbody.Integrations.Credentials.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Documents\MyDogsbody.Integrations.Documents.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Google\MyDogsbody.Integrations.Google.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Startup\MyDogsbody.Startup.fsproj" />
     <ProjectReference Include="..\MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj" />

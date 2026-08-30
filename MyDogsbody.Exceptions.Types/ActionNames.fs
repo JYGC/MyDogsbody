@@ -123,6 +123,15 @@ module MyDogsbody =
                 let insertOne = $"{credentialStore}.insertOne"
                 let updateOne = $"{credentialStore}.updateOne"
 
+        module Google =
+            let private google = $"{integrations}.Google"
+
+            module GoogleCredentialStore =
+                let private googleCredentialStore = $"{google}.GoogleCredentialStore"
+                let getAll = $"{googleCredentialStore}.getAll"
+                let insertOne = $"{googleCredentialStore}.insertOne"
+                let updateOne = $"{googleCredentialStore}.updateOne"
+
         module Documents =
             let private documents = $"{integrations}.Documents"
 
