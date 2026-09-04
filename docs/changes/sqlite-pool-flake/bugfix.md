@@ -56,9 +56,11 @@ WHEN a harness is added later that uses a temp SQLite file THEN a test fails if 
 
 ## Unchanged Behavior (Regression Prevention)
 
-WHEN the application runs THEN `Startup.fs` still opens exactly one `SqliteConnection` per process and
-holds it for the process lifetime — pooling was providing nothing there, and disabling it changes no
-observable behaviour.
+WHEN the application runs THEN `Startup.fs` still constructs exactly one `SqliteConnection` *object*
+and holds it for the process lifetime. Its underlying handle is still opened and closed per store
+operation, now with no pool behind it: measured at 0.090 ms per open/query/close cycle pooled vs
+0.470 ms unpooled (Microsoft.Data.Sqlite 9.0.10, 2000 cycles) — +0.38 ms per operation, so under a
+millisecond on a suppliers page load and nothing a user can observe.
 
 WHEN `createDatabaseContext` hands out a connection THEN `PRAGMA foreign_keys` still reads back as `1`
 (the `Foreign Keys=True` keyword is unaffected by `Pooling=False`).

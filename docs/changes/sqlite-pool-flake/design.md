@@ -53,16 +53,35 @@ harnesses to a *better* place than that.
 | **B — targeted `ClearPool`** | Replace `ClearAllPools()` with `SqliteConnection.ClearPool(conn)` — clears only that connection string's pool (Microsoft.Data.Sqlite ≥ 6.0; verified working on the pinned 9.0.10) | Fixes the cross-test interference and still deletes the file. But each test DB has **two** pools — the plain string the migrations use and the `;Foreign Keys=True` string `createDatabaseContext` builds — so a thorough clear needs both, per site |
 | **C — disable pooling** ✅ | `createDatabaseContext` opens with `;Pooling=False`; test connection strings carry `;Pooling=False`. `Dispose()` / `use` then closes the handle immediately — no pool, nothing to clear, file deletes | Chosen |
 
-**Why C.** Pooling exists to amortise connection setup across many opens of the same database. This
-application opens **one** `SqliteConnection` per process in `Startup.fs` and holds it for the process
-lifetime (CLAUDE-project.md → *Storage → Main database*); the migration run is one more, disposed.
-There is no third. So pooling is pure cost here — it buys nothing in production and causes the flake
-in tests. Disabling it:
+**Why C.** Pooling exists to amortise connection setup across many opens of the same database, and it
+*does* buy something here — the first draft of this section claimed otherwise and was wrong, so state
+the trade honestly. `Startup.fs` holds **one** `SqliteConnection` *object* for the process lifetime,
+but the underlying handle is opened and closed **per store operation**: `SupplierStore`/`TemplateStore`'s
+`inTransaction` calls `Open()`/`Close()` around every write, and Dapper opens and closes a closed
+connection around every `SelectAsync` (so `getAll`'s two selects are two cycles). Measured on the
+pinned Microsoft.Data.Sqlite 9.0.10, one connection object, 2000 open/query/close cycles:
+
+| | per cycle |
+| --- | --- |
+| `Pooling=True` (default) | 0.090 ms |
+| `Pooling=False` | 0.470 ms |
+| cost of disabling | **+0.38 ms per open, 5.2×** |
+
+So a suppliers page load pays roughly +0.8 ms and a write +0.4 ms — below the threshold of anything
+visible in a desktop UI, against a flake that failed ~2 full-suite runs in 45. The trade is taken
+knowingly. Disabling it:
 
 - makes every `context.Dispose()` and every `use connection = new SqliteConnection(…)` release the OS
   handle synchronously, so `File.Delete` is reliable and no pool-clearing call is needed anywhere;
 - removes the process-global side effect entirely rather than narrowing it;
 - stops the suite leaking temp files, which option A does not.
+
+**What C does not cover, and is not in scope here.** `Startup.fs`'s migration line still runs
+`MigrationSetup.setupMigrations $"Data Source={mainDatabasePath}"` with pooling on, so in production
+one FluentMigrator connection to `MyDogsbody.db` goes back into a pool at startup and keeps a handle.
+Nothing observable follows from it — the app holds the file open anyway — but it is the one remaining
+pooled SQLite connection in the product, and adding `;Pooling=False` there is a second production line
+this change deliberately does not take.
 
 Measured (`scratchpad` probe, deleted): a pooled `use` connection leaves the file locked
 (`IOException`); the same with `;Pooling=False` deletes cleanly with no clear call.
@@ -127,6 +146,12 @@ keyword `Foreign Keys=True` is independent of `Pooling`.
   from the source tree (the same shape as `InvoicesModuleCreatorsTests`'s "uses no `Async.Start`"
   check) and asserts none contains `SqliteConnection.ClearAllPools`. Fails if a new harness copies
   the old pattern.
+- **Every test connection string disables pooling** — the same walk, asserting no line building a
+  `Data Source=` string omits `;Pooling=False`. This is the half of the rule that has to hold going
+  forward: dropping `ClearAllPools()` only stops harnesses trampling each other, whereas
+  `;Pooling=False` is what makes the temp file deletable at all. Without this check a new harness
+  reverts silently to leaking a GUID-named file per run, and CLAUDE-project.md's instruction has
+  nothing enforcing it.
 - **`Dispose()` releases the file handle** — the existing `DatabaseContextSetupTests` deletion test,
   with its `ClearAllPools()` line removed, now proves exactly this: after `context.Dispose()` the
   temp file deletes. (Microsoft.Data.Sqlite 9.0.10 does not throw `ObjectDisposedException` on

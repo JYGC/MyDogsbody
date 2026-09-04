@@ -1,9 +1,20 @@
 # Tasks — the SQLite test harnesses clear the process-global connection pool
 
-Branch `change/sqlite-pool-flake`, cut from `main` at `9b0d4ce`. Independent of the
-`invoice-to-calendar` series — it touches only `MyDogsbody.Database/DatabaseContextSetup.fs` (one
-connection-string literal) and ten test files, none of which the in-flight `invoice-extraction`
-branch modifies, so it merges in either order.
+Branch `change/sqlite-pool-flake`, cut from `main` at `9b0d4ce`. It touches only
+`MyDogsbody.Database/DatabaseContextSetup.fs` (one connection-string literal) and the ten test files
+that were calling `ClearAllPools()` at that commit.
+
+> **Base has moved (review round 1).** `main` is now `3834aa1` — `invoice-extraction` (#18, `6f449ab`)
+> and `credentials-per-provider` (#20, `3834aa1`) both merged after this branch was cut. The merge is
+> still textually clean (`git merge-tree` produces no conflict), but "merges in either order" is not
+> the whole story any more: #18 added **eight** further SQLite connection strings in
+> `Contracts/InvoiceDependencyContractTests.fs`, `Contracts/InvoicePersistedShapeTests.fs`,
+> `Database/InvoiceStoreTests.fs`, `Database/ScanWindowStoreTests.fs`, `E2E/InvoicesTestHarness.fs`,
+> `Startup/InvoiceApiFactoryTests.fs` (×4) and `Startup/ScanWindowApiFactoryTests.fs`, none carrying
+> `;Pooling=False`, and CLAUDE-project.md's *Build state* on `main` still says the SQLite harnesses
+> "leak their GUID-named temp file instead if the pool still holds a handle". Task 5.2's check turns
+> those eight into a red test at merge time rather than a silent gap — completing the merge means
+> adding `;Pooling=False` to them and correcting that *Build state* sentence and its totals.
 
 [`bugfix.md`](bugfix.md) · [`design.md`](design.md)
 
@@ -70,10 +81,34 @@ it.
 - [x] **4.5** `CLAUDE-project.md` → *Build state* / the flake notes: the `ClearAllPools()` hazard is
       resolved; only the LiteDB `BsonMapper` race remains as a known flake.
 
+## Phase 5 — PR review round 1
+
+- [x] **5.1** Correct the rationale. Measured on Microsoft.Data.Sqlite 9.0.10 (2000 open/query/close
+      cycles, one connection object): pooled **0.090 ms**/cycle, unpooled **0.470 ms**/cycle —
+      **+0.38 ms, 5.2×**. The app holds one `SqliteConnection` *object*, not one open handle:
+      `inTransaction` opens/closes per write and Dapper opens/closes around every `SelectAsync`, so
+      "a pool amortises nothing here" was false. Reworded in `DatabaseContextSetup.fs`,
+      CLAUDE-project.md → *Storage → Main database*, `design.md` (*Why C*) and `bugfix.md`
+      (*Unchanged Behavior*). The decision is unchanged — sub-millisecond per page load against a
+      flake at ~2 runs in 45 — only the reasoning is now true.
+- [x] **5.2** Enforce the other half of the rule. CLAUDE-project.md now mandates `;Pooling=False` on
+      every SQLite connection string a test builds, but only the `ClearAllPools` half was guarded.
+      `Database/SqliteConnectionPoolingTests` gains **`every SQLite connection string a test builds
+      disables pooling`**, over the same source walk. Red proof: `;Pooling=False` stripped from
+      `Database/SupplierStoreTests.fs:41` → *"these SQLite connection strings do not disable pooling
+      … Database\SupplierStoreTests.fs:41"*; restored → green. The walk also now skips `bin`/`obj` by
+      whole path segment (`Contains "bin\"` missed a file sitting directly in a folder named `bin`).
+
 ## Not in scope
 
 - **The LiteDB `BsonMapper` first-use race.** A separate known flake (CLAUDE-project.md →
   *Per-integration databases*; captured in `invoice-extraction`'s `outcome.md`). Its remedy is a
   process-wide lock around the entity warm-up and wants its own change folder.
 - **Changing how the application opens its main connection.** `Startup.fs` keeps its single
-  process-lifetime connection; `Pooling=False` changes nothing observable there.
+  process-lifetime connection object; `Pooling=False` costs it +0.38 ms per store operation (5.1) and
+  nothing observable.
+- **`Startup.fs`'s migration connection string.** `MigrationSetup.setupMigrations $"Data Source={mainDatabasePath}"`
+  still pools, so one FluentMigrator handle on `MyDogsbody.db` goes into a pool at startup and stays
+  there. Harmless — the app holds the file open regardless — but it is the last pooled SQLite
+  connection in the product, and adding `;Pooling=False` is a second production line this change was
+  scoped not to take. Raise it as its own one-liner if the handle ever matters.
