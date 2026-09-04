@@ -3,7 +3,6 @@ module MyDogsbody.Tests.E2E.SuppliersTestHarness
 open System
 open System.IO
 open Bunit
-open Microsoft.Data.Sqlite
 open Microsoft.Extensions.DependencyInjection
 open MudBlazor.Services
 open MyDogsbody.Builders
@@ -35,7 +34,7 @@ type SuppliersHarness(supplierApi: SupplierApi, logged: ResizeArray<MyDogsbodyEx
 /// the component renders.
 let withSuppliersHarness (test: SuppliersHarness -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
     let logged = ResizeArray<MyDogsbodyException>()
@@ -48,8 +47,7 @@ let withSuppliersHarness (test: SuppliersHarness -> unit) =
     finally
         harness.Dispose()
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 /// The same harness over an API that cannot reach its store, for the failure flows.
 let withUnreachableSupplierStoreHarness (test: SuppliersHarness -> unit) =

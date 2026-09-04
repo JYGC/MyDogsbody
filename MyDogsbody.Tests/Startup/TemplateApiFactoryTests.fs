@@ -3,7 +3,6 @@ module MyDogsbody.Tests.Startup.TemplateApiFactoryTests
 open System
 open System.IO
 open Xunit
-open Microsoft.Data.Sqlite
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Database
@@ -25,7 +24,7 @@ let private validRulesUi =
 /// the file deleted - no test reaches Startup.Startup.
 let private withApi (test: TemplateApi -> string -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
     let api = TemplateApiFactory.createTemplateApi handleError context
@@ -46,8 +45,7 @@ let private withApi (test: TemplateApi -> string -> unit) =
         test api supplierId
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 let private aTemplate supplierId : TemplateUiTypeWithoutId =
     { SupplierId = supplierId; Name = "Monthly statement"; DocumentPart = "AnyPart"; AttachmentFormat = ""; Position = 0; Rules = validRulesUi }
@@ -214,7 +212,7 @@ let ``a validation failure is never written to the log`` () =
     let logged = ResizeArray<MyDogsbodyException>()
     let recordingHandleError = HandleErrorBuilder logged.Add
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
     let api = TemplateApiFactory.createTemplateApi recordingHandleError context
@@ -224,8 +222,7 @@ let ``a validation failure is never written to the log`` () =
         Assert.Empty logged
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 /// The one rule shape that used to break the rule above. `FixedValue null` - a cleared
 /// MudTextField, the same input TemplateApiMappers already guards for an AsMoney separator - is
@@ -242,7 +239,7 @@ let ``a cleared FixedValue box is stored as an empty fixed value and never writt
     let logged = ResizeArray<MyDogsbodyException>()
     let recordingHandleError = HandleErrorBuilder logged.Add
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={databaseFilePath}"
+    let connectionString = $"Data Source={databaseFilePath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
     let api = TemplateApiFactory.createTemplateApi recordingHandleError context
@@ -279,8 +276,7 @@ let ``a cleared FixedValue box is stored as an empty fixed value and never writt
         Assert.Equal("", currencyRule.RuleText)
     finally
         context.Dispose()
-        SqliteConnection.ClearAllPools()
-        File.Delete databaseFilePath
+        try File.Delete databaseFilePath with _ -> ()
 
 [<Fact; Trait("Level", "Integration")>]
 let ``a store failure reaches the UI as an Error and is written to the log exactly once`` () =

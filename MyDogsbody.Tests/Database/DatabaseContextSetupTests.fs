@@ -13,13 +13,34 @@ let private withTempPath (test: string -> unit) =
     try
         test databaseFilePath
     finally
-        SqliteConnection.ClearAllPools()
         try File.Delete databaseFilePath with _ -> ()
+
+/// The migration runner's connection string, with pooling off to match DatabaseContextSetup.fs -
+/// so a FluentMigrator connection does not linger in a pool holding the temp file.
+let private migrationConnectionString databaseFilePath =
+    $"Data Source={databaseFilePath};Pooling=False"
+
+[<Fact; Trait("Level", "Integration")>]
+let ``createDatabaseContext opens with pooling disabled and foreign keys on`` () =
+    withTempPath (fun databaseFilePath ->
+        MigrationSetup.setupMigrations (migrationConnectionString databaseFilePath)
+        let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
+
+        try
+            let builder = SqliteConnectionStringBuilder(context.GetDatabaseConnection().ConnectionString)
+            // Pooling=False is what lets context.Dispose() release the file handle immediately,
+            // instead of a pooled connection keeping the temp file locked and the harnesses reaching
+            // for the process-global pool clear (the ClearAllPools hammer) - see docs/changes/sqlite-pool-flake.
+            Assert.False(builder.Pooling)
+            Assert.Equal(System.Nullable true, builder.ForeignKeys)
+        finally
+            context.Dispose()
+    )
 
 [<Fact; Trait("Level", "Integration")>]
 let ``a context created against a temp file can be disposed and the file then deletes successfully`` () =
     withTempPath (fun databaseFilePath ->
-        MigrationSetup.setupMigrations $"Data Source={databaseFilePath}"
+        MigrationSetup.setupMigrations (migrationConnectionString databaseFilePath)
         let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
 
         // touch the connection so there is something to release
@@ -29,10 +50,12 @@ let ``a context created against a temp file can be disposed and the file then de
 
         context.Dispose()
 
-        // Microsoft.Data.Sqlite pools connections, so a pooled handle can keep the file locked
-        // on Windows even after Dispose() - the pool must be cleared first.
-        SqliteConnection.ClearAllPools()
-
+        // Pooling is disabled on both connection strings (the migration runner's above and the
+        // one createDatabaseContext builds - see the test above), so Dispose() and the `use`
+        // block close their handles rather than returning them to a pool that would keep the file
+        // locked on Windows. No process-global pool clear (the ClearAllPools hammer), which would
+        // clear pooled connections other parallel tests are mid-use of.
+        //
         // no try/with here on purpose: the delete must actually succeed
         File.Delete databaseFilePath
         Assert.False(File.Exists databaseFilePath)
@@ -41,7 +64,7 @@ let ``a context created against a temp file can be disposed and the file then de
 [<Fact; Trait("Level", "Integration")>]
 let ``PRAGMA foreign_keys reads back as 1 on the connection handed out by GetDatabaseConnection`` () =
     withTempPath (fun databaseFilePath ->
-        MigrationSetup.setupMigrations $"Data Source={databaseFilePath}"
+        MigrationSetup.setupMigrations (migrationConnectionString databaseFilePath)
         let context = DatabaseContextSetup.createDatabaseContext databaseFilePath
 
         try
