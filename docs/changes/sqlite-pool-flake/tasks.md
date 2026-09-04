@@ -47,8 +47,11 @@ expected reason before the production line changes.
       after `Dispose()` — verified by probe — so the `Dispose` contract that matters here is "the
       file handle is released", which the existing deletion test in 3.10 asserts once
       `ClearAllPools()` is gone and `Pooling=False` is in.)*
-- [x] **1.2** A source-tree test (mirror `InvoicesModuleCreatorsTests`'s "uses no `Async.Start`"
-      check): walk every `.fs` under `MyDogsbody.Tests` and assert none contains
+- [x] **1.2** A source-tree test (mirror `SuppliersBrowserModuleCreatorsTests`' / `MailAccountsBrowserModuleCreatorsTests`'
+      "no `Async.Start` appears anywhere in the module creator file" checks — the two source-walking
+      guards present at this branch's base; `InvoicesModuleCreatorsTests`, named here in review round 1,
+      arrives only with #18 and does not exist on this branch):
+      walk every `.fs` under `MyDogsbody.Tests` and assert none contains
       `SqliteConnection.ClearAllPools`. Run it: **red** (ten files still call it).
 
 ## Phase 2 — The production line
@@ -92,7 +95,11 @@ it.
 - [x] **4.3** **25 full-suite runs: zero occurrences of the `ObjectDisposedException: 'SQLitePCL.sqlite3'`
       this change fixes** (round 5 measured it at ~2 in 45). 22 green; 3 failures were pre-existing
       flakes out of scope — 2× the LiteDB `BsonMapper` race (`ThunderbirdDatabaseContextModule.fs:16`),
-      1× `MailAccountsFlowTests` deleting a permission-denied temp dir in cleanup. See `outcome.md`.
+      1× `MailAccountsFlowTests` deleting a permission-denied temp dir in cleanup. Review round 3's
+      26th run hit the second face of that same cleanup flake —
+      `ThunderbirdFolderScannerTests.scan records an unreadable directory and continues the walk`,
+      `UnauthorizedAccessException` at `ThunderbirdFolderScannerTests.fs:97` — and still no
+      `ObjectDisposedException`. See `outcome.md`.
 - [x] **4.4** `outcome.md`: the run evidence, the totals, and a note that the ten harnesses now
       match — and improve on — the pattern `invoice-extraction`'s newer ones use.
 - [x] **4.5** `CLAUDE-project.md` → *Build state* / the flake notes: the `ClearAllPools()` hazard is

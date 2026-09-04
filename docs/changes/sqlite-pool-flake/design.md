@@ -145,9 +145,10 @@ keyword `Foreign Keys=True` is independent of `Pooling`.
   `.Pooling` is `false` and `.ForeignKeys` is `Nullable true`. Fails if the production literal is
   reverted.
 - **No harness calls `ClearAllPools()`** — a test that reads the `.fs` files under `MyDogsbody.Tests`
-  from the source tree (the same shape as `InvoicesModuleCreatorsTests`'s "uses no `Async.Start`"
-  check) and asserts none contains `SqliteConnection.ClearAllPools`. Fails if a new harness copies
-  the old pattern.
+  from the source tree (the same shape as `SuppliersBrowserModuleCreatorsTests`' and
+  `MailAccountsBrowserModuleCreatorsTests`' "no `Async.Start` appears anywhere in the module creator
+  file" checks — the two source-walking guards that exist at this branch's base) and asserts none
+  contains `SqliteConnection.ClearAllPools`. Fails if a new harness copies the old pattern.
 - **Every test connection string disables pooling** — the same walk, asserting no line building a
   `Data Source=` string omits `;Pooling=False`. This is the half of the rule that has to hold going
   forward: dropping `ClearAllPools()` only stops harnesses trampling each other, whereas

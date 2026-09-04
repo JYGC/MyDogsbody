@@ -4,10 +4,18 @@ Branch `change/sqlite-pool-flake`, cut from `main` at `9b0d4ce`.
 
 ## Status
 
-**Done. Build clean. Suite green, zero skips.** The ten harnesses no longer call the process-global
-`SqliteConnection.ClearAllPools()`; `MyDogsbody.Database/DatabaseContextSetup.fs` opens with
-`Pooling=False`, and every SQLite connection string the tests build carries `;Pooling=False`, so a
-`Dispose()` / `use` releases the file handle with nothing to clear.
+**Done. Build clean. All four levels green, zero skips.** The ten harnesses no longer call the
+process-global `SqliteConnection.ClearAllPools()`; `MyDogsbody.Database/DatabaseContextSetup.fs`
+opens with `Pooling=False`, and every SQLite connection string the tests build carries
+`;Pooling=False`, so a `Dispose()` / `use` releases the file handle with nothing to clear.
+
+**"Green" is per level, not per full-suite run, and that distinction is the point of this change
+folder** — say it plainly rather than writing an unqualified "suite green" that a cold run does not
+reproduce. Each `--filter "Level=…"` run passes outright (Unit 566 · Integration 224 · Contract 246 ·
+E2E 28, zero skips, measured again in review round 3). A *full-suite* run additionally exposes the two
+pre-existing parallelism flakes tabulated below, neither of them SQLite; round 3's own full-suite run
+hit one of them. What this change is accountable for — the `ObjectDisposedException:
+'SQLitePCL.sqlite3'` — has not recurred in any run since the fix.
 
 ## What changed
 
@@ -107,16 +115,38 @@ Review round 5 of `invoice-extraction` measured this cause at **~2 failures in 4
 (`ObjectDisposedException: 'SQLitePCL.sqlite3'` out of `SqliteCommand.ExecuteReader`), pre-existing at
 the reviewed head.
 
-**25 full-suite runs on this branch: zero occurrences of that exception.** 22 runs green; the 3
-failures were pre-existing flakes this change does not touch and does not claim to fix:
+**25 full-suite runs on this branch: zero occurrences of that exception**, plus one more in review
+round 3 — 26, still zero. 22 of the 25 ran green; the 3 failures, and round 3's, were pre-existing
+flakes this change does not touch and does not claim to fix:
 
-| Failures in 25 runs | Cause | Owner |
+| Failures in 26 runs | Cause | Owner |
 | --- | --- | --- |
 | 2 | `InvalidOperationException: Collection was modified` → `LiteDB.BsonMapper.SerializeObject` → `ThunderbirdDatabaseContextModule.fs:16` | the documented LiteDB `BsonMapper` first-use race — its own change folder |
-| 1 | `UnauthorizedAccessException` deleting a deliberately permission-denied temp dir in `MailAccountsFlowTests` cleanup | a `thunderbird-account-selection` test-hygiene issue, pre-existing on `main` |
+| 2 | `UnauthorizedAccessException` deleting a deliberately permission-denied temp dir in cleanup — `MailAccountsFlowTests` (rounds 1–2) and `ThunderbirdFolderScannerTests.scan records an unreadable directory and continues the walk` (round 3) | a `thunderbird-account-selection` test-hygiene issue, pre-existing on `main` |
 
-The mechanism is removed, not narrowed: with no `ClearAllPools()` call anywhere and pooling disabled,
-one collection's teardown cannot dispose another's connection.
+**The permission-denied-cleanup flake has two faces, and only one of them was recorded here.** Review
+round 3's full-suite run failed on the *other* one, so name it too — CLAUDE-project.md → *Build state*
+says "do not re-run until it passes… Anything else intermittent is yours", which makes an unnamed
+flake indistinguishable from a regression this PR caused. Captured at head `2c77d0e`:
+
+```
+MyDogsbody.Tests.Integrations.Thunderbird.ThunderbirdFolderScannerTests.scan records an unreadable
+directory and continues the walk [FAIL]
+System.UnauthorizedAccessException : Access to the path
+'\\?\C:\Users\...\Temp\mdb-tbscan-555511f2-...\denied' is denied.
+   at System.IO.FileSystem.RemoveDirectoryRecursive(String fullPath, ...)
+   at ...ThunderbirdFolderScannerTests.fs:line 97
+```
+
+Line 97 is the outer `finally`'s `Directory.Delete(root, true)`; the inner `finally` two lines above
+has just run `icacls /reset` on the `denied` subdirectory, and the ACL is not always effective by the
+time the recursive delete reaches it. Same shape as the `MailAccountsFlowTests` one, same owner, and
+equally unrelated to SQLite. Confirmed a flake rather than a break, both ways round: the test passes
+run alone (`--filter "FullyQualifiedName~scan records an unreadable directory"`, 1/1) and inside the
+whole `Level=Integration` run (224/224). It needs the full suite's cross-collection parallelism.
+
+The mechanism this change *does* own is removed, not narrowed: with no `ClearAllPools()` call anywhere
+and pooling disabled, one collection's teardown cannot dispose another's connection.
 
 ## Notes
 
@@ -149,7 +179,11 @@ one collection's teardown cannot dispose another's connection.
 - **The LiteDB `BsonMapper` first-use race.** CLAUDE-project.md → *Per-integration databases*;
   captured in `invoice-extraction`'s `outcome.md`. Remedy is a process-wide lock around the entity
   warm-up; its own change folder.
-- **`MailAccountsFlowTests`' permission-denied-directory cleanup.** Belongs with `thunderbird-account-selection`.
+- **The permission-denied-directory cleanup flake**, in both the tests it is known to take:
+  `MailAccountsFlowTests` and `ThunderbirdFolderScannerTests.scan records an unreadable directory and
+  continues the walk`. The remedy is the same for both — make the post-`icacls /reset` recursive
+  delete tolerate a still-denied directory — and belongs with `thunderbird-account-selection`, not in
+  a SQLite-pooling change folder.
 - **`Startup.fs`'s migration connection string.** `MigrationSetup.setupMigrations $"Data Source={mainDatabasePath}"`
   still pools, leaving one FluentMigrator handle on `MyDogsbody.db` in a pool for the process
   lifetime. Nothing observable follows (the app holds the file open anyway), but it is the last
