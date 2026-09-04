@@ -69,8 +69,15 @@ WHEN the migrations run against a fresh temp file THEN they still produce the do
 every existing migration / store / API-factory / persisted-shape / contract / E2E test still passes,
 unchanged in what it asserts.
 
-WHEN a test disposes its `DatabaseContext` THEN the connection is still closed and unusable
-afterward — `createDatabaseContext`'s `Dispose` contract is unchanged.
+WHEN a test disposes its `DatabaseContext` THEN the connection is still closed and its OS file handle
+released — `createDatabaseContext`'s `Dispose` contract is unchanged.
+
+Note what that contract does **not** include, so no later change locks down an invariant that was
+never true: a disposed `SqliteConnection` is *not* unusable. On the pinned Microsoft.Data.Sqlite
+9.0.10, `Open()` after `Dispose()` silently succeeds and the connection serves queries again — probed
+directly, both before and after this change, so it is neither a regression nor something `Pooling=False`
+alters. Releasing the handle is the only observable part of `Dispose` worth asserting, which is what
+`DatabaseContextSetupTests`' deletion test asserts.
 
 WHEN the suite is counted THEN the totals move only by the regression-prevention tests this change
 adds; no existing test is deleted, and none is newly skipped.

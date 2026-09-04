@@ -7,14 +7,29 @@ that were calling `ClearAllPools()` at that commit.
 > **Base has moved (review round 1).** `main` is now `3834aa1` — `invoice-extraction` (#18, `6f449ab`)
 > and `credentials-per-provider` (#20, `3834aa1`) both merged after this branch was cut. The merge is
 > still textually clean (`git merge-tree` produces no conflict), but "merges in either order" is not
-> the whole story any more: #18 added **eight** further SQLite connection strings in
-> `Contracts/InvoiceDependencyContractTests.fs`, `Contracts/InvoicePersistedShapeTests.fs`,
-> `Database/InvoiceStoreTests.fs`, `Database/ScanWindowStoreTests.fs`, `E2E/InvoicesTestHarness.fs`,
-> `Startup/InvoiceApiFactoryTests.fs` (×4) and `Startup/ScanWindowApiFactoryTests.fs`, none carrying
-> `;Pooling=False`, and CLAUDE-project.md's *Build state* on `main` still says the SQLite harnesses
-> "leak their GUID-named temp file instead if the pool still holds a handle". Task 5.2's check turns
-> those eight into a red test at merge time rather than a silent gap — completing the merge means
-> adding `;Pooling=False` to them and correcting that *Build state* sentence and its totals.
+> the whole story any more: #18 added further SQLite connection strings that carry no `;Pooling=False`.
+> **Measured on the merge itself, not inferred** — `git merge-tree --write-tree origin/main HEAD`
+> (tree `04f4f07`), then grepping that tree for lines building a `Data Source=` string without the
+> keyword — there are **eleven such lines across seven files** (review round 1 said "eight", which
+> undercounts; round 2 corrected it):
+>
+> | File (in the merged tree) | Lines |
+> | --- | --- |
+> | `Contracts/InvoiceDependencyContractTests.fs` | 49, 51 — **two**, the `setupMigrations` string *and* the raw `new SqliteConnection` beside it |
+> | `Contracts/InvoicePersistedShapeTests.fs` | 15 |
+> | `Database/InvoiceStoreTests.fs` | 27 |
+> | `Database/ScanWindowStoreTests.fs` | 22 |
+> | `E2E/InvoicesTestHarness.fs` | 45 |
+> | `Startup/InvoiceApiFactoryTests.fs` | 25, 50, 76, 107 — **four** |
+> | `Startup/ScanWindowApiFactoryTests.fs` | 18 |
+>
+> The `ClearAllPools` half of the check is *green* in that same merged tree: every site that still
+> called it on `main` is in one of the ten files this branch rewrites, so the merge removes them all.
+> Only the `;Pooling=False` half goes red. CLAUDE-project.md's *Build state* on `main` also still says
+> the SQLite harnesses "leak their GUID-named temp file instead if the pool still holds a handle".
+> Task 5.2's check turns those eleven lines into a red test at merge time rather than a silent gap —
+> completing the merge means adding `;Pooling=False` to all eleven and correcting that *Build state*
+> sentence and its totals.
 
 [`bugfix.md`](bugfix.md) · [`design.md`](design.md)
 
@@ -39,8 +54,10 @@ expected reason before the production line changes.
 ## Phase 2 — The production line
 
 - [x] **2.1** `MyDogsbody.Database/DatabaseContextSetup.fs`: connection string →
-      `$"Data Source={databaseFilePath};Foreign Keys=True;Pooling=False"`, with a comment (single
-      long-lived production connection; pooling is cost-only; keeps test cleanup deterministic).
+      `$"Data Source={databaseFilePath};Foreign Keys=True;Pooling=False"`, with a comment saying why:
+      a pooled handle survives `Dispose()` and keeps the file locked, which is what made temp-database
+      cleanup fail. **Not** "pooling is cost-only" — see 5.1, which measured that claim false; the
+      comment states the trade (+0.38 ms per store operation) instead of denying it.
       1.1 goes **green**.
 
 ## Phase 3 — The ten harnesses

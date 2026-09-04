@@ -96,8 +96,10 @@ Measured (`scratchpad` probe, deleted): a pooled `use` connection leaves the fil
 new SqliteConnection($"Data Source={databaseFilePath};Foreign Keys=True;Pooling=False")
 ```
 
-with a comment saying why (single long-lived connection; pooling is cost-only; keeps test cleanup
-deterministic). No other production file changes — `Startup.fs` passes a path to
+with a comment saying why: a pooled handle survives `Dispose()` and keeps the file locked, which is
+what made temp-database test cleanup fail. The comment must **not** say pooling is cost-only here —
+*Why C* above measured that claim false, and the comment states the +0.38 ms-per-operation trade
+instead of denying it. No other production file changes — `Startup.fs` passes a path to
 `createDatabaseContext`, and `MigrationSetup` receives whatever connection string its caller built.
 
 ### Tests — ten files

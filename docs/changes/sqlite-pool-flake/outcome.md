@@ -94,8 +94,12 @@ deleted, none skipped.
 CLAUDE-project.md → *Build state* is deliberately **not** updated here: `main` has since moved to
 `3834aa1` and records `1270 tests — 706 Unit, 270 Integration, 264 Contract, 30 E2E` for
 `credentials-per-provider`'s head. Writing this branch's `1064` over it would be wrong the moment the
-merge lands; the merge should set `1273 — 709 / 271 / 264 / 30` (`main`'s figures plus this change's
-three) after re-measuring. See the base-has-moved note in `tasks.md`.
+merge lands; the merge should set **`1273 tests — 708 Unit, 271 Integration, 264 Contract, 30 E2E`**
+(`main`'s 706 / 270 / 264 / 30 plus this change's +2 Unit and +1 Integration) after re-measuring.
+*(Round 1 wrote `709 / 271 / 264 / 30` here, which sums to 1274 and contradicts its own total; round 2
+corrected the Unit figure to 708. Re-measure at merge rather than trusting either — the eleven
+`;Pooling=False` additions the merge needs add no tests, but #18's own head may have moved again.)*
+See the base-has-moved note in `tasks.md`.
 
 ## The flake, characterised
 
@@ -124,12 +128,19 @@ one collection's teardown cannot dispose another's connection.
   (one literal) and the ten test files that were calling `ClearAllPools()` at `9b0d4ce`. **But the
   base has moved** — `main` is now `3834aa1`, with `invoice-extraction` (#18) and
   `credentials-per-provider` (#20) merged. `git merge-tree origin/main HEAD` is conflict-free, yet the
-  merge is not complete on its own: #18 added eight more SQLite connection strings
-  (`Contracts/InvoiceDependencyContractTests.fs`, `Contracts/InvoicePersistedShapeTests.fs`,
-  `Database/InvoiceStoreTests.fs`, `Database/ScanWindowStoreTests.fs`, `E2E/InvoicesTestHarness.fs`,
-  `Startup/InvoiceApiFactoryTests.fs` ×4, `Startup/ScanWindowApiFactoryTests.fs`) with no
-  `;Pooling=False`, and `main`'s CLAUDE-project.md *Build state* still says the SQLite harnesses "leak
-  their GUID-named temp file instead if the pool still holds a handle" — a sentence this change makes
+  merge is not complete on its own. Measured against the merged tree itself
+  (`git merge-tree --write-tree origin/main HEAD` → `04f4f07`, then grepped for lines building a
+  `Data Source=` string with no `;Pooling=False`): **eleven such lines across seven files**, all from
+  #18 — `Contracts/InvoiceDependencyContractTests.fs` (49 **and** 51: the `setupMigrations` string and
+  the raw `new SqliteConnection` beside it), `Contracts/InvoicePersistedShapeTests.fs` (15),
+  `Database/InvoiceStoreTests.fs` (27), `Database/ScanWindowStoreTests.fs` (22),
+  `E2E/InvoicesTestHarness.fs` (45), `Startup/InvoiceApiFactoryTests.fs` (25, 50, 76, 107) and
+  `Startup/ScanWindowApiFactoryTests.fs` (18). *(Review round 1 said "eight" while listing ten sites;
+  round 2 measured eleven off the merge tree and corrected both numbers here and in `tasks.md`.)*
+  The `ClearAllPools` half of the check is green in that same merged tree — every site still calling
+  it on `main` lives in one of the ten files this branch rewrites — so only the `;Pooling=False` half
+  goes red. `main`'s CLAUDE-project.md *Build state* also still says the SQLite harnesses "leak their
+  GUID-named temp file instead if the pool still holds a handle" — a sentence this change makes
   obsolete. The new `every SQLite connection string a test builds disables pooling` check turns that
   gap into a red test at merge time instead of a silent one.
 
