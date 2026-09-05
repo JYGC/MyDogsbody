@@ -20,6 +20,9 @@
     <Compile Include="InvoiceUiType.fs" />
     <Compile Include="InvoiceApi.fs" />
     <Compile Include="Modules\InvoicesModule.fs" />
+    <Compile Include="GoogleAccountUiType.fs" />
+    <Compile Include="GoogleAccountApi.fs" />
+    <Compile Include="Modules\GoogleAccountsBrowserModule.fs" />
   </ItemGroup>
 
   <ItemGroup>

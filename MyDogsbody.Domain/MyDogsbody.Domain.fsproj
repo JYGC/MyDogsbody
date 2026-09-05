@@ -55,6 +55,12 @@
     <Compile Include="Invoices\DeleteScanWindowWorkflow.fs" />
     <Compile Include="Invoices\ListScanWindowsWorkflow.fs" />
     <Compile Include="Invoices\SelectScanWindowWorkflow.fs" />
+    <Compile Include="Calendar\CalendarTypes.fs" />
+    <Compile Include="Calendar\RegisterGoogleAccountWorkflow.fs" />
+    <Compile Include="Calendar\ListGoogleAccountsWorkflow.fs" />
+    <Compile Include="Calendar\SetDefaultInvoiceCalendarWorkflow.fs" />
+    <Compile Include="Calendar\RemoveGoogleAccountWorkflow.fs" />
+    <Compile Include="Calendar\ReauthoriseGoogleAccountWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">

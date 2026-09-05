@@ -23,7 +23,7 @@ are genuinely new, and both are recorded rather than discovered:
  UI.Portal  /settings/google-accounts
    GoogleAccountsPage.fs ─ GoogleAccountsComponents.fs ─ GoogleAccountsBrowserModuleCreators.fs
         ▼
- UI.Types   GoogleAccountApi { GetClientSecretStatus; SetClientSecret;
+ UI.Types   GoogleAccountApi { GetClientSecret; SetClientSecret;
                                GetAccounts; RegisterAccount; ReauthoriseAccount;
                                RemoveAccount; GetCalendarsFor; SetDefaultInvoiceCalendar }
         ▼

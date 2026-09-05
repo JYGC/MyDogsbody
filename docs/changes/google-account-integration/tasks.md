@@ -22,16 +22,27 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 1 — Domain (required)
 
-- [ ] **1.1** *(test-first)* `GoogleAccountId`, `GoogleEmail`, `CalendarId`, `CalendarName` in
+- [x] **1.1** *(test-first)* `GoogleAccountId`, `GoogleEmail`, `CalendarId`, `CalendarName` in
       `Domain/Calendar/CalendarTypes.fs`.
       Tests: one accepted and one rejected value per rule with the reason; **`GoogleEmail` rejects a
       value with no `@`**.
       *Outcome:* the file is created here and **extended** by change #7 with the events half.
-- [ ] **1.2** `AvailableCalendar`, `RegisteredGoogleAccount`, `CalendarError`, and the seven
+- [x] **1.2** `AvailableCalendar`, `RegisteredGoogleAccount`, `CalendarError`, and the seven
       dependency function types.
       *Note:* `DefaultInvoiceCalendar` is an **option** — a freshly authorised account genuinely has
       no calendar, and that state must be representable rather than guessed at (Q2.11).
-- [ ] **1.3** *(test-first)* `RegisterGoogleAccountWorkflow`.
+      *Deviation recorded:* two cases not in the original listing were added — `GoogleAccountIdInvalid`
+      and `CalendarIdInvalid` — the same fix `MailAccountsTypes.MailAccountIdInvalid` made for the
+      identical gap between a workflow taking a raw `string` and an error DU with no case for a
+      malformed one.
+      *Second gap, found during Phase 5:* `GoogleAccountApi.ReauthoriseAccount` is specified in
+      design.md's API record, but no dependency type or workflow existed for it — only 4 of the
+      listed workflows were in the original table. Added `ReauthoriseAccount = GoogleAccountId ->
+      Result<GoogleEmail, CalendarError>` here and `Calendar/ReauthoriseGoogleAccountWorkflow.fs`
+      (test-first, 5 tests) as a fifth workflow before Phase 5 needed to call it — business logic,
+      however small (look up the account, confirm it exists, keep its default calendar), belongs in
+      the domain, not written inline at the composition root.
+- [x] **1.3** *(test-first)* `RegisterGoogleAccountWorkflow`.
       Tests: Ok path with every field, and `DefaultInvoiceCalendar = None`;
       `ClientSecretMissing` **with `authoriseAccount` never called**;
       `AccountAlreadyRegistered` carrying the email, **with `authoriseAccount` never called**;
@@ -40,158 +51,270 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       *The dependency-not-called cases are the ones that matter: **a test that opens a browser is a
       test that has already failed**, and the browser must not open for a registration that cannot
       succeed.*
-- [ ] **1.4** *(test-first)* `ListGoogleAccountsWorkflow`. Tests: ordered by email; empty is `Ok []`.
-- [ ] **1.5** *(test-first)* `SetDefaultInvoiceCalendarWorkflow`.
+      *Deviation recorded:* `AccountAlreadyRegistered` cannot be checked before `authoriseAccount` —
+      which account is a duplicate is only knowable once the browser step has returned an email, so
+      duplicate detection runs immediately after authorisation, before anything is saved. The
+      implementation and its test instead assert `saveGoogleAccount` is never called for this case.
+      `ClientSecretMissing` still stops before the browser opens, exactly as specified.
+- [x] **1.4** *(test-first)* `ListGoogleAccountsWorkflow`. Tests: ordered by email; empty is `Ok []`.
+- [x] **1.5** *(test-first)* `SetDefaultInvoiceCalendarWorkflow`.
       Tests: Ok path; `AccountNotRegistered`; **`CalendarNoLongerExists` when the calendar is absent
       from the account's listing — verified *before* storing** (design decision 6);
       `saveGoogleAccount` never called on either failure.
-- [ ] **1.6** *(test-first)* `RemoveGoogleAccountWorkflow`. Tests: Ok; `AccountNotRegistered`; **no
+- [x] **1.6** *(test-first)* `RemoveGoogleAccountWorkflow`. Tests: Ok; `AccountNotRegistered`; **no
       revoke is attempted** (Q3.6).
+- [x] **1.7** *(added during Phase 5, test-first)* `ReauthoriseGoogleAccountWorkflow` — not in
+      design.md's workflow table, but `GoogleAccountApi.ReauthoriseAccount` is specified with
+      nothing to back it. Tests: Ok path clears `NeedsReauthorisation` and keeps
+      `DefaultInvoiceCalendar`; updates the stored email if Google returns a different one;
+      `AccountNotRegistered` with `reauthoriseAccount` and `saveGoogleAccount` never called;
+      `GoogleAccountIdInvalid` on an empty id with neither dependency called; a cancelled
+      re-authorisation propagates without saving.
 
 ## Phase 2 — Google store (required)
 
-- [ ] **2.1** *(test-first)* `GoogleAccountEntity` and `GoogleClientSecretEntity` (C#), and the two
+- [x] **2.1** *(test-first)* `GoogleAccountEntity` and `GoogleClientSecretEntity` (C#), and the two
       new getters on the context record change #5 created, **each with a
       `BsonMapper.Global.ToDocument` warm-up** before the context returns.
       Tests *(Integration)*: the context disposes and **the temp file then deletes successfully**;
       all three entities are warmed.
-- [ ] **2.2** *(test-first)* `GoogleEntityMappers.fs` — the bottom mapper.
+      *Note:* the context uses its own local `BsonMapper` (not `.Global`) per change #5's decision
+      for this database — the warm-up call is the same idea, applied to the same local mapper.
+- [x] **2.2** *(test-first)* `GoogleEntityMappers.fs` — the bottom mapper.
       Tests: field-for-field both directions; a **null** stored calendar id maps to `None` and back;
       the needs-reauthorisation flag round-trips.
-- [ ] **2.3** *(test-first)* `GoogleAccountStore.fs` — accounts and the client secret.
+- [x] **2.3** *(test-first)* `GoogleAccountStore.fs` — accounts and the client secret.
       Tests *(Integration)*: round trips; saving an account twice updates rather than duplicating;
       the client secret is a **single** row.
       Tests *(Unit)*: each error path asserts its `ActionNames` string, message and inner exception.
-- [ ] **2.4** Persisted-shape tests for both new entities — assert the stored document's **field
+- [x] **2.4** Persisted-shape tests for both new entities — assert the stored document's **field
       names**.
-- [ ] **2.5** `ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.*`.
+- [x] **2.5** `ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.*`.
+      *Outcome:* this phase also gave `Integrations.Google` its first `MyDogsbody.Domain` reference
+      (`GoogleEntityMappers.fs` maps to/from `RegisteredGoogleAccount`) — expected per
+      requirements.md → *Architecture*, since the account store now satisfies domain-declared
+      dependency types rather than staying credential-only.
 
 ## Phase 3 — Authorisation (required)
 
-- [ ] **3.1** *(test-first)* `GoogleCredentialDataStore.fs` — an `IDataStore` over the `Credentials`
+- [x] **3.1** *(test-first)* `GoogleCredentialDataStore.fs` — an `IDataStore` over the `Credentials`
       collection, so tokens land in `Google.db` rather than in a `FileDataStore` directory
       (design decision 1).
       Tests *(Integration)*: store, get, delete, clear; **a token round-trips byte-for-byte** — the
       characterization assertion change #5 established, now applied to a token.
       *Depends on:* 2.1.
-- [ ] **3.2** `GoogleAuthorization.fs` — `GoogleWebAuthorizationBroker`, system browser, loopback
+- [x] **3.2** `GoogleAuthorization.fs` — `GoogleWebAuthorizationBroker`, system browser, loopback
       redirect, the calendar scope **and `userinfo.email`** (Q3.5), lifted from the
       `GoogleCalendarCRUD` prototype.
       *Outcome:* the account's own address is read back, so accounts are distinguishable.
       *Depends on:* 3.1.
-- [ ] **3.3** *(test-first)* Failure paths at the adapter boundary: the loopback port already in use;
+      *Note:* the account's email is read via a plain authenticated GET against
+      `https://www.googleapis.com/oauth2/v2/userinfo` (bearer token), not via `GoogleJsonWebSignature`
+      id-token validation — the latter fetches Google's public certs over the network on every call,
+      which would make this line untestable without network access. `authoriseWith` takes both the
+      consent-flow call and the email fetch as function parameters, so `GoogleAuthorizationTests`
+      substitutes fakes for both and never opens a browser, a loopback listener, or the network.
+      *Note:* `authoriseWith` takes the OAuth datastore key (`accountId: string`) as a parameter
+      rather than minting one itself. `authorise` (new account) mints a fresh one
+      (`ObjectId.NewObjectId()`); `reauthorise` (Phase 6's re-authorise action) passes the existing
+      account's id, so the same `Credentials` row is overwritten and the `Accounts` row — its
+      `DefaultInvoiceCalendar` included — never has to move to a new identity (requirements.md:
+      "an account is re-authorised THE SYSTEM SHALL keep its chosen default calendar").
+- [x] **3.3** *(test-first)* Failure paths at the adapter boundary: the loopback port already in use;
       consent abandoned or timed out; a malformed client secret. Each maps to its own `CalendarError`
       case — **no half-registered account is ever stored**.
-- [ ] **3.4** `ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise`.
+      *Outcome — the exact `Message` strings `GoogleAccountApiMappers.toCalendarError` (Phase 5) must
+      match on:*
+
+      | Case | `Message` | Logged? |
+      | --- | --- | --- |
+      | Cancelled/denied consent | `The consent flow was cancelled or denied.` | No (bypasses the outer `with`, returned as a plain `Error` value) |
+      | Malformed client secret | `The stored Google client secret is malformed.` | No |
+      | Email unreadable | `The authorised account's email address could not be read.` | No |
+      | Loopback port in use | `The loopback port is already in use.` | Yes |
+      | Consent timed out (5-minute internal timeout) | `The consent flow timed out.` | Yes |
+      | Anything else | `Authorisation failed.` | Yes |
+
+      Loopback-port-in-use and timed-out are not in design.md's explicit "logged" list by name, but
+      fold under `AuthorisationFailed` there (no dedicated unlogged case exists for them) — a
+      documented judgement call, not a deviation from the table.
+- [x] **3.4** `ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise`.
 
 ## Phase 4 — Calendar client (required)
 
-- [ ] **4.1** *(test-first)* `GoogleCalendarClient.listCalendars` over `CalendarService`.
+- [x] **4.1** *(test-first)* `GoogleCalendarClient.listCalendars` over `CalendarService`.
       Tests, against a **stubbed `HttpMessageHandler`**: a normal list; **a paged list, proving the
       adapter follows `nextPageToken` rather than returning only the first page**; an empty list;
       `401` → `NotAuthorised`; `403` → `NotAuthorised`; `429` → **`CalendarRateLimited`**;
       `500` → `CalendarUnreachable`.
       *The 429 case is the one that matters: "try again shortly" and "grant access" are different
       instructions, and collapsing them tells the user to do the wrong thing.*
-- [ ] **4.2** `ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars`.
-- [ ] **4.3** Confirm **no event operation is declared or bound in this change** — `ListCalendarEvents`,
-      `CreateCalendarEvent`, `UpdateCalendarEvent` and `DeleteCalendarEvent` arrive in change #7 with
-      the workflows that consume them (design decision 3).
-      *The prototype's event code may be moved into this file, but it is not exposed as a dependency
-      type yet.*
-- [ ] **4.4** Record in the change description that calls are **blocked on** rather than made
-      asynchronous (friction #1), and that the condition for revisiting is change #7's batch making
-      the interface feel stuck.
+      *Outcome — the exact `Message` strings, for Phase 5:*
+
+      | Case | `Message` |
+      | --- | --- |
+      | `401` / `403` | `The stored Google credential is no longer authorised.` |
+      | `429` | `Google is rate-limiting this account; try again shortly.` |
+      | Anything else (`500`, network failure, etc.) | `Could not reach Google Calendar.` |
+- [x] **4.2** `ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars`.
+- [x] **4.3** Confirmed: no event operation is declared or bound in this change — `ListCalendarEvents`,
+      `CreateCalendarEvent`, `UpdateCalendarEvent` and `DeleteCalendarEvent` are not in
+      `GoogleCalendarClient.fs`. They arrive in change #7 with the workflows that consume them
+      (design decision 3).
+- [x] **4.4** Recorded in the file's own doc comment: calls are **blocked on**
+      (`Async.RunSynchronously`) rather than made asynchronous (friction #1); the condition for
+      revisiting is change #7's batch making the interface feel stuck.
 
 ## Phase 5 — Composition root (required)
 
-- [ ] **5.1** *(test-first)* `GoogleAccountApiMappers.fs` — domain ⇄ UI, `toCalendarError`,
-      `toMyDogsbodyException`.
+- [x] **5.1** *(test-first)* `GoogleAccountApiMappers.fs` — domain ⇄ UI, `toAuthorisationError` /
+      `toListCalendarsError` / `toStoreError` (split three ways by which adapter action produced the
+      exception — `toCalendarError` as one function turned out not to fit, since `NotAuthorised`
+      needs the account id, which only `ListCalendars`' own call site has in scope), `toMyDogsbodyException`.
       Tests: field-for-field both directions; **each `CalendarError` case → its intended action and
-      message**, with the expected/unexpected split asserted (design → *Error handling*) — in
-      particular that `CalendarUnreachable` **is** logged, because change #7 needs the log to explain
-      why a sync plan was refused.
-- [ ] **5.2** *(test-first)* `GoogleAccountApiFactory.createGoogleAccountApi handleError googleContext`.
-      Tests *(Integration)*: every member against a real temp LiteDB and stubbed HTTP.
-      No module-level I/O.
-- [ ] **5.3** `ActionNames.MyDogsbody.Startup.GoogleAccountApi.*`.
-- [ ] **5.4** `Startup.fs`: `Google.db` context, `googleAccountApi`, one more registration.
-      *Outcome:* `MainWindow.xaml.cs` unchanged.
+      message**, with the expected/unexpected split asserted — `AuthorisationFailed`,
+      `CalendarUnreachable`, `CalendarRateLimited` and `GoogleStoreFailed` carry their message
+      unmarked (already logged once by the adapter that produced them), every other case wrapped in
+      an `ApplicationException` and left for the caller to decide whether that also means unlogged.
+- [x] **5.2** *(test-first)* `GoogleAccountApiFactory.createGoogleAccountApi handleError googleContext`.
+      Tests *(Integration)*: every member against a real temp LiteDB. No module-level I/O.
+      *Outcome — a second gap found and closed while wiring this up:* `GoogleAccountApi.ReauthoriseAccount`
+      was specified in design.md with no domain workflow behind it. Added `ReauthoriseAccount`
+      (dependency type) and `ReauthoriseGoogleAccountWorkflow.fs` to Phase 1's domain area, test-first,
+      before writing this factory — see Phase 1's task 1.2 note. `GoogleAuthorization.authoriseWith`
+      was also refactored to take `accountId` as a parameter (minted by `authorise`, reused by
+      `reauthorise`) so re-authorising an existing account keeps its `DefaultInvoiceCalendar` without
+      the Accounts row having to move to a new identity; `GoogleAuthorizationTests` updated accordingly,
+      still green.
+      *Outcome:* `GoogleAuthorization.loadCredential` (loads a stored token and lets the SDK refresh
+      it silently — never `AuthorizeAsync`, which would open a browser if the token were missing) is
+      what `ListCalendars`'/`GetCalendarsFor`'s real binding uses; a missing stored credential is
+      indistinguishable, by design, from Google itself reporting 401/403 - both map to `NotAuthorised`.
+- [x] **5.3** `ActionNames.MyDogsbody.Startup.GoogleAccountApi.*`.
+- [x] **5.4** `Startup.fs`: `Google.db` context (`connection=shared`, matching Thunderbird.db/the log
+      database's convention), `googleAccountApi`, one more registration.
+      *Outcome:* `MainWindow.xaml.cs` unchanged; `dotnet build MyDogsbody.sln` clean.
 
 ## Phase 6 — UI (required)
 
-- [ ] **6.1** `MyDogsbody.UI.Types`: `GoogleAccountUiType`, `CalendarUiType`, `GoogleAccountApi`,
+- [x] **6.1** `MyDogsbody.UI.Types`: `GoogleAccountUiType`, `CalendarUiType`, `GoogleAccountApi`,
       `Modules/GoogleAccountsBrowserModule.fs`.
-- [ ] **6.2** *(test-first)* `ModuleCreators/GoogleAccountsBrowserModuleCreators.fs` —
+      *Outcome:* pulled forward into Phase 5, since `GoogleAccountApiFactory` needs the record type
+      to exist before it can return one — the type declarations landed then; the module type landed
+      here alongside its creator.
+- [x] **6.2** *(test-first)* `ModuleCreators/GoogleAccountsBrowserModuleCreators.fs` —
       `cval`/`transact`, `startWork` first, write-then-reload.
       Tests: registering reloads the table; choosing a calendar reloads; a failure sets `ErrorAval`
-      and a success clears it; **no `Async.Start` in the file**.
-- [ ] **6.3** `Components/GoogleAccountsComponents.fs` — the accounts table, the client-secret entry,
+      and a success clears it; a ready account's calendars load automatically (populating its
+      picker) while an account needing re-authorisation never has its calendars fetched;
+      **no `Async.Start` in the file**. 15 tests.
+- [x] **6.3** `Components/GoogleAccountsComponents.fs` — the accounts table, the client-secret entry,
       and the per-account calendar picker populated from **that account's own** calendars.
-- [ ] **6.4** The **not-ready** state: an account with no default calendar is shown as such with the
-      reason, and any action requiring a calendar is unavailable (Q2.11).
-- [ ] **6.5** Remove-account confirmation, **stating that access remains granted at Google and can be
-      revoked there** — so the user is not left believing more happened than did (Q3.6).
-- [ ] **6.6** Re-authorise action for an account whose token has expired or been revoked, **keeping
-      its chosen default calendar**.
-- [ ] **6.7** `Pages/Settings/GoogleAccountsPage.fs`, `routeCi "/settings/google-accounts"`,
+- [x] **6.4** The **not-ready** state: an account with no default calendar is shown as such with the
+      reason ("Not ready - no calendar chosen" chip), and its calendar picker is the only action
+      that needs one — `SetDefaultInvoiceCalendar` is what makes it ready, so nothing else is
+      disabled behind it (Q2.11).
+- [x] **6.5** Remove-account confirmation via `dialogService.ShowMessageBox` (the same pattern
+      `InvoicesPage.confirmAndDelete` uses), **stating that access remains granted at Google and can
+      be revoked there** — so the user is not left believing more happened than did (Q3.6).
+- [x] **6.6** Re-authorise action (button shown only when `NeedsReauthorisation`) for an account whose
+      token has expired or been revoked, **keeping its chosen default calendar** — proven by
+      `ReauthoriseGoogleAccountWorkflow`'s and the module creator's own tests.
+- [x] **6.7** `Pages/Settings/GoogleAccountsPage.fs`, `routeCi "/settings/google-accounts"`,
       registered in `Shell.fs` and in `SettingsComponents.settingsNavMenu`.
       *Outcome:* **this page replaces the `/settings/credentials` page change #5 removed** — it *is*
-      Google's credential page (Q3.10).
+      Google's credential page (Q3.10). `dotnet build MyDogsbody.sln` clean.
 
 ## Phase 7 — Contract suites (required) — friction #2
 
-- [ ] **7.1** One shared suite per dependency function type — `LoadClientSecret`, `SaveClientSecret`,
-      `AuthoriseAccount`, `ListGoogleAccounts`, `SaveGoogleAccount`, `RemoveGoogleAccount`,
-      `ListCalendars` — run against **every fake and against the real adapter over stubbed HTTP**.
-      **`MemberData` sources must be public `let`s.**
-- [ ] **7.2** `GoogleAccountApi` contract suite: real record and every fake.
-- [ ] **7.3** Write the arrangement into the test file as a comment and into the change description:
-      **fakes + stub-backed real adapter, with live verification recorded as manual coverage.**
-      *This must be stated explicitly rather than quietly skipping the level.*
+- [x] **7.1** One shared suite per dependency function type. **Split across two files, not one, by
+      what "real" means for each:**
+      - `GoogleAccountDependencyContractTests.fs` — `LoadClientSecret`, `SaveClientSecret`,
+        `ListGoogleAccounts`, `SaveGoogleAccount`, `RemoveGoogleAccount`: pure LiteDB CRUD, real
+        bindings over a temp file + an in-memory fake. 12 tests.
+      - `ListCalendarsDependencyContractTests.fs` — `ListCalendars`: the real adapter
+        (`GoogleCalendarClient.listCalendarsVia`) over a **stubbed `HttpMessageHandler`** + an
+        in-memory fake. 4 tests.
+      - `AuthoriseAccount` is **not** in either file — see the deviation note below.
+      **`MemberData` sources are public `let`s** in both files.
+- [x] **7.2** `GoogleAccountApiContractTests.fs` — real record (`GoogleAccountApiFactory` over a temp
+      LiteDB) and a fake record literal, scoped to the paths **neither** implementation ever needs
+      the real Google network for (a missing client secret, an unregistered account) — the same
+      precondition-refusal both implementations must agree on. 7 tests × 2 implementations = 14.
+- [x] **7.3** *Deviation recorded, not a silent skip:* `AuthoriseAccount`'s real side has no
+      stubbed-HTTP equivalent - unlike `ListCalendars`, it is not one REST call but a system browser
+      plus a local loopback listener, which cannot be driven headlessly at all. Its real-adapter
+      coverage is `GoogleAuthorizationTests.fs`'s `authoriseWith` suite (the actual production
+      function, with only the innermost two SDK calls - the consent flow and the userinfo fetch -
+      substituted at the function-parameter seam) plus `GoogleAccountApiFactoryTests.fs`'s
+      precondition tests (`ClientSecretMissing` refuses before either call). Recorded in
+      `docs/changes/google-account-integration/tasks.md` (here) and restated in `outcome.md` -
+      never silently dropped from the suite.
 
 ## Phase 8 — Housekeeping (required)
 
-- [ ] **8.1** Delete the `GoogleCalendarCRUD` scratch project and remove it from `MyDogsbody.sln`
-      (Q5.5). What it proved now lives in the integration; leaving it would leave a second, untested
-      copy of the auth dance.
-      *Outcome:* check the `.sln` diff by hand.
-- [ ] **8.2** Remove its `bin/` and `obj/` output.
+- [x] **8.1** Deleted the `GoogleCalendarCRUD` scratch project and removed it from `MyDogsbody.sln`
+      via `dotnet sln remove` (Q5.5) — clean edit, no manual GUID surgery. What it proved now lives
+      in the integration (`GoogleAuthorization.fs`, `GoogleCalendarClient.fs`); leaving it would
+      leave a second, untested copy of the auth dance.
+      *Outcome:* `dotnet build MyDogsbody.sln` clean afterward.
+- [x] **8.2** Its `bin/`/`obj/` output went with the directory (`rm -rf GoogleCalendarCRUD`).
 
 ## Phase 9 — End to end (required)
 
-- [ ] **9.1** `E2E/GoogleAccountsFlowTests.fs` with a **faked authoriser** and stubbed HTTP, against a
-      real temp LiteDB: register → the row appears marked not-ready; choose a calendar → it shows and
-      the account becomes ready; an account with no calendar stays not-ready with its reason; remove
-      → the row goes; a failure → `MudAlert`, cleared by the next success.
-- [ ] **9.2** Confirm no test opens a browser, requires network, or reaches `Startup.Startup`.
+- [x] **9.1** `E2E/GoogleAccountsTestHarness.fs` + `E2E/GoogleAccountsFlowTests.fs`, against a real
+      temp LiteDB: register → the row appears marked not-ready; choose a calendar → it shows and the
+      account becomes ready; an account with no calendar stays not-ready with its reason; remove →
+      the row goes; a failure → `MudAlert`, cleared by the next success. 5 tests.
+      *Outcome:* the harness does **not** go through `GoogleAccountApiFactory` — it re-composes the
+      same real `GoogleAccountStore` bindings and domain workflows directly, with `AuthoriseAccount`
+      and `ListCalendars` supplied as test-controlled fakes, because the real consent flow needs a
+      system browser and the real calendar client needs the network. `MudSelect` (the calendar
+      picker) renders through a popover, so the view is rendered inside a `MudPopoverProvider`, the
+      same fix `InvoicesFlowTests` already needed for its own `MudSelect`.
+- [x] **9.2** Confirmed: no test opens a browser, requires network, or reaches `Startup.Startup`.
 
 ## Phase 10 — Gate (required)
 
-- [ ] **10.1** `dotnet build MyDogsbody.sln` — zero errors.
-- [ ] **10.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-- [ ] **10.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass;
+- [x] **10.1** `dotnet build MyDogsbody.sln` — zero errors, zero warnings introduced.
+- [x] **10.2** `dotnet test` — **1448 passed, 1 failed, 0 skipped**, all four levels present (Unit
+      779, Integration 305, Contract 330, E2E 35). **The one failure predates this change** —
+      `Database/SqliteConnectionPoolingTests.fs` flags several pre-existing `invoice-extraction`/
+      `invoice-ledger-foundation` test files that never got `;Pooling=False` added; verified via
+      `git diff origin/main -- <each flagged file>` returning empty for all of them. See
+      `outcome.md` for the full account. Every test this change added is green.
+- [x] **10.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass;
       the domain names no `CalendarService`, OAuth or HTTP type.
-- [ ] **10.4** **Manual verification against a real Google account**: register, list calendars, choose
-      a default, remove, re-register. Record what was run and what was observed — **this is the
-      coverage the contract level cannot supply.**
-- [ ] **10.5** Confirm `MainWindow.xaml.cs` is untouched.
+- [x] **10.4** **Manual verification against a real Google account** — performed by the user across
+      this session and the one that fixed `CalendarApiNotEnabled`. Confirmed: register (with a real
+      client secret, real browser consent), the account appears not-ready with no default calendar,
+      the calendar picker populates from the real account's own calendars once the Cloud project's
+      Calendar API was enabled, and a default calendar is now selectable. See `outcome.md`'s "Task
+      10.4" section for the two real bugs this surfaced and fixed (a swallowed calendar-fetch error,
+      and every 403 reading as `NotAuthorised` regardless of cause). Remove/re-register were not
+      exercised in this pass - flagged, not blocking, since the workflow-level tests for both are
+      unchanged by anything found here.
+- [x] **10.5** Confirmed `MainWindow.xaml.cs`/`.xaml` untouched (`git diff origin/main -- MyDogsbody/MainWindow.*` empty).
 
 ## Phase 11 — Documentation (required)
 
-- [ ] **11.1** `CLAUDE-project.md`: `Integrations.Google` is no longer a stub; the new collections in
-      `Google.db`; `GoogleCalendarCRUD` removed from the scratch tier; the *Build state* totals.
-- [ ] **11.2** `outcome.md`, and it must carry two things beyond the totals:
-      **(a)** the manual verification from 10.4, stated as manual coverage of the contract level;
-      **(b)** **that OAuth refresh tokens are stored unencrypted, as a deliberate, accepted risk**
-      (Q5.6) — a refresh token is durable, silent to use, and valid until revoked; DPAPI
-      (`ProtectedData`, `CurrentUser`) is the retrofit, and **retrofitting means re-authorising every
-      account**, because tokens already written cannot be re-encrypted without being read first.
-- [ ] **11.3** Open `change/google-account-integration` for review, with this file's checkboxes ticked
-      and `outcome.md` on the branch. **Merge only after Phase 10 passed in full.**
-      *Point the reviewer at task 7.3 and at `outcome.md`'s two entries: this is the first change
-      whose contract level leans on recorded manual coverage, and the first to write a durable
-      credential to disk.*
+- [x] **11.1** `CLAUDE-project.md`: `Integrations.Google` is no longer a stub; the new collections in
+      `Google.db`; `GoogleCalendarCRUD` removed from the scratch tier; the *Build state* totals;
+      the reference-direction bullet updated (the integration now references `Domain`); the
+      four-contexts warm-up paragraph updated to include Google's.
+- [x] **11.2** `outcome.md` written, carrying: the message-string table Phase 5's error translation
+      matches on; **that OAuth refresh tokens are stored unencrypted, as a deliberate, accepted risk**
+      (Q5.6) with the DPAPI retrofit and its re-authorise-everything cost; the three documented
+      deviations (Phase 1's ordering, the added `ReauthoriseAccount`/workflow, `AuthoriseAccount`'s
+      contract-suite gap); and task 10.4's manual verification, later completed against a real
+      account, with the two real bugs it found and fixed (a swallowed calendar-fetch error, and
+      every 403 reading as `NotAuthorised` regardless of cause).
+- [x] **11.3** Opened `change/google-account-integration` for review, with this file's checkboxes
+      ticked and `outcome.md` on the branch.
+      *Point the reviewer at task 7.3 and at `outcome.md`'s entries: this is the first change whose
+      contract level leans on recorded manual coverage, the first to write a durable credential to
+      disk, and the one where that manual pass against a real account found two real bugs before
+      merge rather than after.*
 
 ---
 

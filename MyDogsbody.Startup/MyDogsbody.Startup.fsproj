@@ -16,6 +16,8 @@
     <Compile Include="ScanWindowApiMappers.fs" />
     <Compile Include="InvoiceApiFactory.fs" />
     <Compile Include="ScanWindowApiFactory.fs" />
+    <Compile Include="GoogleAccountApiMappers.fs" />
+    <Compile Include="GoogleAccountApiFactory.fs" />
     <Compile Include="Startup.fs" />
   </ItemGroup>
 
@@ -29,6 +31,7 @@
     <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Thunderbird\MyDogsbody.Integrations.Thunderbird.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Documents\MyDogsbody.Integrations.Documents.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Integrations.Google\MyDogsbody.Integrations.Google.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Database\MyDogsbody.Database.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Database.Migrations\MyDogsbody.Database.Migrations.fsproj" />
   </ItemGroup>

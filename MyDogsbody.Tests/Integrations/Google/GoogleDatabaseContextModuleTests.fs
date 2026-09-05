@@ -114,3 +114,34 @@ let ``a fresh context maps every property of a fully populated entity - the warm
         finally
             context.Dispose()
     )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``the account and client secret collections are also warmed before the context returns`` () =
+    withTempPath (fun databasePath ->
+        // Arrange - change #6 adds two more entities; each needs the same warm-up as GoogleCredential.
+        let context = GoogleDatabaseContextModule.getDatabaseContext databasePath "direct"
+
+        try
+            let accounts = context.GetAccountCollection()
+
+            GoogleAccountEntity(
+                EmailAddress = "person@gmail.com",
+                DefaultInvoiceCalendarId = "cal-1",
+                NeedsReauthorisation = true
+            )
+            |> accounts.Insert
+            |> ignore
+
+            let storedAccount = accounts.FindAll() |> Seq.exactlyOne
+            Assert.Equal("person@gmail.com", storedAccount.EmailAddress)
+            Assert.Equal("cal-1", storedAccount.DefaultInvoiceCalendarId)
+            Assert.True storedAccount.NeedsReauthorisation
+
+            let clientSecrets = context.GetClientSecretCollection()
+            GoogleClientSecretEntity(Secret = "the-secret") |> clientSecrets.Insert |> ignore
+
+            let storedSecret = clientSecrets.FindAll() |> Seq.exactlyOne
+            Assert.Equal("the-secret", storedSecret.Secret)
+        finally
+            context.Dispose()
+    )

@@ -40,6 +40,12 @@
     <Compile Include="Domain\Invoices\ScanForInvoicesWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\DeleteInvoiceWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ScanWindowWorkflowsTests.fs" />
+    <Compile Include="Domain\Calendar\CalendarTypesTests.fs" />
+    <Compile Include="Domain\Calendar\RegisterGoogleAccountWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\ListGoogleAccountsWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\SetDefaultInvoiceCalendarWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\RemoveGoogleAccountWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\ReauthoriseGoogleAccountWorkflowTests.fs" />
     <Compile Include="Fixtures\ThunderbirdFixturePaths.fs" />
     <Compile Include="Fixtures\DocumentFixtures.fs" />
     <Compile Include="Fixtures\MeasuredTemplates.fs" />
@@ -56,6 +62,10 @@
     <Compile Include="Integrations\Google\GoogleDatabaseContextModuleTests.fs" />
     <Compile Include="Integrations\Google\GoogleCredentialStoreTests.fs" />
     <Compile Include="Integrations\Google\GoogleCredentialCharacterizationTests.fs" />
+    <Compile Include="Integrations\Google\GoogleAccountStoreTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCredentialDataStoreTests.fs" />
+    <Compile Include="Integrations\Google\GoogleAuthorizationTests.fs" />
+    <Compile Include="Integrations\Google\GoogleCalendarClientTests.fs" />
     <Compile Include="Integrations\Documents\PdfDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\WordDocumentReaderTests.fs" />
     <Compile Include="Integrations\Documents\PlainTextDocumentReaderTests.fs" />
@@ -85,9 +95,13 @@
     <Compile Include="Startup\InvoiceApiMappersTests.fs" />
     <Compile Include="Startup\ScanWindowApiFactoryTests.fs" />
     <Compile Include="Startup\InvoiceApiFactoryTests.fs" />
+    <Compile Include="Startup\GoogleAccountApiMappersTests.fs" />
+    <Compile Include="Startup\GoogleAccountApiFactoryTests.fs" />
     <Compile Include="Contracts\GoogleCredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\GoogleCredentialPersistedShapeTests.fs" />
     <Compile Include="Contracts\GoogleCredentialBoundaryMapperTests.fs" />
+    <Compile Include="Contracts\GoogleAccountBoundaryMapperTests.fs" />
+    <Compile Include="Contracts\GoogleAccountPersistedShapeTests.fs" />
     <Compile Include="Contracts\PersistedShapeTests.fs" />
     <Compile Include="Contracts\SupplierDependencyContractTests.fs" />
     <Compile Include="Contracts\ThunderbirdDependencyContractTests.fs" />
@@ -100,10 +114,14 @@
     <Compile Include="Contracts\DocumentReaderContractTests.fs" />
     <Compile Include="Contracts\InvoiceDependencyContractTests.fs" />
     <Compile Include="Contracts\InvoicePersistedShapeTests.fs" />
+    <Compile Include="Contracts\GoogleAccountDependencyContractTests.fs" />
+    <Compile Include="Contracts\ListCalendarsDependencyContractTests.fs" />
+    <Compile Include="Contracts\GoogleAccountApiContractTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\MailAccountsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\InvoicesModuleCreatorsTests.fs" />
+    <Compile Include="UI\ModuleCreators\GoogleAccountsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\Components\MailAccountsComponentsTests.fs" />
     <Compile Include="E2E\SuppliersTestHarness.fs" />
     <Compile Include="E2E\SuppliersFlowTests.fs" />
@@ -111,6 +129,8 @@
     <Compile Include="E2E\MailAccountsFlowTests.fs" />
     <Compile Include="E2E\InvoicesTestHarness.fs" />
     <Compile Include="E2E\InvoicesFlowTests.fs" />
+    <Compile Include="E2E\GoogleAccountsTestHarness.fs" />
+    <Compile Include="E2E\GoogleAccountsFlowTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
