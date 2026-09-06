@@ -225,6 +225,42 @@ let ``loadCredential returns a credential carrying the stored access token`` () 
         context.Dispose()
         try System.IO.File.Delete databasePath with _ -> ()
 
+[<Theory; Trait("Level", "Integration")>]
+[<InlineData("not json at all")>]
+[<InlineData("""{ "hello": "world" }""")>]
+let ``loadCredential reports a malformed stored client secret, not a bare authorisation failure, unlogged``
+    (storedSecret: string)
+    =
+    // requirements.md's edge case: "WHEN the stored client secret is malformed THE SYSTEM SHALL
+    // report that rather than producing an obscure authorisation failure." `authoriseWith` already
+    // names this failure; `loadCredential` parses the very same secret and did not, so replacing a
+    // working secret with a bad paste turned every calendar picker into "Authorisation failed."
+    let databasePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{System.Guid.NewGuid()}.db")
+    let context = Database.GoogleDatabaseContextModule.getDatabaseContext databasePath "direct"
+    let logged = ResizeArray<MyDogsbodyException>()
+
+    try
+        let dataStore =
+            GoogleCredentialDataStore.GoogleCredentialDataStore(HandleErrorBuilder(fun _ -> ()), context.GetCredentialCollection)
+            :> IDataStore
+
+        dataStore.StoreAsync("account-1", TokenResponse(AccessToken = "at", RefreshToken = "rt"))
+        |> Async.AwaitTask
+        |> Async.RunSynchronously
+
+        match GoogleAuthorization.loadCredential (HandleErrorBuilder logged.Add) context.GetCredentialCollection storedSecret "account-1" with
+        | Error ex ->
+            Assert.Equal("The stored Google client secret is malformed.", ex.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential, ex.ActionName)
+            Assert.NotNull ex.InnerException
+            // A secret the user pasted wrongly is a state they can fix, not a defect worth a stack
+            // trace - the same unlogged treatment `authoriseWith` gives the identical failure.
+            Assert.Empty logged
+        | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+    finally
+        context.Dispose()
+        try System.IO.File.Delete databasePath with _ -> ()
+
 [<Fact; Trait("Level", "Unit")>]
 let ``authoriseWith reports any other failure generically, logged, with the inner exception preserved`` () =
     let logged = ResizeArray<MyDogsbodyException>()

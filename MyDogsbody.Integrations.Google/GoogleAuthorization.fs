@@ -184,7 +184,9 @@ let reauthorise
 ///
 /// `Message = "No stored credential for this account."` is the one case
 /// `GoogleAccountApiMappers` maps to `NotAuthorised`, ahead of anything `listCalendars` itself
-/// could report.
+/// could report; `"The stored Google client secret is malformed."` is the other message this
+/// function chooses, and maps to `ClientSecretInvalid` - it happens before a single byte reaches
+/// Google, so it is not a "could not reach Google Calendar" failure.
 let loadCredential
     (handleError: HandleErrorBuilder)
     (getCredentialCollection: unit -> GoogleCredentialsCollection)
@@ -195,8 +197,19 @@ let loadCredential
 
     handleError {
         try
-            use stream = new MemoryStream(Encoding.UTF8.GetBytes clientSecretJson)
-            let secrets = GoogleClientSecrets.FromStream(stream).Secrets
+            // Parsing the stored client secret is the only thing this step does, so any failure
+            // in it means exactly one thing: the stored secret is malformed. Named here rather
+            // than left to the catch-all below, which reported a bare "Authorisation failed." for
+            // a bad paste - the "obscure authorisation failure" requirements.md asks this edge
+            // case not to become. Yielded as an Error value, so handleError passes it through
+            // unlogged, the same treatment `authoriseWith` gives the identical failure.
+            let! secrets =
+                try
+                    use stream = new MemoryStream(Encoding.UTF8.GetBytes clientSecretJson)
+                    Ok (GoogleClientSecrets.FromStream(stream).Secrets)
+                with ex ->
+                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
+
             let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
 
             let flow =

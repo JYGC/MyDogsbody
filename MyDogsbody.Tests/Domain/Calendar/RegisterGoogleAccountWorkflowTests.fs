@@ -47,6 +47,17 @@ let private recordingDiscard () =
 let private unusedDiscard: DiscardAuthorisation =
     fun _ -> failwith "discardAuthorisation must not be called"
 
+/// A save that refuses, and records whether it was reached at all.
+let private failingSave (reason: string) =
+    let attempted = ResizeArray<RegisteredGoogleAccount>()
+
+    let save: SaveGoogleAccount =
+        fun account ->
+            attempted.Add account
+            Error (GoogleStoreFailed reason)
+
+    save, attempted
+
 [<Fact; Trait("Level", "Unit")>]
 let ``registerGoogleAccount registers a newly authorised account with no default calendar`` () =
     let loadSecret: LoadClientSecret = fun () -> Ok (Some "secret")
@@ -127,6 +138,69 @@ let ``registerGoogleAccount still reports the duplicate when discarding the stra
     // handleError has already recorded why it failed.
     Assert.Equal(Error (AccountAlreadyRegistered existing.EmailAddress), actual)
     Assert.Empty received
+
+[<Fact; Trait("Level", "Unit")>]
+let ``registerGoogleAccount discards the authorisation consent wrote when the account list cannot be read`` () =
+    let loadSecret: LoadClientSecret = fun () -> Ok (Some "secret")
+    let listAccounts: ListGoogleAccounts = fun () -> Error (GoogleStoreFailed "the account store is unreachable")
+
+    let authorise: AuthoriseAccount =
+        fun () -> Ok (email "new@example.com", accountId "minted-id")
+
+    let save, received = recordingSave ()
+    let discard, discarded = recordingDiscard ()
+
+    let actual =
+        RegisterGoogleAccountWorkflow.registerGoogleAccount loadSecret listAccounts authorise discard save ()
+
+    // The failure the user needs to see is the store's, unchanged by the cleanup.
+    Assert.Equal(Error (GoogleStoreFailed "the account store is unreachable"), actual)
+    Assert.Empty received
+
+    // Consent completed before this step, so a token is already sitting in the credential store
+    // keyed by the minted id. Nothing will ever point at it - only removing an account deletes a
+    // token, and no account row was written - so it has to be discarded here or not at all.
+    Assert.Equal<string list>([ "minted-id" ], discarded |> Seq.map GoogleAccountId.value |> List.ofSeq)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``registerGoogleAccount discards the authorisation consent wrote when the account cannot be saved`` () =
+    let loadSecret: LoadClientSecret = fun () -> Ok (Some "secret")
+    let listAccounts: ListGoogleAccounts = fun () -> Ok []
+
+    let authorise: AuthoriseAccount =
+        fun () -> Ok (email "new@example.com", accountId "minted-id")
+
+    let save, attempted = failingSave "the account store is unreachable"
+    let discard, discarded = recordingDiscard ()
+
+    let actual =
+        RegisterGoogleAccountWorkflow.registerGoogleAccount loadSecret listAccounts authorise discard save ()
+
+    Assert.Equal(Error (GoogleStoreFailed "the account store is unreachable"), actual)
+    Assert.Single attempted |> ignore
+
+    // `SaveGoogleAccount` returning Error means the account was not stored - that is the contract
+    // the dependency type declares. So the registration produced nothing but a token, and the
+    // token is exactly what has to go.
+    Assert.Equal<string list>([ "minted-id" ], discarded |> Seq.map GoogleAccountId.value |> List.ofSeq)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``registerGoogleAccount still reports the save failure when discarding the stranded authorisation fails`` () =
+    let loadSecret: LoadClientSecret = fun () -> Ok (Some "secret")
+    let listAccounts: ListGoogleAccounts = fun () -> Ok []
+
+    let authorise: AuthoriseAccount =
+        fun () -> Ok (email "new@example.com", accountId "minted-id")
+
+    let save, _ = failingSave "the account store is unreachable"
+    let discard: DiscardAuthorisation = fun _ -> Error (GoogleStoreFailed "the credential store is unreachable")
+
+    let actual =
+        RegisterGoogleAccountWorkflow.registerGoogleAccount loadSecret listAccounts authorise discard save ()
+
+    // A failed cleanup must not replace the answer the user needs, exactly as on the duplicate
+    // path. The discard adapter's own handleError has already recorded why it failed.
+    Assert.Equal(Error (GoogleStoreFailed "the account store is unreachable"), actual)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``registerGoogleAccount reports a cancelled consent flow and saves nothing`` () =

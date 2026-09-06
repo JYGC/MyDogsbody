@@ -122,6 +122,11 @@ points at it, and the only thing that deletes a token is removing the account it
 refused duplicate stranded another unencrypted refresh token. Measured before the fix: two refused
 duplicate registrations left `credentials=3` against `accounts=1`.
 
+Round 3 widened it to **every** post-consent exit, not just the duplicate. Reading the account
+list and saving the new account can each fail after consent has written the token, and each
+stranded it for the identical reason. Measured before that widening, against a real `Google.db`:
+either failure left `accounts=0, credentials=1`; after it, `credentials=0`.
+
 `CalendarRateLimited` is separate from `NotAuthorised` on purpose: *"try again shortly"* and
 *"you need to grant access"* need different responses, and collapsing them produces an alert that
 tells the user to do the wrong thing.
@@ -302,9 +307,11 @@ cannot supply.
 5. **`RegisterGoogleAccountWorkflow` checks everything it can before authorising.** Opening a browser
    and completing consent, only to refuse the registration afterwards, wastes the user's time and
    leaves a granted scope with nothing to show for it. What it *cannot* check that early is whether
-   the account is a duplicate — that is keyed on the email consent returns — so the one refusal that
-   happens after consent hands the token it wrote to `DiscardAuthorisation` rather than leaving it
-   in the store.
+   the account is a duplicate — that is keyed on the email consent returns — so everything that runs
+   after consent is grouped, and **any** exit from that group without an account row hands the token
+   consent wrote to `DiscardAuthorisation` rather than leaving it in the store. The duplicate is the
+   most likely of those exits, not the only one: an unreadable account list and a refused save
+   strand the same token the same way.
 6. **`SetDefaultInvoiceCalendarWorkflow` verifies the calendar exists before storing it.** Otherwise
    change #7 discovers a dead calendar id halfway through a sync batch, which is the worst possible
    moment.

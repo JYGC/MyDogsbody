@@ -22,6 +22,11 @@ open MyDogsbody.Domain.Calendar
 /// simply not saving would leave that token behind with no account row pointing at it - and the
 /// only thing that deletes a token is removing the account it belongs to. Every refused
 /// duplicate would strand another one.
+///
+/// The duplicate check is only the *first* step that can fail after consent, not the only one:
+/// reading the existing accounts and saving the new one can both fail too, and each strands the
+/// same token for the same reason. So the discard covers the whole post-consent tail rather than
+/// one branch of it - anything that leaves without an account row hands the token back.
 let registerGoogleAccount
     (loadClientSecret: LoadClientSecret)
     (listGoogleAccounts: ListGoogleAccounts)
@@ -39,25 +44,41 @@ let registerGoogleAccount
             | None -> Error ClientSecretMissing
 
         let! (email, accountId) = authoriseAccount ()
-        let! existing = listGoogleAccounts ()
 
-        let alreadyRegistered =
-            existing |> List.exists (fun account -> account.EmailAddress = email)
+        // Everything below this line runs with a token already persisted against `accountId`.
+        // Grouped so that every way of leaving without an account row - a duplicate, an
+        // unreadable account list, a refused save - goes through the one discard, instead of
+        // only the duplicate that first made the leak visible.
+        let registered =
+            result {
+                let! existing = listGoogleAccounts ()
 
-        if alreadyRegistered then
+                let alreadyRegistered =
+                    existing |> List.exists (fun account -> account.EmailAddress = email)
+
+                if alreadyRegistered then
+                    return! Error (AccountAlreadyRegistered email)
+                else
+                    // A store reporting Error means the account was not saved: that is the
+                    // contract `SaveGoogleAccount` declares, and it is what makes discarding
+                    // safe here rather than a guess about how far the write got.
+                    return!
+                        saveGoogleAccount
+                            {
+                                Id = accountId
+                                EmailAddress = email
+                                DefaultInvoiceCalendar = None
+                                NeedsReauthorisation = false
+                            }
+            }
+
+        match registered with
+        | Ok account -> return account
+        | Error error ->
             // Deliberately discarded rather than bound: a failure to clean up must not replace
-            // the answer the user actually needs, which is that this account is already
-            // registered. The discard adapter's own handleError has already recorded it.
+            // the answer the user actually needs, which is why the registration was refused.
+            // The discard adapter's own handleError has already recorded it.
             discardAuthorisation accountId |> ignore
 
-            return! Error (AccountAlreadyRegistered email)
-        else
-            return!
-                saveGoogleAccount
-                    {
-                        Id = accountId
-                        EmailAddress = email
-                        DefaultInvoiceCalendar = None
-                        NeedsReauthorisation = false
-                    }
+            return! Error error
     }

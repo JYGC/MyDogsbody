@@ -196,6 +196,37 @@ let ``toListCalendarsError maps the API-not-enabled 403 to its own case, NOT to 
     Assert.NotEqual(NotAuthorised id, actual)
 
 [<Fact; Trait("Level", "Contract")>]
+let ``toListCalendarsError maps a malformed stored client secret to ClientSecretInvalid, NOT CalendarUnreachable`` () =
+    // `loadCredential` parses the stored client secret before it ever reaches Google, so this
+    // failure is not "Google could not be reached" - nothing was sent. Reporting it as
+    // CalendarUnreachable both misnames it and logs it, when the user simply needs to re-paste.
+    let id = accountId "acc-1"
+    let message = "The stored Google client secret is malformed."
+
+    let actual = GoogleAccountApiMappers.toListCalendarsError id (MyDogsbodyException(authoriseAction, message))
+
+    Assert.Equal(ClientSecretInvalid message, actual)
+    Assert.NotEqual(CalendarUnreachable message, actual)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``the message a user is shown for a malformed stored client secret names the secret`` () =
+    // The whole inbound-then-outbound translation, ending at the string the MudAlert renders.
+    let id = accountId "acc-1"
+
+    let shown =
+        MyDogsbodyException(
+            authoriseAction,
+            "The stored Google client secret is malformed.",
+            InvalidOperationException "Error deserializing JSON credential data."
+        )
+        |> GoogleAccountApiMappers.toListCalendarsError id
+        |> GoogleAccountApiMappers.toMyDogsbodyException listCalendarsAction
+
+    Assert.Equal("The stored Google client secret is malformed.", shown.Message)
+    // Expected, so it passes through handleError unlogged - the ApplicationException marker.
+    Assert.IsType<ApplicationException>(shown.InnerException) |> ignore
+
+[<Fact; Trait("Level", "Contract")>]
 let ``toStoreError wraps any store failure as GoogleStoreFailed carrying the message`` () =
     let ex =
         MyDogsbodyException(

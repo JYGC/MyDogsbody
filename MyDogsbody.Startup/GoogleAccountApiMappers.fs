@@ -70,6 +70,10 @@ let toListCalendarsError (accountId: GoogleAccountId) (ex: MyDogsbodyException) 
         | "The stored Google credential is no longer authorised."
         | "No stored credential for this account." -> NotAuthorised accountId
         | "Google is rate-limiting this account; try again shortly." -> CalendarRateLimited ex.Message
+        // `loadCredential` parses the stored client secret before anything is sent to Google, so
+        // a malformed one is neither "unreachable" nor "not authorised" - and it is the user's to
+        // fix by re-pasting, which is advice neither of the other two cases would give them.
+        | "The stored Google client secret is malformed." -> ClientSecretInvalid ex.Message
         | _ -> CalendarUnreachable ex.Message
 
 /// `GoogleAccountStore` failures (the client secret and the account rows) - always

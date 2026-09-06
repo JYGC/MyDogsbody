@@ -141,6 +141,7 @@ chosen by the adapters that construct them:
 | | `The consent flow timed out.` | `AuthorisationFailed` **carrying that sentence** | Yes |
 | | *(anything else)* `Authorisation failed.` | `AuthorisationFailed` carrying the **inner exception's** message | Yes |
 | `GoogleAuthorization.loadCredential` | `No stored credential for this account.` | `NotAuthorised` | No |
+| | `The stored Google client secret is malformed.` | `ClientSecretInvalid` | No |
 | `GoogleCalendarClient.listCalendars` | `The stored Google credential is no longer authorised.` | `NotAuthorised` | Yes¹ |
 | | `Google is rate-limiting this account; try again shortly.` | `CalendarRateLimited` | Yes |
 | | *(anything else)* `Could not reach Google Calendar.` | `CalendarUnreachable` | Yes |
@@ -497,3 +498,140 @@ Per level, each measured with `--filter "Level=..."`: Unit **784** (carrying the
 failure), Integration **310**, Contract **340** (+3), E2E **35**. Neither documented flake — the
 LiteDB `BsonMapper` first-use race, or `MailAccountsFlowTests`' `icacls` cleanup race — was
 observed in this round's runs.
+
+---
+
+## PR review, round 3 — two defects found in the diff, both fixed
+
+A cold third read of the whole PR diff, rounds 1 and 2 included and judged on the code rather than
+on their summaries. PR #21 still carries **no review comments** (0 review comments, 2 issue
+comments — rounds 1 and 2's own summaries), so this round's findings are again all from reading
+the diff. Both were reproduced against the checked-out head with throwaway scripts before anything
+was changed.
+
+### 1. Round 1's stranded-token fix closed one post-consent path out of three
+
+Round 1 established the rule and built `DiscardAuthorisation` for it: consent persists a token
+against the minted id *before* the workflow decides whether the registration is allowed, so any
+refusal owes a discard or the token is left with no account row pointing at it, unreachable by
+removal and durable until revoked at Google.
+
+It then applied that rule to the duplicate branch only. But the duplicate check is the *first*
+step after consent, not the last: `listGoogleAccounts` and `saveGoogleAccount` both run afterwards,
+and either failing returned an error with the token left exactly where round 1 said it must not be
+left. `RemoveAccount` cannot reach it (there is no account row), and the next "Add account" mints
+a fresh id and a fresh token, so nothing ever collects it.
+
+Measured before the fix, driving `RegisterGoogleAccountWorkflow` over a **real** temp `Google.db`
+with an `AuthoriseAccount` that persists a token through the production `GoogleCredentialDataStore`
+the way `GoogleWebAuthorizationBroker` does:
+
+| Post-consent failure | Before | After |
+| --- | --- | --- |
+| `listGoogleAccounts` fails | `accounts=0, credentials=1` | `accounts=0, credentials=0` |
+| `saveGoogleAccount` fails | `accounts=0, credentials=1` | `accounts=0, credentials=0` |
+| duplicate refused (round 1's path) | `accounts=1, credentials=1` | unchanged |
+| successful registration | `accounts=1, credentials=1` | unchanged |
+
+Fixed by grouping the whole post-consent tail into one nested `result { }` and discarding on any
+`Error` out of it, rather than adding a second and third call site. That closes the class instead
+of the two instances: change #7 cannot reopen it by adding a step. The discard is still
+deliberately `|> ignore`d — a failed cleanup must not replace the answer the user needs — and a
+success still never discards.
+
+Safe because `SaveGoogleAccount` returning `Error` *means the account was not saved*; that is the
+contract the dependency type declares, and it is what makes "discard the token" the right call
+rather than a guess about how far the write got.
+
+Locked in by three unit tests written red first (`RegisterGoogleAccountWorkflowTests`): the
+unreadable-account-list path, the refused-save path, and one asserting the save failure still
+reaches the user when the discard itself fails. `DiscardAuthorisation` actually deleting the token
+was already covered by `GoogleAccountDependencyContractTests`' shared suite against the real
+adapter and the fake, so no new integration test was needed to complete the chain.
+
+### 2. A malformed **stored** client secret reported "Authorisation failed." on the calendar path
+
+requirements.md's own edge case: *"WHEN the stored client secret is malformed THE SYSTEM SHALL
+report that rather than producing an obscure authorisation failure."* `authoriseWith` honours it —
+`JsonException`/`FormatException` become `The stored Google client secret is malformed.`, unlogged.
+`loadCredential` parses the *same* secret with the *same* `GoogleClientSecrets.FromStream` call and
+did not, so the failure fell into its catch-all.
+
+This is reachable through a path requirements.md explicitly supports: register an account with a
+good secret, then press **Edit** and replace it with a bad paste (`SetClientSecret` validates
+nothing). Every calendar picker then fails, and the reason the page showed was the one string the
+requirement names.
+
+Measured before the fix, driving the real `loadCredential` over a real temp `Google.db` holding a
+real token, then the real `toListCalendarsError >> toMyDogsbodyException` pair:
+
+| Stored secret | `CalendarError` before | MudAlert before | Logged before |
+| --- | --- | --- | --- |
+| `not json at all` | `CalendarUnreachable` | `Authorisation failed.` | 1 |
+| `{"hello":"world"}` | `CalendarUnreachable` | `Authorisation failed.` | 1 |
+
+After: both give `ClientSecretInvalid`, the MudAlert reads `The stored Google client secret is
+malformed.`, and **0** are logged. A well-formed secret still loads its credential unchanged.
+
+`CalendarUnreachable` was wrong on three counts, not one: it says Google could not be reached when
+nothing was ever sent to Google; it is on the *logged* side of the error table, so a user's typo
+wrote an exception-log entry; and it gives the user no action, where the correct case tells them to
+re-paste the secret.
+
+Fixed by wrapping only the parse — the one thing that step does, so any failure in it means exactly
+one thing — and yielding a named `Error` value, which `handleError` passes through unlogged. The
+mapper gained the matching case. `authoriseWith` is deliberately untouched: it already names this
+failure, and its catch-all is honest for the action it describes.
+
+Locked in by a two-case integration `[<Theory>]` in `GoogleAuthorizationTests` (message,
+`ActionName`, preserved inner exception, nothing logged) and two contract tests in
+`GoogleAccountApiMappersTests` (the mapping, and the whole inbound-then-outbound chain ending at
+the exact string the `MudAlert` renders).
+
+### Considered and deliberately not changed
+
+- **`loadCalendarsFor`'s success clears another account's error.** `loadAccounts` fires one
+  `GetCalendarsFor` per account, and each success sets `ErrorAval <- None`, so with several
+  accounts a later success can wipe an earlier failure's message. It is the "last operation wins"
+  convention every module creator in this codebase follows, and changing it means per-account error
+  state — a widening of `GoogleAccountsBrowserModule`'s contract for a defect only visible with
+  more than one account, one of which is broken. Flagged, not folded in.
+- **`GoogleAuthorization.reauthorise` still reports `authorise`'s `ActionName`.** Round 2's
+  deferral stands and its reasoning is unchanged: the path is unreachable until something sets
+  `NeedsReauthorisation`.
+- **`NeedsReauthorisation` is still never set to `true`** (see *Still open*). Round 3 agrees with
+  rounds 1 and 2: what raises it is a decision, not a review fix.
+
+### Round 3 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, none in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` | 1469 → **1476** (+7), 0 skipped. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **787** (+3, and carrying the one
+pre-existing failure, which is tagged `Unit`), Integration **312** (+2), Contract **342** (+2),
+E2E **35** — 1476 in total.
+
+**Three flake observations, named rather than re-run away.** All three are in Thunderbird or
+SQLite files that `git diff origin/main HEAD` reports as byte-identical on this branch, so none is
+this change's:
+
+- The documented LiteDB global `BsonMapper` first-use race, twice, both with the captured signature
+  `CLAUDE-project.md` records — `InvalidOperationException: Collection was modified; enumeration
+  operation may not execute` out of `BsonMapper.SerializeObject`, raised at the warm-up line
+  `ThunderbirdDatabaseContextModule.fs:16`. Once in the baseline run
+  (`ThunderbirdDatabaseContextModuleTests.getDatabaseContext exposes a working collection getter for
+  every one of the five entities`) and once in the per-level Contract run
+  (`ThunderbirdDependencyContractTests.a saved selection is visible to a later load...`, real
+  adapter). Different tests, one cause, and the cause is the open item that paragraph already says
+  wants a process-wide lock and its own change folder.
+- A **third**, not previously recorded: `E2E\MailAccountsFlowTests.a message count survives the next
+  scan and keeps the time it was taken` failed once in the first full run and passed in the second
+  and in isolation. It is a `WaitForAssertion`-timed bUnit render over the same Thunderbird LiteDB
+  store, so most likely the same race seen from the E2E level, but that is not asserted here — what
+  *is* checked is that every file in its chain (`MailAccountsFlowTests.fs`,
+  `MailAccountsTestHarness.fs`, `MailAccountApiFactory.fs`, `MailAccountApiMappers.fs`,
+  `ThunderbirdStore.fs`, `MailAccountsBrowserModuleCreators.fs`) is byte-identical to `origin/main`.
+  Recorded so the next round has a name for it rather than rediscovering it.
