@@ -82,6 +82,11 @@ let withGoogleAccountsHarness
             GoogleAccountStore.removeOne handleError context.GetAccountCollection accountId
             |> Result.mapError GoogleAccountApiMappers.toStoreError
 
+    let discardAuthorisation: DiscardAuthorisation =
+        fun accountId ->
+            GoogleAuthorization.removeStoredToken handleError context.GetCredentialCollection (GoogleAccountId.value accountId)
+            |> Result.mapError GoogleAccountApiMappers.toStoreError
+
     let toException = GoogleAccountApiMappers.toMyDogsbodyException
 
     let api: GoogleAccountApi =
@@ -105,6 +110,7 @@ let withGoogleAccountsHarness
                         loadClientSecret
                         listGoogleAccounts
                         authoriseAccount
+                        discardAuthorisation
                         saveGoogleAccount
                         ()
                     |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
@@ -113,7 +119,13 @@ let withGoogleAccountsHarness
                 fun _ -> failwith "not exercised by this harness"
             RemoveAccount =
                 fun id ->
+                    // Mirrors GoogleAccountApiFactory exactly, token deletion included - a harness
+                    // that removed only the account row would leave the flow test unable to see
+                    // whether the local token went with it.
                     RemoveGoogleAccountWorkflow.removeGoogleAccount removeGoogleAccountDependency id
+                    |> Result.map (fun () ->
+                        GoogleAuthorization.removeStoredToken handleError context.GetCredentialCollection id
+                        |> ignore)
                     |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.removeAccount)
             GetCalendarsFor =
                 fun id ->

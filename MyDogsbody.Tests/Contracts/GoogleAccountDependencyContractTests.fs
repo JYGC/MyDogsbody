@@ -3,17 +3,19 @@ module MyDogsbody.Tests.Contracts.GoogleAccountDependencyContractTests
 open System
 open System.IO
 open Xunit
+open Google.Apis.Auth.OAuth2.Responses
+open Google.Apis.Util.Store
 open MyDogsbody.Builders
 open MyDogsbody.Domain.Calendar
 open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database
 open MyDogsbody.Startup
 
-// LoadClientSecret, SaveClientSecret, ListGoogleAccounts, SaveGoogleAccount and RemoveGoogleAccount
-// are dependency function types a domain workflow consumes - published interfaces, so CLAUDE.md's
-// shared-suite rule applies: the same suite runs against the real bindings (GoogleAccountApiFactory
-// over a temp LiteDB) and an in-memory fake, so a workflow unit test's fake cannot drift into a
-// shape the real store never produces.
+// LoadClientSecret, SaveClientSecret, ListGoogleAccounts, SaveGoogleAccount, RemoveGoogleAccount
+// and DiscardAuthorisation are dependency function types a domain workflow consumes - published
+// interfaces, so CLAUDE.md's shared-suite rule applies: the same suite runs against the real
+// bindings (GoogleAccountApiFactory over a temp LiteDB) and an in-memory fake, so a workflow unit
+// test's fake cannot drift into a shape the real store never produces.
 //
 // AuthoriseAccount and ListCalendars are not here - the real Google network/browser cannot run in
 // an automated test. AuthoriseAccount's real-side coverage is `GoogleAuthorizationTests`
@@ -36,6 +38,13 @@ type private GoogleAccountDependencies =
         ListGoogleAccounts: ListGoogleAccounts
         SaveGoogleAccount: SaveGoogleAccount
         RemoveGoogleAccount: RemoveGoogleAccount
+        DiscardAuthorisation: DiscardAuthorisation
+
+        // Harness affordances, not dependency types: DiscardAuthorisation's whole job is to take
+        // an authorisation away, so a suite that cannot put one there first, or count what is
+        // left, can only assert that it returned Ok.
+        StoreAuthorisationFor: GoogleAccountId -> unit
+        AuthorisationCount: unit -> int
     }
 
 // ---------- the real bindings, over a temp LiteDB file ----------
@@ -67,6 +76,29 @@ let private withRealDependencies (test: GoogleAccountDependencies -> unit) =
                     fun accountId ->
                         GoogleAccountStore.removeOne handleError context.GetAccountCollection accountId
                         |> Result.mapError GoogleAccountApiMappers.toStoreError
+                DiscardAuthorisation =
+                    fun accountId ->
+                        GoogleAuthorization.removeStoredToken
+                            handleError
+                            context.GetCredentialCollection
+                            (GoogleAccountId.value accountId)
+                        |> Result.mapError GoogleAccountApiMappers.toStoreError
+                StoreAuthorisationFor =
+                    fun accountId ->
+                        let dataStore =
+                            GoogleCredentialDataStore.GoogleCredentialDataStore(
+                                handleError,
+                                context.GetCredentialCollection
+                            )
+                            :> IDataStore
+
+                        dataStore.StoreAsync(
+                            GoogleAccountId.value accountId,
+                            TokenResponse(AccessToken = "at", RefreshToken = "rt")
+                        )
+                        |> Async.AwaitTask
+                        |> Async.RunSynchronously
+                AuthorisationCount = fun () -> context.GetCredentialCollection().Count()
             }
     finally
         context.Dispose()
@@ -77,6 +109,7 @@ let private withRealDependencies (test: GoogleAccountDependencies -> unit) =
 let private withFakeDependencies (test: GoogleAccountDependencies -> unit) =
     let mutable clientSecret: string option = None
     let accounts = ResizeArray<RegisteredGoogleAccount>()
+    let authorisations = ResizeArray<GoogleAccountId>()
 
     test
         {
@@ -100,6 +133,12 @@ let private withFakeDependencies (test: GoogleAccountDependencies -> unit) =
                         accounts.RemoveAt index
                         Ok true
                     | None -> Ok false
+            DiscardAuthorisation =
+                fun accountId ->
+                    authorisations.Remove accountId |> ignore
+                    Ok()
+            StoreAuthorisationFor = fun accountId -> authorisations.Add accountId
+            AuthorisationCount = fun () -> authorisations.Count
         }
 
 /// Public because xUnit's MemberData resolves it by reflection on the compiled class.
@@ -201,4 +240,52 @@ let ``RemoveGoogleAccount reports false for an id that carries no row`` (impleme
     withImplementation implementation (fun deps ->
         let unknownId = GoogleAccountId.create "507f1f77bcf86cd799439099" |> valueOrFail
         Assert.False(deps.RemoveGoogleAccount unknownId |> okOrFail "RemoveGoogleAccount")
+    )
+
+// ---------- discarding an authorisation ----------
+//
+// RegisterGoogleAccountWorkflow calls this when it refuses a duplicate: consent has already
+// persisted a token against the id authoriseAccount just returned, so a refusal that only
+// declines to save would strand it - no account row would point at it, and only removing an
+// account deletes a token.
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``DiscardAuthorisation removes the authorisation it names`` (implementation: string) =
+    withImplementation implementation (fun deps ->
+        let accountId = GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail
+        deps.StoreAuthorisationFor accountId
+        Assert.Equal(1, deps.AuthorisationCount())
+
+        deps.DiscardAuthorisation accountId |> okOrFail "DiscardAuthorisation"
+
+        Assert.Equal(0, deps.AuthorisationCount())
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``DiscardAuthorisation leaves every other account's authorisation alone`` (implementation: string) =
+    withImplementation implementation (fun deps ->
+        let discarded = GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail
+        let kept = GoogleAccountId.create "507f1f77bcf86cd799439012" |> valueOrFail
+        deps.StoreAuthorisationFor discarded
+        deps.StoreAuthorisationFor kept
+
+        deps.DiscardAuthorisation discarded |> okOrFail "DiscardAuthorisation"
+
+        Assert.Equal(1, deps.AuthorisationCount())
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``DiscardAuthorisation succeeds for an id that was never authorised`` (implementation: string) =
+    withImplementation implementation (fun deps ->
+        // Nothing to discard is not a failure - the workflow calls this on a path where the
+        // authorisation may already be gone, and a reported error there would replace
+        // AccountAlreadyRegistered with noise.
+        let accountId = GoogleAccountId.create "507f1f77bcf86cd799439099" |> valueOrFail
+
+        deps.DiscardAuthorisation accountId |> okOrFail "DiscardAuthorisation"
+
+        Assert.Equal(0, deps.AuthorisationCount())
     )

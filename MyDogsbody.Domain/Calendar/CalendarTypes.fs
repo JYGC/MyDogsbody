@@ -130,6 +130,15 @@ type SaveGoogleAccount = RegisteredGoogleAccount -> Result<RegisteredGoogleAccou
 type RemoveGoogleAccount = GoogleAccountId -> Result<bool, CalendarError>
 type ListCalendars = GoogleAccountId -> Result<AvailableCalendar list, CalendarError>
 
+/// Throws away an authorisation that was completed but never became a registered account.
+///
+/// `AuthoriseAccount` cannot be undone by not saving: completing consent has already persisted a
+/// token against the id it returns, before this workflow gets to decide whether the registration
+/// is allowed. So a refused registration owes a discard, or the token is left behind with no
+/// account row pointing at it - unreachable by removal, and durable until someone revokes it at
+/// Google.
+type DiscardAuthorisation = GoogleAccountId -> Result<unit, CalendarError>
+
 /// Re-authorises an *existing* account, reusing its id rather than minting a new one - the
 /// analogue of `AuthoriseAccount` for the "token expired or revoked" path.
 ///

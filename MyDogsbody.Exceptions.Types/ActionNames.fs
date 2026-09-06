@@ -139,6 +139,8 @@ module MyDogsbody =
             module GoogleAuthorization =
                 let private googleAuthorization = $"{google}.GoogleAuthorization"
                 let authorise = $"{googleAuthorization}.authorise"
+                let loadCredential = $"{googleAuthorization}.loadCredential"
+                let removeStoredToken = $"{googleAuthorization}.removeStoredToken"
 
             module GoogleCalendarClient =
                 let private googleCalendarClient = $"{google}.GoogleCalendarClient"

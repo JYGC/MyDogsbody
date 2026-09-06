@@ -332,3 +332,91 @@ own unit suites plus `GoogleAccountApiFactoryTests`.
   probe deliberately, but nothing was ever given the job of raising it — a `NotAuthorised` from
   `listCalendars` is the obvious candidate, at the cost of a write during a read. Flagged rather
   than fixed here: it wants its own decision, not a unilateral one folded into a bug fix.
+
+---
+
+## PR review, round 1 — two defects found in the diff, both fixed
+
+No review comments had been left on PR #21, so this round's findings are all from reading the
+diff. Both were reproduced against the checked-out head with a throwaway script before anything
+was changed.
+
+### 1. A refused duplicate registration stranded its OAuth refresh token
+
+`RegisterGoogleAccountWorkflow` authorises, *then* checks for a duplicate (deviation 1 above — it
+has to, the email is what consent returns). But completing consent has already persisted a token
+against the freshly minted id, and refusing by simply not saving left it there: no `Accounts` row
+ever pointed at it, and the only thing that deletes a token is removing the account it belongs to.
+Every refused attempt stranded another one, unencrypted and unreachable from the UI — which makes
+the accepted risk in *Secrets at rest* above quietly worse than it was written.
+
+Measured before the fix, driving the real composition with an `AuthoriseAccount` that persists a
+token the way `GoogleWebAuthorizationBroker` does: one successful registration then **two** refused
+duplicates left `accounts=1, credentials=3`, three distinct
+`TokenResponse:<id>` rows each carrying a refresh token.
+
+Fixed with a new dependency function type, `DiscardAuthorisation: GoogleAccountId -> Result<unit,
+CalendarError>`, taken by `registerGoogleAccount` and called on the duplicate path before the error
+is returned. Its result is deliberately discarded — a failed cleanup must not replace
+`AccountAlreadyRegistered`, which is the answer the user actually needs, and the adapter's own
+`handleError` has already recorded why it failed. Bound at the composition root to
+`GoogleAuthorization.removeStoredToken`, the same adapter `RemoveAccount` uses.
+
+### 2. `RemoveAccount` raised straight through its declared `Result`
+
+`GoogleAuthorization.removeStoredToken` returned `unit` and was not written with `handleError`, on
+the stated reasoning that a leftover token row is inert. But `IDataStore` is exception-based by
+construction, so `GoogleCredentialDataStore` re-raises whatever `GoogleCredentialStore` hands back
+— and `GoogleAccountApi.RemoveAccount`, declared `string -> Result<unit, MyDogsbodyException>`,
+raised it. Reproduced: with the credential collection unreachable, `RemoveAccount` threw
+`MyDogsbodyException: Failed to retrieve all credentials.` **after** deleting the account row. The
+UI's `Error` branch never runs on that path, so there is no `MudAlert` and no reload — the row it
+had just deleted stays on screen.
+
+`removeStoredToken` now has the outer-ring shape every other function in the file has:
+`handleError`, `Result<unit, MyDogsbodyException>`, and its own `ActionNames` entry. The removal
+still reports `Ok` when only the token deletion fails — the account row really is gone, and
+reporting failure would tell the user to retry something already done — but the failure is a
+logged value rather than an escaping exception.
+
+**It had no test at all**, which is how both halves survived: the factory tests only reached
+`RemoveAccount`'s error paths, and `E2E/GoogleAccountsTestHarness.fs` rebuilt `RemoveAccount`
+*without* the token deletion, so the E2E remove flow could not see it either. The harness now
+mirrors `GoogleAccountApiFactory` exactly.
+
+### Also corrected
+
+- **`loadCredential` reported `GoogleAuthorization.authorise` as its action.** requirements.md asks
+  for one `ActionNames` entry per function, and the exception log is where "the consent flow
+  failed" is told apart from "the stored token could not be loaded" — the distinction *this
+  change's own* manual verification was debugged through. It now has its own entry, as does
+  `removeStoredToken`.
+- **`GoogleAccountsBrowserModuleCreators.loadAccounts`' comment** claimed ready accounts are not
+  re-fetched on reload. The code fetches calendars for every account not flagged for
+  re-authorisation, ready ones included — which is correct (a ready account's picker must still
+  offer a change), so the comment was corrected rather than the code. It now says plainly that this
+  is one `GetCalendarsFor` call per account per reload.
+- `design.md`'s sequence diagram, workflow table and decision 5 now match the shipped call order
+  instead of the one deviation 1 records as unachievable.
+
+### Round 1 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. 3 warnings, all pre-existing and none in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` | 1454 → **1466** (+12), 0 skipped. |
+| Failures | The same one pre-existing `SqliteConnectionPoolingTests` failure described above. |
+
+Test totals per level after this round, each measured with `--filter "Level=..."`: Unit **784**
+(the one pre-existing failure is tagged `Unit`), Integration **310**, Contract **337**, E2E **35**
+— 1466 in total.
+
+**A second environmental flake was observed once during this round** and is recorded here rather
+than re-run away: `E2E\MailAccountsFlowTests.a walk hitting an unreadable directory lists it and
+the other accounts still appear` failed with `UnauthorizedAccessException` from
+`Directory.Delete(root, true)` in its own `finally` — its `icacls /reset` had not taken effect
+before the delete. It passes in isolation, the file is untouched by this change (last modified by
+PR #17), and `%TEMP%` already held five orphaned `mdb-e2e-*` directories from earlier runs, so the
+cleanup has been losing this race for a while. It is an `icacls`-under-parallelism race in a
+Thunderbird test, unrelated to anything Google, and distinct from the documented LiteDB
+`BsonMapper` flake.

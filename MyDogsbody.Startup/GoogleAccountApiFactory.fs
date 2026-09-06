@@ -92,6 +92,17 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
                 return! GoogleEmail.create emailRaw |> Result.mapError (fun _ -> AccountEmailUnavailable)
             }
 
+    /// Throws away the token a completed consent flow left behind when the registration it was
+    /// for is refused. Same adapter `RemoveAccount` uses to delete a removed account's token -
+    /// an authorisation with no account row is exactly what removing an account leaves behind.
+    let discardAuthorisation: DiscardAuthorisation =
+        fun accountId ->
+            GoogleAuthorization.removeStoredToken
+                handleError
+                googleContext.GetCredentialCollection
+                (GoogleAccountId.value accountId)
+            |> Result.mapError GoogleAccountApiMappers.toStoreError
+
     /// `loadCredential` never opens a browser - it fails with `NotAuthorised` if no valid
     /// stored token exists, rather than starting a consent flow the caller did not ask for.
     let listCalendarsDependency: ListCalendars =
@@ -139,6 +150,7 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
                     loadClientSecret
                     listGoogleAccounts
                     authoriseAccount
+                    discardAuthorisation
                     saveGoogleAccount
                     ()
                 |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
@@ -158,7 +170,13 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
             fun id ->
                 RemoveGoogleAccountWorkflow.removeGoogleAccount removeGoogleAccountDependency id
                 |> Result.map (fun () ->
-                    GoogleAuthorization.removeStoredToken handleError googleContext.GetCredentialCollection id)
+                    // The account row is already gone by here, so a token that will not delete
+                    // must not report the removal as having failed - the user would be told to
+                    // retry something that has already happened, and the table would not reload.
+                    // `handleError` has logged it; the leftover row is inert. Discarded as a
+                    // value, deliberately, rather than left free to raise past this Result.
+                    GoogleAuthorization.removeStoredToken handleError googleContext.GetCredentialCollection id
+                    |> ignore)
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.removeAccount)
 
         GetCalendarsFor =

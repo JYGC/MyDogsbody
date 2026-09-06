@@ -112,7 +112,15 @@ type ListGoogleAccounts = unit -> Result<RegisteredGoogleAccount list, CalendarE
 type SaveGoogleAccount  = RegisteredGoogleAccount -> Result<RegisteredGoogleAccount, CalendarError>
 type RemoveGoogleAccount = GoogleAccountId -> Result<bool, CalendarError>
 type ListCalendars      = GoogleAccountId -> Result<AvailableCalendar list, CalendarError>
+type DiscardAuthorisation = GoogleAccountId -> Result<unit, CalendarError>
 ```
+
+`DiscardAuthorisation` was added in PR review round 1, and it is what the deviation below costs.
+Completing consent **persists a token before the workflow gets to decide whether the registration
+is allowed**, so refusing a duplicate by simply not saving strands that token: no account row
+points at it, and the only thing that deletes a token is removing the account it belongs to. Every
+refused duplicate stranded another unencrypted refresh token. Measured before the fix: two refused
+duplicate registrations left `credentials=3` against `accounts=1`.
 
 `CalendarRateLimited` is separate from `NotAuthorised` on purpose: *"try again shortly"* and
 *"you need to grant access"* need different responses, and collapsing them produces an alert that
@@ -122,7 +130,7 @@ tells the user to do the wrong thing.
 
 | File | Signature | Notes |
 | --- | --- | --- |
-| `RegisterGoogleAccountWorkflow.fs` | `LoadClientSecret -> ListGoogleAccounts -> AuthoriseAccount -> SaveGoogleAccount -> unit -> Result<RegisteredGoogleAccount, CalendarError>` | Refuses before authorising if there is no client secret or the account is already registered — **the browser must not open for a registration that cannot succeed** |
+| `RegisterGoogleAccountWorkflow.fs` | `LoadClientSecret -> ListGoogleAccounts -> AuthoriseAccount -> DiscardAuthorisation -> SaveGoogleAccount -> unit -> Result<RegisteredGoogleAccount, CalendarError>` | Refuses before authorising if there is no client secret — **the browser must not open for a registration that cannot succeed**. The already-registered check *cannot* run that early (the email a duplicate is keyed on does not exist until consent returns), so it runs immediately after and discards the authorisation consent just wrote |
 | `ListGoogleAccountsWorkflow.fs` | `ListGoogleAccounts -> unit -> Result<RegisteredGoogleAccount list, CalendarError>` | Ordered by email |
 | `SetDefaultInvoiceCalendarWorkflow.fs` | `ListGoogleAccounts -> ListCalendars -> SaveGoogleAccount -> string -> string -> Result<RegisteredGoogleAccount, CalendarError>` | Confirms the calendar still exists at Google before storing it |
 | `RemoveGoogleAccountWorkflow.fs` | `RemoveGoogleAccount -> string -> Result<unit, CalendarError>` | Local only. No revoke |
@@ -150,13 +158,18 @@ GoogleAccountsPage    GoogleAccountApi    RegisterGoogleAccountWorkflow    Googl
      │                    │                       │   None → ClientSecretMissing, STOP
      │                    │                       │        ► the browser never opens for a
      │                    │                       │          registration that cannot succeed
-     │                    │                       ├ listGoogleAccounts
-     │                    │                       │   already registered → AccountAlreadyRegistered
      │                    │                       ├ authoriseAccount ─────────► system browser
      │                    │                       │                             loopback redirect
      │                    │                       │                             calendar + userinfo.email
      │                    │                       │◄─ (email, accountId) ───────┤
      │                    │                       │   cancelled → AuthorisationCancelled, save NOTHING
+     │                    │                       ├ listGoogleAccounts
+     │                    │                       │   already registered → discardAuthorisation
+     │                    │                       │                        then AccountAlreadyRegistered
+     │                    │                       │        ► the duplicate check CANNOT run earlier:
+     │                    │                       │          the email it keys on is what consent
+     │                    │                       │          returns. Consent has already written a
+     │                    │                       │          token, so refusing owes a discard.
      │                    │                       ├ saveGoogleAccount
      │                    │                       │   DefaultInvoiceCalendar = None   ← NOT READY
      │◄─ RegisteredGoogleAccount ─────────────────┤
@@ -288,7 +301,10 @@ cannot supply.
    feel stuck** — that is where a batch of API calls first exists.
 5. **`RegisterGoogleAccountWorkflow` checks everything it can before authorising.** Opening a browser
    and completing consent, only to refuse the registration afterwards, wastes the user's time and
-   leaves a granted scope with nothing to show for it.
+   leaves a granted scope with nothing to show for it. What it *cannot* check that early is whether
+   the account is a duplicate — that is keyed on the email consent returns — so the one refusal that
+   happens after consent hands the token it wrote to `DiscardAuthorisation` rather than leaving it
+   in the store.
 6. **`SetDefaultInvoiceCalendarWorkflow` verifies the calendar exists before storing it.** Otherwise
    change #7 discovers a dead calendar id halfway through a sync batch, which is the worst possible
    moment.

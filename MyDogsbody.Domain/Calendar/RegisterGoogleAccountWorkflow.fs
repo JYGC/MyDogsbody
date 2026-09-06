@@ -16,10 +16,17 @@ open MyDogsbody.Domain.Calendar
 /// diagram, which shows the check ahead of the browser step for narrative grouping rather than
 /// as an achievable call order - a browser-issued email cannot be compared before the browser
 /// step has produced one.
+///
+/// That ordering is what `discardAuthorisation` pays for. Consent has already persisted a token
+/// against the id `authoriseAccount` returns by the time the duplicate is found, so refusing by
+/// simply not saving would leave that token behind with no account row pointing at it - and the
+/// only thing that deletes a token is removing the account it belongs to. Every refused
+/// duplicate would strand another one.
 let registerGoogleAccount
     (loadClientSecret: LoadClientSecret)
     (listGoogleAccounts: ListGoogleAccounts)
     (authoriseAccount: AuthoriseAccount)
+    (discardAuthorisation: DiscardAuthorisation)
     (saveGoogleAccount: SaveGoogleAccount)
     ()
     : Result<RegisteredGoogleAccount, CalendarError> =
@@ -38,6 +45,11 @@ let registerGoogleAccount
             existing |> List.exists (fun account -> account.EmailAddress = email)
 
         if alreadyRegistered then
+            // Deliberately discarded rather than bound: a failure to clean up must not replace
+            // the answer the user actually needs, which is that this account is already
+            // registered. The discard adapter's own handleError has already recorded it.
+            discardAuthorisation accountId |> ignore
+
             return! Error (AccountAlreadyRegistered email)
         else
             return!

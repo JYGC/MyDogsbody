@@ -196,6 +196,9 @@ let ``loadCredential reports that an account has no stored credential, unlogged`
         match GoogleAuthorization.loadCredential (HandleErrorBuilder logged.Add) context.GetCredentialCollection sampleClientSecretJson "never-authorised" with
         | Error ex ->
             Assert.Equal("No stored credential for this account.", ex.Message)
+            // Its own action, not `authorise`'s - a failure loading a stored token has nothing to
+            // do with the consent flow, and the exception log is where that distinction is read.
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential, ex.ActionName)
             Assert.Empty logged
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
     finally
@@ -247,3 +250,74 @@ let ``authoriseWith reports any other failure generically, logged, with the inne
         Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``removeStoredToken deletes the account's stored token`` () =
+    let databasePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{System.Guid.NewGuid()}.db")
+    let context = Database.GoogleDatabaseContextModule.getDatabaseContext databasePath "direct"
+
+    try
+        let dataStore =
+            GoogleCredentialDataStore.GoogleCredentialDataStore(HandleErrorBuilder(fun _ -> ()), context.GetCredentialCollection)
+            :> IDataStore
+
+        dataStore.StoreAsync("account-1", TokenResponse(AccessToken = "at", RefreshToken = "rt"))
+        |> Async.AwaitTask
+        |> Async.RunSynchronously
+
+        dataStore.StoreAsync("account-2", TokenResponse(AccessToken = "at2", RefreshToken = "rt2"))
+        |> Async.AwaitTask
+        |> Async.RunSynchronously
+
+        Assert.Equal(2, context.GetCredentialCollection().Count())
+
+        GoogleAuthorization.removeStoredToken (HandleErrorBuilder(fun _ -> ())) context.GetCredentialCollection "account-1"
+        |> okOrFail "removeStoredToken"
+
+        // requirements.md: removing an account "SHALL delete its local token and its record" -
+        // and only that account's. The other account's token is untouched.
+        Assert.Equal(1, context.GetCredentialCollection().Count())
+
+        let remaining =
+            GoogleAuthorization.loadCredential (HandleErrorBuilder(fun _ -> ())) context.GetCredentialCollection sampleClientSecretJson "account-2"
+            |> okOrFail "loadCredential"
+
+        Assert.Equal("at2", remaining.Token.AccessToken)
+
+        match GoogleAuthorization.loadCredential (HandleErrorBuilder(fun _ -> ())) context.GetCredentialCollection sampleClientSecretJson "account-1" with
+        | Error ex -> Assert.Equal("No stored credential for this account.", ex.Message)
+        | Ok _ -> Assert.Fail("Expected the deleted account's credential to be gone")
+    finally
+        context.Dispose()
+        try System.IO.File.Delete databasePath with _ -> ()
+
+[<Fact; Trait("Level", "Integration")>]
+let ``removeStoredToken deleting a token no row carries succeeds without logging`` () =
+    let databasePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{System.Guid.NewGuid()}.db")
+    let context = Database.GoogleDatabaseContextModule.getDatabaseContext databasePath "direct"
+    let logged = ResizeArray<MyDogsbodyException>()
+
+    try
+        GoogleAuthorization.removeStoredToken (HandleErrorBuilder logged.Add) context.GetCredentialCollection "never-authorised"
+        |> okOrFail "removeStoredToken"
+
+        Assert.Empty logged
+    finally
+        context.Dispose()
+        try System.IO.File.Delete databasePath with _ -> ()
+
+[<Fact; Trait("Level", "Unit")>]
+let ``removeStoredToken reports an unreachable credential store as a Result, rather than raising`` () =
+    // IDataStore is exception-based by construction, so GoogleCredentialDataStore re-raises what
+    // GoogleCredentialStore hands back. Before this was written with handleError, that exception
+    // travelled straight out of GoogleAccountApi.RemoveAccount, past its declared Result and past
+    // the UI's error branch - the account row already deleted, no alert, no reload.
+    let logged = ResizeArray<MyDogsbodyException>()
+
+    match GoogleAuthorization.removeStoredToken (HandleErrorBuilder logged.Add) unreachableCollection "account-1" with
+    | Error ex ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.removeStoredToken, ex.ActionName)
+        Assert.Equal("Failed to delete the stored Google credential.", ex.Message)
+        Assert.NotNull ex.InnerException
+        Assert.NotEmpty logged
+    | Ok () -> Assert.Fail("Expected Error, but got Ok")

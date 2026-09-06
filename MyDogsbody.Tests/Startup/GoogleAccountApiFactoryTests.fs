@@ -3,9 +3,15 @@ module MyDogsbody.Tests.Startup.GoogleAccountApiFactoryTests
 open System
 open System.IO
 open Xunit
+open Google.Apis.Auth.OAuth2.Responses
+open Google.Apis.Util.Store
+open LiteDB
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
+open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database
+open MyDogsbody.Integrations.Google.Database.Models
+open MyDogsbody.Integrations.Google.Database.Types
 open MyDogsbody.Startup
 open MyDogsbody.UI.Types
 
@@ -20,16 +26,47 @@ let private sampleClientSecret =
 
 /// Fresh temp LiteDB file per test, context disposed and the file deleted - no test reaches
 /// Startup.Startup.
-let private withApi (test: GoogleAccountApi -> unit) =
+///
+/// `adjust` lets a test hand the factory a context whose collection getter fails, which is the
+/// only way to simulate "the store is unreachable" without a hand-faked ILiteCollection. The
+/// test still gets the *real* context back, so it can inspect what actually landed on disk.
+let private withApiOver
+    (adjust: GoogleDatabaseContext -> GoogleDatabaseContext)
+    (test: GoogleDatabaseContext -> GoogleAccountApi -> unit)
+    =
     let databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let context = GoogleDatabaseContextModule.getDatabaseContext databasePath "direct"
-    let api = GoogleAccountApiFactory.createGoogleAccountApi handleError context
+    let api = GoogleAccountApiFactory.createGoogleAccountApi handleError (adjust context)
 
     try
-        test api
+        test context api
     finally
         context.Dispose()
         try File.Delete databasePath with _ -> ()
+
+let private withApi (test: GoogleAccountApi -> unit) = withApiOver id (fun _ api -> test api)
+
+/// Writes an account row and a stored OAuth token for it, exactly as a completed registration
+/// would leave them - the pair `RemoveAccount` is supposed to delete together.
+let private registerByHand (context: GoogleDatabaseContext) (accountId: string) (emailAddress: string) =
+    context
+        .GetAccountCollection()
+        .Upsert(
+            GoogleAccountEntity(
+                Id = ObjectId accountId,
+                EmailAddress = emailAddress,
+                DefaultInvoiceCalendarId = null,
+                NeedsReauthorisation = false
+            )
+        )
+    |> ignore
+
+    let dataStore =
+        GoogleCredentialDataStore.GoogleCredentialDataStore(handleError, context.GetCredentialCollection) :> IDataStore
+
+    dataStore.StoreAsync(accountId, TokenResponse(AccessToken = "at", RefreshToken = "rt"))
+    |> Async.AwaitTask
+    |> Async.RunSynchronously
 
 let private okOrFail label result =
     match result with
@@ -120,4 +157,41 @@ let ``SetDefaultInvoiceCalendar refuses an unregistered account as an unlogged e
 
         Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
         Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, ex.ActionName)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``RemoveAccount deletes the account's stored token as well as its row`` () =
+    withApiOver id (fun context api ->
+        registerByHand context "507f1f77bcf86cd799439011" "person@gmail.com"
+        registerByHand context "507f1f77bcf86cd799439012" "other@gmail.com"
+
+        api.RemoveAccount "507f1f77bcf86cd799439011" |> okOrFail "RemoveAccount"
+
+        // requirements.md: removal "SHALL delete its local token and its record". Nothing
+        // exercised the token half of that before - the factory tests only reached RemoveAccount's
+        // error paths, and the E2E harness rebuilt RemoveAccount without the token deletion.
+        Assert.Equal(1, context.GetAccountCollection().Count())
+        Assert.Equal(1, context.GetCredentialCollection().Count())
+
+        let remaining = api.GetAccounts() |> okOrFail "GetAccounts"
+        Assert.Equal("other@gmail.com", (Assert.Single remaining).EmailAddress)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
+let ``RemoveAccount reports an unreachable credential store as an Error, rather than raising`` () =
+    let brokenCredentials (context: GoogleDatabaseContext) =
+        { context with
+            GetCredentialCollection = fun () -> failwith "the credential collection is unreachable" }
+
+    withApiOver brokenCredentials (fun context api ->
+        registerByHand context "507f1f77bcf86cd799439011" "person@gmail.com"
+
+        // `RemoveAccount` is declared `string -> Result<unit, MyDogsbodyException>`. It used to
+        // raise straight through that declaration when the token deletion failed, so the UI's
+        // Error branch never ran: no MudAlert, no reload, and the row it had just deleted still
+        // on screen. The removal itself still succeeds - the account row really is gone, and
+        // reporting a failure would tell the user to retry something already done.
+        match api.RemoveAccount "507f1f77bcf86cd799439011" with
+        | Ok () -> Assert.Equal(0, context.GetAccountCollection().Count())
+        | Error ex -> Assert.Fail($"RemoveAccount expected Ok, but got Error: {ex.Message}")
     )

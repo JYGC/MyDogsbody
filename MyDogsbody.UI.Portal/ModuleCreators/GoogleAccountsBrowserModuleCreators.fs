@@ -46,10 +46,14 @@ let getGoogleAccountsBrowserModule
                     errorCval.Value <- None)
             | Error(ex: MyDogsbodyException) -> transact (fun _ -> errorCval.Value <- Some ex.Message))
 
-    /// Reloads the accounts table, then the calendars for every account with no default chosen
-    /// (a NOT READY account's picker needs to be populated to let the user choose one) or whose
-    /// stored default might no longer exist. Ready accounts are not re-fetched on every reload -
-    /// their picker already has what it needs once loaded.
+    /// Reloads the accounts table, then the calendars for every account that has a usable
+    /// credential - a NOT READY account's picker needs populating so a calendar can be chosen at
+    /// all, and a READY account's needs it so the choice can be changed. Only an account flagged
+    /// as needing re-authorisation is skipped, because fetching its calendars would fail anyway.
+    ///
+    /// So this is one `GetCalendarsFor` call per account on every reload, not a cached first
+    /// fetch. Worth knowing before change #7 adds more: `CalendarRateLimited` is a real error
+    /// case, and every write reloads.
     let loadAccounts () =
         transact (fun _ -> isLoadingCval.Value <- true)
 

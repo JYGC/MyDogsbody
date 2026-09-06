@@ -191,7 +191,7 @@ let loadCredential
     (clientSecretJson: string)
     (accountId: string)
     : Result<UserCredential, MyDogsbodyException> =
-    let action = ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise
+    let action = ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential
 
     handleError {
         try
@@ -224,14 +224,27 @@ let loadCredential
     }
 
 /// Deletes the stored token for an account being removed (requirements.md: "deletes its local
-/// token and its record"). `GoogleAccountApiFactory`'s `RemoveAccount` calls this alongside
-/// `GoogleAccountStore.removeOne`. Thin enough, and non-critical enough on failure (a leftover
-/// token row for a deleted account is inert), that it does not merit its own `ActionNames` entry;
-/// any store failure surfaces as a raised `MyDogsbodyException` from `GoogleCredentialDataStore`.
+/// token and its record"), and discards the token a refused registration left behind
+/// (`RegisterGoogleAccountWorkflow`'s `DiscardAuthorisation` dependency).
+///
+/// Outer-ring shape, like every other function here. It used to return `unit` on the reasoning
+/// that a leftover token row is inert - but `GoogleCredentialDataStore` is exception-based by
+/// construction (`IDataStore` is not `Result`-based), so an unreachable store *raised* straight
+/// out of `GoogleAccountApi.RemoveAccount`, past its declared `Result<unit, MyDogsbodyException>`
+/// and past the UI's error branch. A failure here is now a value like every other, and its
+/// caller decides what it is worth; nothing escapes as control flow.
 let removeStoredToken
     (handleError: HandleErrorBuilder)
     (getCredentialCollection: unit -> GoogleCredentialsCollection)
     (accountId: string)
-    : unit =
-    let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
-    dataStore.DeleteAsync<TokenResponse>(accountId) |> Async.AwaitTask |> Async.RunSynchronously
+    : Result<unit, MyDogsbodyException> =
+    let action = ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.removeStoredToken
+
+    handleError {
+        try
+            let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
+            dataStore.DeleteAsync<TokenResponse>(accountId) |> Async.AwaitTask |> Async.RunSynchronously
+            return ()
+        with ex ->
+            return! MyDogsbodyException(action, "Failed to delete the stored Google credential.", ex)
+    }
