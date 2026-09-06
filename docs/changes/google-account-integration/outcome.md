@@ -137,9 +137,9 @@ chosen by the adapters that construct them:
 | `GoogleAuthorization.authorise`/`.reauthorise` | `The consent flow was cancelled or denied.` | `AuthorisationCancelled` | No |
 | | `The stored Google client secret is malformed.` | `ClientSecretInvalid` | No |
 | | `The authorised account's email address could not be read.` | `AccountEmailUnavailable` | No |
-| | `The loopback port is already in use.` | `AuthorisationFailed` | Yes |
-| | `The consent flow timed out.` | `AuthorisationFailed` | Yes |
-| | *(anything else)* `Authorisation failed.` | `AuthorisationFailed` | Yes |
+| | `The loopback port is already in use.` | `AuthorisationFailed` **carrying that sentence** | Yes |
+| | `The consent flow timed out.` | `AuthorisationFailed` **carrying that sentence** | Yes |
+| | *(anything else)* `Authorisation failed.` | `AuthorisationFailed` carrying the **inner exception's** message | Yes |
 | `GoogleAuthorization.loadCredential` | `No stored credential for this account.` | `NotAuthorised` | No |
 | `GoogleCalendarClient.listCalendars` | `The stored Google credential is no longer authorised.` | `NotAuthorised` | Yes¹ |
 | | `Google is rate-limiting this account; try again shortly.` | `CalendarRateLimited` | Yes |
@@ -420,3 +420,80 @@ PR #17), and `%TEMP%` already held five orphaned `mdb-e2e-*` directories from ea
 cleanup has been losing this race for a while. It is an `icacls`-under-parallelism race in a
 Thunderbird test, unrelated to anything Google, and distinct from the documented LiteDB
 `BsonMapper` flake.
+
+---
+
+## PR review, round 2 — one defect found in the diff, fixed
+
+A cold second read of the whole PR diff (round 1's own commit included, judged on the code
+rather than on its summary). PR #21 still carries **no review comments**, so this round's single
+finding is again from reading the diff. It was reproduced against the checked-out head with a
+throwaway script before anything was changed.
+
+### The two named authorisation failures never reached the user
+
+`GoogleAuthorization.authoriseWith` deliberately chooses a distinct sentence for each failure it
+can name, and the table above records them. `GoogleAccountApiMappers.toAuthorisationError` matched
+three of those sentences and let the other two fall into its catch-all, which prefers the **inner
+exception's** message over the adapter's own. That preference is right for `"Authorisation
+failed."` — the adapter's catch-all, which carries nothing — but for the two named cases the inner
+exception carries *less* than the sentence it replaced.
+
+Measured before the fix, driving the real `authoriseWith` and then the real
+`toAuthorisationError >> toMyDogsbodyException` pair, printing the `Message` the `MudAlert`
+renders:
+
+| Failure | Adapter's chosen `Message` | What the user actually saw |
+| --- | --- | --- |
+| Loopback port in use | `The loopback port is already in use.` | `Failed to listen on prefix because it conflicts with an existing registration on the machine.` |
+| Consent timed out (`OperationCanceledException`) | `The consent flow timed out.` | `The operation was canceled.` |
+| Consent timed out (`TaskCanceledException`) | `The consent flow timed out.` | `A task was canceled.` |
+
+Both contradict requirements.md's own edge cases: *"WHEN the loopback port is already in use THE
+SYSTEM SHALL report that **specifically**"* — the words "loopback" and "port" never appeared — and
+*"WHEN the user closes the browser without completing consent THE SYSTEM SHALL time out **with a
+reason**"* — `"The operation was canceled."` is not a reason, it names neither what was cancelled
+nor why.
+
+Fixed by matching those two sentences explicitly in `toAuthorisationError` and carrying them
+through as the `AuthorisationFailed` payload. The catch-all is unchanged, and so is everything
+else: the full exception is still logged by the adapter's own `handleError`, so no diagnostic
+detail is lost — only the *user-facing* sentence changes. After the fix all five paths through
+`authoriseWith` produce the message the adapter chose, and the generic path still prefers its
+inner exception (`the real reason`).
+
+Locked in by three new contract tests in `GoogleAccountApiMappersTests.fs`, written red first:
+the loopback case, the timed-out case (both `OperationCanceledException` and
+`TaskCanceledException`), and one that runs the whole inbound-then-outbound translation and
+asserts the exact string the `MudAlert` shows.
+
+### Considered and deliberately not changed
+
+- **`GoogleAccountsComponents.fs`'s `let mutable editedSecret`** is the only `let mutable` in
+  `MyDogsbody.UI.Portal`, and CLAUDE.md names `cval` + `transact` as the UI's sanctioned mutation
+  point. Probed rather than assumed: F# lifts the captured local, the `ValueChanged` closure and
+  the `Save` handler share one cell, and the typed value is what `SetClientSecret` receives — so
+  it is a convention deviation with no behavioural cost. Replacing it would mean widening
+  `GoogleAccountsBrowserModule`'s contract for no defect, which is more churn than the finding
+  earns.
+- **`GoogleAuthorization.reauthorise` reports `authorise`'s `ActionName`**, so the exception log
+  cannot tell a failed re-authorisation from a failed registration — the same shape round 1 fixed
+  for `loadCredential`. Left alone because the path is unreachable today: the "Re-authorise"
+  button only renders for an account with `NeedsReauthorisation = true`, which nothing sets. It
+  belongs with the `NeedsReauthorisation` change below, not folded in ahead of it.
+- **`NeedsReauthorisation` is still never set to `true`** (see *Still open* above). Round 2 agrees
+  with round 1's deferral: choosing what raises it — a `NotAuthorised` from `listCalendars` is the
+  obvious candidate, at the cost of a write during a read — is a decision, not a review fix.
+
+### Round 2 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The 3 pre-existing warnings are unchanged and none is in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` | 1466 → **1469** (+3), 0 skipped. |
+| Failures | The same one pre-existing `SqliteConnectionPoolingTests` failure described above — it fails on `main` too and none of the files it flags is touched by this change. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **784** (carrying the one pre-existing
+failure), Integration **310**, Contract **340** (+3), E2E **35**. Neither documented flake — the
+LiteDB `BsonMapper` first-use race, or `MailAccountsFlowTests`' `icacls` cleanup race — was
+observed in this round's runs.

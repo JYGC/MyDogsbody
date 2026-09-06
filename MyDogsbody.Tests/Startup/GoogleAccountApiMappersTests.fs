@@ -87,7 +87,58 @@ let ``toAuthorisationError maps an unavailable email`` () =
     Assert.Equal(AccountEmailUnavailable, GoogleAccountApiMappers.toAuthorisationError ex)
 
 [<Fact; Trait("Level", "Contract")>]
+let ``toAuthorisationError keeps the loopback-port sentence rather than the listener exception's`` () =
+    // requirements.md: "WHEN the loopback port is already in use THE SYSTEM SHALL report that
+    // specifically". GoogleAuthorization chose that sentence deliberately; preferring the inner
+    // exception's message here would replace it with HttpListenerException's own text, in which
+    // the words "loopback" and "port" never appear.
+    let ex =
+        MyDogsbodyException(
+            authoriseAction,
+            "The loopback port is already in use.",
+            Net.HttpListenerException(
+                183,
+                "Failed to listen on prefix because it conflicts with an existing registration on the machine."
+            )
+        )
+
+    Assert.Equal(AuthorisationFailed "The loopback port is already in use.", GoogleAccountApiMappers.toAuthorisationError ex)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``toAuthorisationError keeps the timed-out sentence rather than the cancellation's bare message`` () =
+    // requirements.md: "WHEN the user closes the browser without completing consent THE SYSTEM
+    // SHALL time out with a reason". The inner exception is not a reason - it says only "The
+    // operation was canceled." (or "A task was canceled." when the SDK's cancellation surfaces as
+    // a TaskCanceledException), which tells the user nothing about what was cancelled or why.
+    let operationCancelled =
+        MyDogsbodyException(authoriseAction, "The consent flow timed out.", OperationCanceledException())
+
+    let taskCancelled =
+        MyDogsbodyException(authoriseAction, "The consent flow timed out.", Threading.Tasks.TaskCanceledException())
+
+    Assert.Equal(AuthorisationFailed "The consent flow timed out.", GoogleAccountApiMappers.toAuthorisationError operationCancelled)
+    Assert.Equal(AuthorisationFailed "The consent flow timed out.", GoogleAccountApiMappers.toAuthorisationError taskCancelled)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``the message a user is shown for the two named authorisation failures is the one the adapter chose`` () =
+    // The whole inbound-then-outbound translation, which is what actually reaches the MudAlert.
+    let userSees (adapterMessage: string) (inner: exn) =
+        MyDogsbodyException(authoriseAction, adapterMessage, inner)
+        |> GoogleAccountApiMappers.toAuthorisationError
+        |> GoogleAccountApiMappers.toMyDogsbodyException anAction
+        |> fun ex -> ex.Message
+
+    Assert.Equal(
+        "The loopback port is already in use.",
+        userSees "The loopback port is already in use." (Net.HttpListenerException(183, "conflicts with an existing registration"))
+    )
+
+    Assert.Equal("The consent flow timed out.", userSees "The consent flow timed out." (OperationCanceledException()))
+
+[<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError maps anything else to AuthorisationFailed, preferring the inner exception's message`` () =
+    // Unchanged: "Authorisation failed." is the adapter's catch-all and carries nothing, so the
+    // inner exception is the only place the real reason lives.
     let ex = MyDogsbodyException(authoriseAction, "Authorisation failed.", InvalidOperationException "the real reason")
 
     Assert.Equal(AuthorisationFailed "the real reason", GoogleAccountApiMappers.toAuthorisationError ex)

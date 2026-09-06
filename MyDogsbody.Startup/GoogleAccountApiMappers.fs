@@ -43,6 +43,16 @@ let toAuthorisationError (ex: MyDogsbodyException) : CalendarError =
     | "The consent flow was cancelled or denied." -> AuthorisationCancelled
     | "The stored Google client secret is malformed." -> ClientSecretInvalid ex.Message
     | "The authorised account's email address could not be read." -> AccountEmailUnavailable
+    // The two failures GoogleAuthorization names for itself keep the sentence it chose. The
+    // catch-all below prefers the inner exception because "Authorisation failed." carries
+    // nothing - but for these two the inner exception carries *less* than the adapter's own
+    // wording: HttpListenerException talks about listener prefixes without ever saying
+    // "loopback" or "port", and a cancelled consent flow arrives as a bare "The operation was
+    // canceled." / "A task was canceled." Both are what requirements.md asks be reported
+    // specifically and with a reason, so neither may be replaced by the exception underneath.
+    // The full exception is still logged by the adapter's own handleError.
+    | "The loopback port is already in use."
+    | "The consent flow timed out." -> AuthorisationFailed ex.Message
     | _ ->
         let reason = match ex.InnerException with null -> ex.Message | inner -> inner.Message
         AuthorisationFailed reason
