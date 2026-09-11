@@ -89,7 +89,8 @@ let ``choosing a default calendar makes a not-ready account ready`` () =
 
         rendered.WaitForAssertion(fun () ->
             Assert.Contains("Ready", rendered.Markup)
-            Assert.DoesNotContain("Not ready", rendered.Markup))
+            Assert.DoesNotContain("Not ready", rendered.Markup)
+            Assert.DoesNotContain("No calendars were found for this account.", rendered.Markup))
 
         Assert.Empty harness.Logged)
 
@@ -110,6 +111,7 @@ let ``an account with no calendars stays not ready, with a reason, and no error 
 
         rendered.WaitForAssertion(fun () ->
             Assert.Contains("Not ready - no calendar chosen", rendered.Markup)
+            Assert.Contains("No calendars were found for this account.", rendered.Markup)
             Assert.Contains("person@gmail.com", rendered.Markup))
 
         Assert.Empty harness.Logged)

@@ -1062,3 +1062,99 @@ substitutes `AuthoriseAccount` with a fake, so it never reaches this adapter.
 Per level, each measured with `--filter "Level=..."`: Unit **798** (+6, carrying the one
 pre-existing failure, which is tagged `Unit`), Integration **324** (+1), Contract **348** (+1),
 E2E **37**. 1507 in total.
+
+---
+
+## PR review, round 8 — two defects found in the diff, both fixed
+
+An eighth cold read of the whole PR diff, rounds 1–7 included and judged on the code. PR #21 still
+carries **no review comments** (0 review comments; 7 issue comments, which are rounds 1–7's own
+summaries), so both findings come from reading the diff. Round 7's granted-scope check was verified
+first, against the real SDK rather than from memory.
+
+### Round 7's granted-scope check, verified against Google.Apis.Auth 1.72.0
+
+- **It reads the right property.** Reflection on the package's `TokenResponse`: `Scope` carries
+  `[JsonProperty("scope")]`, the RFC 6749 §5.1 field.
+- **The real code exchange fills it verbatim.** A throwaway probe outside the repository drove the
+  real `GoogleAuthorizationCodeFlow` through `AuthorizationCodeInstalledApp` (the same path
+  `GoogleWebAuthorizationBroker` takes). It used a fake `ICodeReceiver` and stubbed only the token
+  endpoint, through the flow's `HttpClientFactory`. For a sign-in-only grant, `credential.Token.Scope`
+  came back as the endpoint's space-separated string, `https://www.googleapis.com/auth/userinfo.email
+  openid`. That same string is what `IDataStore.StoreAsync` receives, and what
+  `NewtonsoftJsonSerializer` reads back. A response with no `scope` gives `Scope = null`.
+- **Letting a token that reports no scope through is sound, and for a stronger reason than round 7
+  gave.** RFC 6749 §5.1 makes `scope` optional only "if identical to the scope requested by the
+  client". So when it is absent, the scope was granted as requested; that is not a refusal left
+  unsaid.
+- **Tests and clean-up hold.** The unit theory asserts the exact `ActionName`, the message, the
+  preserved `ApplicationException` inner carrying the granted scopes, that nothing was logged, and
+  that the email was never read. The integration test proves `authoriseNewAccountWith` hands back
+  the token consent wrote (0 rows left). The contract test covers `toAuthorisationError` and the
+  chain to the `MudAlert` string. The outbound `AuthorisationFailed` exception has no
+  `ApplicationException` inner, but nothing on that side logs (the factory only `Result.mapError`s),
+  so the refusal stays unlogged end to end.
+
+### 1. An account with no calendars showed an empty picker with no message
+
+requirements.md, *Edge cases*: "WHEN an account has no calendars at all THE SYSTEM SHALL show an empty
+picker with a message, not an error." The component rendered an empty `MudSelect` and nothing else.
+The E2E test named `an account with no calendars stays not ready, with a reason, …` asserted only the
+`Not ready - no calendar chosen` chip, which every account without a default calendar shows whether
+its picker holds twenty calendars or none. So manual verification's own complaint ("the picker had no
+options, with nothing on the page explaining why") was still true for a fetch that *succeeds* with
+zero calendars. No deferral of this requirement was recorded anywhere.
+
+Fixed in `GoogleAccountsComponents`. A pure `noCalendarsMessage` returns
+`No calendars were found for this account.` for an account whose `CalendarsByAccountIdAval` entry
+holds `[]`, and nothing otherwise. The picker renders that message as a caption under the `MudSelect`.
+Only *loaded and empty* earns it. An account with no entry is still loading, or its fetch failed, and
+a failure already has the page's `MudAlert`, so "no calendars" there would be a claim nobody checked.
+
+Tests, written red first. Against a stub `noCalendarsMessage` returning `None`, three failed, each for
+the predicted reason:
+
+- two unit tests (`… says so for an account whose calendars loaded and are empty`,
+  `… reads only that account's own calendars`), each `Expected: Some(No calendars were found for this
+  account.)`, `Actual: null`;
+- the E2E no-calendars flow, now asserting the message: "Sub-string not found".
+
+Green before and after: two unit controls (`… says nothing for an account whose calendars have not
+loaded`, `… says nothing for an account with calendars`), and a new `DoesNotContain` in the E2E
+`choosing a default calendar makes a not-ready account ready`. The unit tests are in the new
+`UI/Components/GoogleAccountsComponentsTests.fs`, following `MailAccountsComponentsTests`' pure-helper
+precedent.
+
+### 2. One outbound error translation was never asserted
+
+`toMyDogsbodyException`'s `CalendarApiNotEnabled` case returns an *expected* exception: unlogged, with
+an `ApplicationException` inner, carrying Google's own sentence. Every other `CalendarError` case has
+its own contract test. This one appeared only in `every CalendarError case produces a non-empty message
+and the declared action`, which checks neither the message nor the unlogged marking. That misses
+requirements.md's "each `CalendarError` case maps to the intended `MyDogsbodyException`". Added
+`CalendarApiNotEnabled becomes an unlogged exception carrying Google's own sentence` (Contract): it
+asserts the `ActionName`, the exact message, the `ApplicationException` inner, and
+`ExceptionHelpers.isApplicationException`. **Test-only:** the translation was already right, so the
+test passed on its first run. This adds missing coverage and changes no behaviour, so there is no red
+run to report.
+
+### Considered and deliberately not changed
+
+- **A refused scope check leaves the grant live at Google.** Only the local token is deleted, as for
+  every other post-consent failure, and Q3.6 chose not to revoke.
+- **`reauthorise`'s refusal does not discard the account's token.** That decision belongs to the
+  `NeedsReauthorisation` change (round 4's note on `authoriseNewAccountWith`), and the path is
+  unreachable today.
+- Rounds 1–7's deferrals stand, for the reasons they give.
+
+### Round 8 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, none in a file this round touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 2m`) | 1507 → **1512** (+5), 0 skipped, 9 s. No hang, no dump. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **802** (+4, carrying the one
+pre-existing failure, which is tagged `Unit`), Integration **324**, Contract **349** (+1), E2E **37**
+(two existing flows gained assertions). 1512 in total.

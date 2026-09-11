@@ -5,6 +5,17 @@ open MudBlazor
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 
+/// What to say under an account's calendar picker when there is nothing in it to pick
+/// (requirements.md: "WHEN an account has no calendars at all THE SYSTEM SHALL show an empty picker
+/// with a message, not an error"). Only an account whose calendars have *loaded* and come back empty
+/// earns it: `CalendarsByAccountIdAval` has no entry for an account still loading, or whose fetch
+/// failed - and a failure is already the page's `MudAlert`, so claiming "no calendars" there would
+/// state something nobody has checked.
+let noCalendarsMessage (calendarsByAccountId: Map<string, CalendarUiType list>) (accountId: string) : string option =
+    match Map.tryFind accountId calendarsByAccountId with
+    | Some [] -> Some "No calendars were found for this account."
+    | _ -> None
+
 let googleAccountsBrowser
     (m: GoogleAccountsBrowserModule)
     (confirmAndRemove: GoogleAccountUiType -> unit)
@@ -166,21 +177,31 @@ let googleAccountsBrowser
                                     "Re-authorise to choose a calendar"
                                 }
                             else
-                                MudSelect'' {
-                                    Dense true
-                                    Value(account.DefaultInvoiceCalendarId |> Option.defaultValue "")
-                                    ValueChanged(fun (calendarId: string) ->
-                                        if not (System.String.IsNullOrEmpty calendarId) then
-                                            m.SetDefaultInvoiceCalendar account.Id calendarId)
-                                    fragment {
-                                        for calendar in calendars do
-                                            let label = if calendar.IsPrimary then $"{calendar.Name} (primary)" else calendar.Name
+                                fragment {
+                                    MudSelect'' {
+                                        Dense true
+                                        Value(account.DefaultInvoiceCalendarId |> Option.defaultValue "")
+                                        ValueChanged(fun (calendarId: string) ->
+                                            if not (System.String.IsNullOrEmpty calendarId) then
+                                                m.SetDefaultInvoiceCalendar account.Id calendarId)
+                                        fragment {
+                                            for calendar in calendars do
+                                                let label = if calendar.IsPrimary then $"{calendar.Name} (primary)" else calendar.Name
 
-                                            MudSelectItem'' {
-                                                Value calendar.Id
-                                                label
-                                            }
+                                                MudSelectItem'' {
+                                                    Value calendar.Id
+                                                    label
+                                                }
+                                        }
                                     }
+
+                                    match noCalendarsMessage calendarsByAccountId account.Id with
+                                    | Some message ->
+                                        MudText'' {
+                                            Typo Typo.caption
+                                            message
+                                        }
+                                    | None -> ()
                                 }
                         }
                         MudTd'' {

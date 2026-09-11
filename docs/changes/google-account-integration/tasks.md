@@ -212,6 +212,10 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       **no `Async.Start` in the file**. 15 tests.
 - [x] **6.3** `Components/GoogleAccountsComponents.fs` — the accounts table, the client-secret entry,
       and the per-account calendar picker populated from **that account's own** calendars.
+      *Since PR review round 8:* an account whose calendars loaded and came back empty shows the
+      empty picker with `No calendars were found for this account.` under it (requirements.md's
+      "an empty picker with a message, not an error"). `noCalendarsMessage`, 4 unit tests in
+      `UI/Components/GoogleAccountsComponentsTests.fs`, and the E2E no-calendars flow asserts it.
 - [x] **6.4** The **not-ready** state: an account with no default calendar is shown as such with the
       reason ("Not ready - no calendar chosen" chip), and its calendar picker is the only action
       that needs one — `SetDefaultInvoiceCalendar` is what makes it ready, so nothing else is

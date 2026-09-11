@@ -387,3 +387,20 @@ let ``every CalendarError case produces a non-empty message and the declared act
         let actual = GoogleAccountApiMappers.toMyDogsbodyException anAction case
         Assert.False(String.IsNullOrWhiteSpace actual.Message, $"{case} produced an empty message")
         Assert.Equal(anAction, actual.ActionName)
+
+[<Fact; Trait("Level", "Contract")>]
+let ``CalendarApiNotEnabled becomes an unlogged exception carrying Google's own sentence`` () =
+    // The one outbound case no test pinned beyond "non-empty message": it is expected (a
+    // configuration the user fixes, already logged once by the adapter with the full exception),
+    // so it must arrive unmarked for logging, and its payload - which names the project and the URL
+    // that enables the API - is the sentence the MudAlert renders, word for word.
+    let message =
+        "The Google Calendar API is not enabled for this project. Google Calendar API has not been used in project 000000000000 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=000000000000 then retry."
+
+    let actual = GoogleAccountApiMappers.toMyDogsbodyException anAction (CalendarApiNotEnabled message)
+
+    Assert.Equal(anAction, actual.ActionName)
+    Assert.Equal(message, actual.Message)
+    let inner = Assert.IsType<ApplicationException>(actual.InnerException)
+    Assert.Equal(message, inner.Message)
+    Assert.True(MyDogsbody.Exceptions.ExceptionHelpers.isApplicationException actual)

@@ -123,6 +123,7 @@
     <Compile Include="UI\ModuleCreators\InvoicesModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\GoogleAccountsBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\Components\MailAccountsComponentsTests.fs" />
+    <Compile Include="UI\Components\GoogleAccountsComponentsTests.fs" />
     <Compile Include="E2E\SuppliersTestHarness.fs" />
     <Compile Include="E2E\SuppliersFlowTests.fs" />
     <Compile Include="E2E\MailAccountsTestHarness.fs" />
