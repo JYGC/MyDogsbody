@@ -124,3 +124,23 @@ let ``the in-memory fake returns exactly the calendars it was given`` () =
     withFakeListCalendars calendars (fun listCalendars ->
         Assert.Equal(Ok calendars, listCalendars accountId)
     )
+
+[<Theory; Trait("Level", "Contract")>]
+[<InlineData("userRateLimitExceeded")>]
+[<InlineData("rateLimitExceeded")>]
+[<InlineData("quotaExceeded")>]
+[<InlineData("dailyLimitExceeded")>]
+let ``the real adapter maps a usage-limit 403 to CalendarRateLimited, not NotAuthorised`` (reason: string) =
+    // Google documents its usage limits as 403s as well as 429s; only error.errors[].reason tells
+    // them apart from a permission failure, and they need opposite responses from the user.
+    let respond (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.Forbidden
+            $"""{{ "error": {{ "code": 403, "message": "Rate Limit Exceeded", "errors": [ {{ "domain": "usageLimits", "reason": "{reason}", "message": "Rate Limit Exceeded" }} ] }} }}"""
+
+    withRealListCalendars respond (fun listCalendars ->
+        Assert.Equal(
+            Error(CalendarRateLimited "Google is rate-limiting this account; try again shortly."),
+            listCalendars accountId
+        )
+    )

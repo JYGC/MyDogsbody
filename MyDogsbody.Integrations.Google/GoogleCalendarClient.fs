@@ -37,6 +37,15 @@ let private hasReason (reason: string) (ex: Google.GoogleApiException) =
         | null -> false
         | errors -> errors |> Seq.exists (fun e -> e.Reason = reason)
 
+/// Google's documented usage-limit reasons (the Calendar API's "Handle API errors" guide). Each can
+/// arrive as a 403, not only as a 429 - and a 403 is otherwise read as a permission failure. The
+/// guide's remedy for all of them is to back off and retry; re-authorising fixes none of them.
+let private usageLimitReasons =
+    [ "rateLimitExceeded"; "userRateLimitExceeded"; "quotaExceeded"; "dailyLimitExceeded" ]
+
+let private isUsageLimit (ex: Google.GoogleApiException) =
+    usageLimitReasons |> List.exists (fun reason -> hasReason reason ex)
+
 let private googleMessage (ex: Google.GoogleApiException) =
     match ex.Error with
     | null -> ex.Message
@@ -98,12 +107,17 @@ let listCalendarsVia
             // URL that enables it, so it is carried through verbatim rather than replaced by a
             // message of ours that would send the user to do the wrong thing.
             return! MyDogsbodyException(action, $"{apiNotEnabledPrefix} {googleMessage ex}", ex)
+        // Ahead of the 401/403 clause below, which would otherwise take a usage-limit 403 and tell a
+        // rate-limited user to re-authorise - the instruction design decision 7 exists to prevent.
+        | :? Google.GoogleApiException as ex when
+            ex.HttpStatusCode = HttpStatusCode.TooManyRequests
+            || (ex.HttpStatusCode = HttpStatusCode.Forbidden && isUsageLimit ex)
+            ->
+            return! MyDogsbodyException(action, "Google is rate-limiting this account; try again shortly.", ex)
         | :? Google.GoogleApiException as ex when
             ex.HttpStatusCode = HttpStatusCode.Unauthorized || ex.HttpStatusCode = HttpStatusCode.Forbidden
             ->
             return! MyDogsbodyException(action, "The stored Google credential is no longer authorised.", ex)
-        | :? Google.GoogleApiException as ex when ex.HttpStatusCode = HttpStatusCode.TooManyRequests ->
-            return! MyDogsbodyException(action, "Google is rate-limiting this account; try again shortly.", ex)
         | ex ->
             // Google's own text appended, because "could not reach" on its own leaves a user with
             // nothing to act on - the real reason was thrown away before it reached the screen.

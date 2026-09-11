@@ -163,3 +163,39 @@ let ``listCalendars maps a 500 to an unreachable message`` () =
         Assert.StartsWith("Could not reach Google Calendar.", ex.Message)
         Assert.Contains("Backend Error", ex.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Theory; Trait("Level", "Integration")>]
+[<InlineData("userRateLimitExceeded", "User Rate Limit Exceeded")>]
+[<InlineData("rateLimitExceeded", "Rate Limit Exceeded")>]
+[<InlineData("quotaExceeded", "Calendar usage limits exceeded.")>]
+[<InlineData("dailyLimitExceeded", "Daily Limit Exceeded")>]
+let ``listCalendars maps a usage-limit 403 to the rate-limit message, not the not-authorised one``
+    (reason: string, googleMessage: string)
+    =
+    // Google's Calendar API error guide documents its usage limits as 403s, not only as 429s - these
+    // bodies are the guide's own shape, domain "usageLimits". Its remedy is to back off and retry;
+    // re-authorising fixes none of them. requirements.md: "WHEN Google returns a rate-limit or
+    // transient error THE SYSTEM SHALL report it distinctly from a permission failure".
+    let respond (_: HttpRequestMessage) =
+        jsonResponse HttpStatusCode.Forbidden (errorBodyWithReason 403 reason googleMessage)
+
+    match listCalendars respond with
+    | Error ex ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, ex.ActionName)
+        Assert.Equal("Google is rate-limiting this account; try again shortly.", ex.Message)
+        let inner = Assert.IsType<Google.GoogleApiException>(ex.InnerException)
+        Assert.Equal(HttpStatusCode.Forbidden, inner.HttpStatusCode)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listCalendars still maps a 403 for too-narrow scopes to the not-authorised message`` () =
+    // The 403 that re-consenting DOES fix - seen in task 10.4's real use, a token predating the
+    // calendar scope. The usage-limit reasons above must not swallow it.
+    let respond (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.Forbidden
+            """{ "error": { "code": 403, "message": "Insufficient Permission", "errors": [ { "domain": "global", "reason": "insufficientPermissions", "message": "Insufficient Permission" } ] } }"""
+
+    match listCalendars respond with
+    | Error ex -> Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")

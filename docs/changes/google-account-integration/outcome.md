@@ -143,7 +143,7 @@ chosen by the adapters that construct them:
 | `GoogleAuthorization.loadCredential` | `No stored credential for this account.` | `NotAuthorised` | No |
 | | `The stored Google client secret is malformed.` | `ClientSecretInvalid` | No |
 | `GoogleCalendarClient.listCalendars` | `The stored Google credential is no longer authorised.` | `NotAuthorised` | Yes¹ |
-| | `Google is rate-limiting this account; try again shortly.` | `CalendarRateLimited` | Yes |
+| | `Google is rate-limiting this account; try again shortly.` — a `429`, or a `403` whose reason is a usage limit³ | `CalendarRateLimited` | Yes |
 | | *(anything else)* `Could not reach Google Calendar.` | `CalendarUnreachable` | Yes |
 
 ¹ Logged by `GoogleCalendarClient`'s own `handleError`, same as every other `listCalendars`
@@ -158,6 +158,10 @@ production**: the consent flow fails as a faulted `Task`, `Async.AwaitTask` surf
 `One or more errors occurred. (...)`, logged. A `TokenResponseException` carrying any code other
 than `access_denied` (a failed code exchange, e.g. `invalid_client`) is now `Authorisation failed.`,
 logged — the user did consent, so it is not reported as their choice.
+
+³ Since PR review round 5. Google documents `rateLimitExceeded`, `userRateLimitExceeded`,
+`quotaExceeded` (and, API-wide, `dailyLimitExceeded`) as **403**s as well as 429s; before round 5
+every one of them read as `NotAuthorised`. Any other 401/403 is still `NotAuthorised`.
 
 ---
 
@@ -766,3 +770,85 @@ failure, which is tagged `Unit`), Integration **316**, Contract **342**, E2E
 **35** — 1485 in total.
 
 **One full-suite run in this round stalled, and it is not explained.** Its testhost sat at about 25 s of CPU for four and a half minutes (the whole suite normally takes 7-9 s) and was killed before a dump was taken, so the stalled test is not named. Four further full runs under `--blame-hang --blame-hang-timeout 60s` all completed in 10-11 s with no hang and no dump. This round's change does block on `.GetAwaiter().GetResult()`, but every fake it adds returns an already-completed `Task`, and production calls run on the thread pool via `Async.Start`, so reading finds no deadlock path. Recorded as an unreproduced stall rather than attributed to a known flake: if it recurs, take the dump before killing it.
+
+---
+
+## PR review, round 5 — one defect found in the diff, fixed
+
+A cold fifth read of the whole PR diff, rounds 1–4 included and judged on the code. PR #21 still
+carries **no review comments** (0 review comments; 4 issue comments, which are rounds 1–4's own
+summaries), so the finding is from reading the diff.
+
+### A rate-limited account was told to re-authorise
+
+`GoogleCalendarClient.listCalendarsVia` split 403s by one reason only: `accessNotConfigured` became
+`CalendarApiNotEnabled`, and **every other 401/403** became `"The stored Google credential is no
+longer authorised."` → `NotAuthorised`. But Google's Calendar API error guide documents its usage
+limits as **403**s as well as 429s — `userRateLimitExceeded`, `rateLimitExceeded` and
+`quotaExceeded`, all domain `usageLimits`, remedy "back off and retry". Each one read as a
+permission failure, which is exactly what requirements.md forbids ("WHEN Google returns a
+rate-limit or transient error THE SYSTEM SHALL report it distinctly from a permission failure")
+and what design decision 7 gives `CalendarRateLimited` its own case to prevent.
+
+**This overturns a recorded decision.** Task 10.4's fix above left "other 401/403 → `NotAuthorised`,
+unchanged", and tasks.md 4.1 specified `403` → `NotAuthorised` outright. Neither weighed the
+usage-limit 403s; the requirement they sit under does, so the requirement wins.
+
+Measured before the fix, driving the real adapter over a stubbed `HttpMessageHandler` with the
+guide's own bodies, then the real `toListCalendarsError` and `toMyDogsbodyException` — the string
+the `MudAlert` renders:
+
+| Google's response | Before | After |
+| --- | --- | --- |
+| `403 userRateLimitExceeded` | `The account '…' needs to be re-authorised.` (`NotAuthorised`) | `Google is rate-limiting this account; try again shortly.` (`CalendarRateLimited`) |
+| `403 rateLimitExceeded` | same, `NotAuthorised` | same, `CalendarRateLimited` |
+| `403 quotaExceeded` | same, `NotAuthorised` | same, `CalendarRateLimited` |
+| `403 dailyLimitExceeded` | same, `NotAuthorised` | same, `CalendarRateLimited` |
+| `429 rateLimitExceeded` (control) | `CalendarRateLimited` | unchanged |
+| `403 insufficientPermissions` (control) | `NotAuthorised` | unchanged |
+| `401 authError` (control) | `NotAuthorised` | unchanged |
+| `403 accessNotConfigured` (control) | `CalendarApiNotEnabled` | unchanged |
+
+Fixed by a named list of usage-limit reasons in `GoogleCalendarClient`, matched on a 403 in the
+same clause as a 429 and ordered ahead of the 401/403 clause. Widening, noted:
+`dailyLimitExceeded` is not in the Calendar guide's own list but is the API-wide usage-limit reason
+from the same `usageLimits` domain, so it is included. For a daily quota, "try again shortly" is
+optimistic about the wait. It is still the right kind of instruction (wait, don't re-authorise), and
+the adapter logs Google's full response.
+
+Tests, written red first (8 failing before the fix, each because the adapter returned the
+not-authorised message): a four-reason theory in `GoogleCalendarClientTests` asserting the exact
+message, `ActionName` and the preserved 403 `GoogleApiException`; the same four reasons in the
+`ListCalendars` contract suite, asserting `Error (CalendarRateLimited <message>)` whole; and one
+control fact, green before and after, locking `insufficientPermissions` to `NotAuthorised`.
+No E2E test was added: the E2E harness substitutes `ListCalendars` with a fake, so it never reaches
+this adapter. The adapter → mapper → alert chain is covered link by link: this adapter test, plus
+the existing `toListCalendarsError maps a 429-shaped message to CalendarRateLimited`.
+
+### Considered and deliberately not changed
+
+- **Round 4's `.GetAwaiter().GetResult()` fix stands.** Its fakes return faulted or cancelled `Task`s,
+  which is the shape the real flow produces. Its malformed-secret theory drives the real
+  `runRealConsentFlow`, whose parse sits inside the `task { }`, so that failure also arrives as a
+  faulted task. The one way a blocking wait could deadlock is a captured `SynchronizationContext`,
+  and that does not arise in production: every caller is reached through the page's
+  `Async.Start` on the thread pool. The suite did not stall this round (see the gate).
+- A userinfo call hitting `HttpClient`'s own timeout surfaces as `TaskCanceledException` and reads as
+  "The consent flow timed out." Imprecise, but the remedy is the same (try again), and the minted
+  token is handed back either way.
+- `loadCredential` builds a `GoogleAuthorizationCodeFlow` per calendar fetch and never disposes it.
+  Its `HttpClient` only opens a connection to refresh a token, so there is no measurable cost in a
+  desktop app.
+- Rounds 1–4's deferrals stand, for the reasons they give.
+
+### Round 5 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, none in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 2m`) | 1485 → **1494** (+9), 0 skipped, 11 s. No hang, no dump. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **792** (carrying the one pre-existing
+failure, which is tagged `Unit`), Integration **321** (+5), Contract **346** (+4), E2E **35** — 1494
+in total.
