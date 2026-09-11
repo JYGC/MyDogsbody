@@ -124,6 +124,9 @@ type CalendarError =
 
 type LoadClientSecret = unit -> Result<string option, CalendarError>
 type SaveClientSecret = string -> Result<unit, CalendarError>
+/// Completing consent persists a token before the account's email is known. An `Error` carries no
+/// id, so `DiscardAuthorisation` cannot be pointed at that token: an implementation that fails
+/// after consent hands its own token back before returning.
 type AuthoriseAccount = unit -> Result<GoogleEmail * GoogleAccountId, CalendarError>
 type ListGoogleAccounts = unit -> Result<RegisteredGoogleAccount list, CalendarError>
 type SaveGoogleAccount = RegisteredGoogleAccount -> Result<RegisteredGoogleAccount, CalendarError>

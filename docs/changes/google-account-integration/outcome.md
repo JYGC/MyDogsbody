@@ -134,7 +134,7 @@ chosen by the adapters that construct them:
 
 | Adapter action | `Message` | `CalendarError` | Logged? |
 | --- | --- | --- | --- |
-| `GoogleAuthorization.authorise`/`.reauthorise` | `The consent flow was cancelled or denied.` | `AuthorisationCancelled` | No |
+| `GoogleAuthorization.authorise`/`.reauthorise` | `The consent flow was cancelled or denied.` — OAuth `access_denied` only² | `AuthorisationCancelled` | No |
 | | `The stored Google client secret is malformed.` | `ClientSecretInvalid` | No |
 | | `The authorised account's email address could not be read.` | `AccountEmailUnavailable` | No |
 | | `The loopback port is already in use.` | `AuthorisationFailed` **carrying that sentence** | Yes |
@@ -151,6 +151,13 @@ failure; `NotAuthorised` itself is on `toMyDogsbodyException`'s *expected/unlogg
 that translation never touches `handleError` at all (same reasoning
 `MailAccountApiMappers.toMyDogsbodyException`'s comment gives) — the two "logged" columns above
 describe two different translation directions and are not in tension.
+
+² Since PR review round 4. Before it, **none of the five `authorise` rows was reachable in
+production**: the consent flow fails as a faulted `Task`, `Async.AwaitTask` surfaced that as an
+`AggregateException`, and no typed catch matched it — so every one of them reached the user as
+`One or more errors occurred. (...)`, logged. A `TokenResponseException` carrying any code other
+than `access_denied` (a failed code exchange, e.g. `invalid_client`) is now `Authorisation failed.`,
+logged — the user did consent, so it is not reported as their choice.
 
 ---
 
@@ -635,3 +642,127 @@ this change's:
   `MailAccountsTestHarness.fs`, `MailAccountApiFactory.fs`, `MailAccountApiMappers.fs`,
   `ThunderbirdStore.fs`, `MailAccountsBrowserModuleCreators.fs`) is byte-identical to `origin/main`.
   Recorded so the next round has a name for it rather than rediscovering it.
+
+---
+
+## PR review, round 4 — two defects found in the diff, both fixed
+
+A cold fourth read of the whole PR diff, rounds 1–3 included and judged on the code. PR #21 still
+carries **no review comments** (0 review comments; 3 issue comments, which are rounds 1–3's own
+summaries), so both findings are from reading the diff. Both were reproduced against the
+checked-out head with throwaway scripts before anything was changed — driving the **real**
+`runRealConsentFlow`, and Google.Apis.Auth's own `AuthorizationCodeInstalledApp` with its browser
+step replaced by a fake code receiver and its token endpoint stubbed.
+
+### 1. Every named consent failure was unreachable in production
+
+`authoriseWith` awaited the consent flow with `Async.AwaitTask |> Async.RunSynchronously`.
+`GoogleWebAuthorizationBroker.AuthorizeAsync` is an async method, and so is `runRealConsentFlow`
+(a `task { }`), so every failure arrives as a **faulted `Task`** — and `Async.AwaitTask` surfaces
+a faulted task as an `AggregateException`. None of the typed catches (`TokenResponseException`,
+`JsonException`, `FormatException`, `HttpListenerException`) matches that, so each fell to the
+logged catch-all, and the mapper's catch-all then showed the `AggregateException`'s own sentence.
+
+The unit tests passed over this because every fake consent flow **raised synchronously**, before a
+`Task` existed — a shape the real flow never produces. That also means round 2's fix (keeping the
+adapter's loopback-port sentence) was correct in the mapper but could not reach a user: round 2's
+own measurement drove `authoriseWith` with a synchronous throw.
+
+Measured before → after, the string the `MudAlert` renders (`toAuthorisationError >>
+toMyDogsbodyException`) and the log count:
+
+| Failure | Before | After |
+| --- | --- | --- |
+| Malformed secret, **real** `runRealConsentFlow` | `One or more errors occurred. (Unexpected character encountered while parsing value: n. ...)`, logged 1 | `The stored Google client secret is malformed.`, logged 0 |
+| Consent denied (the library's own installed-app flow) | `One or more errors occurred. (Error:"access_denied", Description:"", Uri:"")`, logged 1 | `The consent flow was cancelled or denied.`, logged 0 |
+| Loopback port in use | `One or more errors occurred. (Failed to listen on prefix)`, logged 1 | `The loopback port is already in use.`, logged 1 |
+| Consent timed out | `The consent flow timed out.`, logged 1 | unchanged — a cancelled task surfaces as `OperationCanceledException` either way |
+
+Fixed by awaiting with `.GetAwaiter().GetResult()`, which rethrows the original exception, for both
+the consent flow and the email fetch. Two refinements the fix needed so that it did not trade one
+defect for another:
+
+- **The `TokenResponseException` catch is narrowed to `access_denied`.** Unwrapping alone would have
+  made a failed code *exchange* (`invalid_client` — a wrong or rotated `client_secret`, after the user
+  had consented) read `The consent flow was cancelled or denied.`, **unlogged**: telling a user who
+  just said yes that they said no, with nothing in the log. Measured against the library's flow with
+  the token endpoint stubbed to `401 invalid_client`: now `Authorisation failed.`, logged, inner
+  `TokenResponseException` carrying `invalid_client`.
+- **Malformed now means any failure to parse the secret, on this path as on `loadCredential`'s.**
+  Widening, noted: `GoogleClientSecrets.FromStream(...).Secrets` raises `InvalidOperationException`
+  for well-formed JSON that is not an OAuth client secret (`{ "hello": "world" }`, or a pasted
+  service-account key) and `NullReferenceException` for an empty paste — `SetClientSecret` validates
+  nothing, so both are storable. `runRealConsentFlow` turns any parse failure into the
+  `FormatException` `authoriseWith` already names as malformed.
+
+Tests, written red first (12 failing before the fix, each for the predicted reason): the five
+typed-failure tests now fake the consent flow as a faulted `Task` (a cancelled one for the timeout),
+which is what the real flow returns; a four-input theory drives the **real** `runRealConsentFlow`
+with malformed secrets (safe — the parse fails before any browser or listener exists); and a test
+for the `invalid_client` exchange failure.
+
+### 2. A registration that failed *inside* `authorise`, after consent, still stranded its token
+
+Round 3 grouped the workflow's post-consent tail so every exit hands the token back. But the first
+post-consent step is not in the workflow at all: `authoriseWith` reads the account's email after
+the consent flow has already persisted the token. An `Error` from there carries no id, so
+`DiscardAuthorisation` cannot be pointed at it, and no account row will ever carry the minted id,
+so removal cannot reach it either — the same stranded refresh token rounds 1 and 3 fixed elsewhere,
+and a contradiction of design decision 5's "any exit".
+
+Measured with the library's own installed-app flow persisting a real token through
+`GoogleCredentialDataStore` over a temp `Google.db`:
+
+| Failure after consent | Before | After |
+| --- | --- | --- |
+| userinfo returns no email (`AccountEmailUnavailable`) | `credentials=1` | `credentials=0` |
+| userinfo call fails (`503`) | `credentials=1` | `credentials=0` |
+| success (control) | `credentials=1` | `credentials=1` |
+
+Fixed by `GoogleAuthorization.authoriseNewAccountWith`: `authoriseWith`, then `removeStoredToken`
+for the freshly minted id on any `Error`. That id is minted for the one attempt and never handed out
+on failure, so nothing else can refer to a token under it; a failure before consent wrote anything
+finds nothing to delete and logs nothing. `authorise` now binds it. `reauthorise` deliberately does
+not — its id belongs to a registered account, and whether a failed re-authorisation should delete
+that account's token belongs with the `NeedsReauthorisation` change. `AuthoriseAccount`'s doc
+comment now states the contract.
+
+Locked in by four integration tests over a real temp `Google.db`, written red first: both
+post-consent failures leave no token; success keeps it; and a failure before consent is reported
+exactly as before (`cancelled or denied`, unlogged).
+
+**One residual, stated rather than fixed:** `GoogleAccountApiFactory`'s `authoriseAccount` re-validates
+the email the adapter accepted with `GoogleEmail.create`, and a non-blank email without `@` would
+still return `AccountEmailUnavailable` without discarding. Google's userinfo endpoint does not return
+such an address, and that function binds the real browser flow, so there is no seam to put a red
+test through — left, rather than added untested.
+
+### Considered and deliberately not changed
+
+Rounds 1–3's deferrals stand, for the reasons they give: `NeedsReauthorisation` is never raised;
+`reauthorise` reports `authorise`'s `ActionName`; a `loadCalendarsFor` success clears another
+account's error; the `let mutable editedSecret`. This round measured two further facts that the
+`NeedsReauthorisation` change will need, recorded here rather than acted on, since neither path is
+reachable until that change exists:
+
+- **Re-authorising never reaches the consent screen while a refresh token is stored.** The library's
+  installed-app flow reuses any stored token that has a refresh token — revoked or not — so
+  `reauthorise` hands `fetchRealAccountEmail` the stale access token instead of a fresh consent.
+- **A revoked refresh token reads as `CalendarUnreachable`, not `NotAuthorised`,** on the first
+  calendar fetch: the refresh fails with a `TokenResponseException` (`invalid_grant`) that
+  `GoogleCalendarClient`'s catch-all maps to "Could not reach Google Calendar.", logged. The library
+  also deletes the stored token when that happens, so the *next* fetch reads `NotAuthorised`.
+
+### Round 4 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, none in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` | 1476 → **1485** (+9), 0 skipped. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **792** (carrying the one pre-existing
+failure, which is tagged `Unit`), Integration **316**, Contract **342**, E2E
+**35** — 1485 in total.
+
+**One full-suite run in this round stalled, and it is not explained.** Its testhost sat at about 25 s of CPU for four and a half minutes (the whole suite normally takes 7-9 s) and was killed before a dump was taken, so the stalled test is not named. Four further full runs under `--blame-hang --blame-hang-timeout 60s` all completed in 10-11 s with no hang and no dump. This round's change does block on `.GetAwaiter().GetResult()`, but every fake it adds returns an already-completed `Task`, and production calls run on the thread pool via `Async.Start`, so reading finds no deadlock path. Recorded as an unreproduced stall rather than attributed to a known flake: if it recurs, take the dump before killing it.

@@ -41,8 +41,18 @@ let private consentTimeout = TimeSpan.FromMinutes 5.0
 /// token through whichever `IDataStore` it is given - `GoogleCredentialDataStore` in production.
 let runRealConsentFlow (clientSecretJson: string) (accountId: string) (dataStore: IDataStore) : Task<UserCredential> =
     task {
-        use stream = new MemoryStream(Encoding.UTF8.GetBytes clientSecretJson)
-        let secrets = GoogleClientSecrets.FromStream(stream).Secrets
+        // Whatever the parse trips on - text that is not JSON, JSON that is not an OAuth client
+        // secret (a pasted service-account key: InvalidOperationException), an empty paste
+        // (NullReferenceException) - it means one thing: what is stored is not a usable client
+        // secret. FormatException is the shape `authoriseWith` names as malformed, so each of those
+        // is reported as that, the same rule `loadCredential` applies to the very same parse.
+        let secrets =
+            try
+                use stream = new MemoryStream(Encoding.UTF8.GetBytes clientSecretJson)
+                GoogleClientSecrets.FromStream(stream).Secrets
+            with ex ->
+                raise (FormatException("The client secret is not a Google OAuth client secret.", ex))
+
         use cts = new CancellationTokenSource(consentTimeout)
         return! GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes, accountId, cts.Token, dataStore)
     }
@@ -98,14 +108,22 @@ let authoriseWith
             // rather than letting them raise - so cancelling consent, a malformed secret, or a
             // missing email pass through the outer handleError block unlogged, the same idiom
             // PdfDocumentReader.readContent uses for a missing file.
+            //
+            // Both are awaited with `.GetAwaiter().GetResult()`, never `Async.AwaitTask |>
+            // Async.RunSynchronously`. The consent flow is an async method, so its failures arrive
+            // as a faulted Task, and AwaitTask surfaces that as an AggregateException - which no
+            // catch here or below matches, so every named failure used to reach the user as
+            // "One or more errors occurred. (...)", logged. GetResult rethrows the original.
             let! credential =
                 try
-                    runConsentFlow clientSecretJson accountId dataStore
-                    |> Async.AwaitTask
-                    |> Async.RunSynchronously
-                    |> Ok
+                    (runConsentFlow clientSecretJson accountId dataStore).GetAwaiter().GetResult() |> Ok
                 with
-                | :? TokenResponseException as ex ->
+                // "access_denied" is the OAuth error code for a user who pressed Cancel or said no.
+                // A TokenResponseException carrying any other code (a failed code exchange -
+                // "invalid_client" for a wrong or rotated client_secret) happened AFTER the user
+                // consented, so it is not their choice to report back to them; it falls to the
+                // logged catch-all below, which keeps Google's code in the inner exception.
+                | :? TokenResponseException as ex when not (isNull ex.Error) && ex.Error.Error = "access_denied" ->
                     Error(MyDogsbodyException(action, "The consent flow was cancelled or denied.", ex))
                 | :? Newtonsoft.Json.JsonException as ex ->
                     Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
@@ -113,9 +131,7 @@ let authoriseWith
                     Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
 
             let! email =
-                fetchAccountEmail credential
-                |> Async.AwaitTask
-                |> Async.RunSynchronously
+                (fetchAccountEmail credential).GetAwaiter().GetResult()
                 |> fun value ->
                     if String.IsNullOrWhiteSpace value then
                         Error(
@@ -138,8 +154,70 @@ let authoriseWith
             return! MyDogsbodyException(action, "Authorisation failed.", ex)
     }
 
+/// Deletes the stored token for an account being removed (requirements.md: "deletes its local
+/// token and its record"), and discards the token a refused registration left behind - both the
+/// refusals `RegisterGoogleAccountWorkflow` makes (its `DiscardAuthorisation` dependency) and the
+/// failures `authoriseNewAccountWith` meets after consent, before the workflow ever sees an id.
+///
+/// Outer-ring shape, like every other function here. It used to return `unit` on the reasoning
+/// that a leftover token row is inert - but `GoogleCredentialDataStore` is exception-based by
+/// construction (`IDataStore` is not `Result`-based), so an unreachable store *raised* straight
+/// out of `GoogleAccountApi.RemoveAccount`, past its declared `Result<unit, MyDogsbodyException>`
+/// and past the UI's error branch. A failure here is now a value like every other, and its
+/// caller decides what it is worth; nothing escapes as control flow.
+let removeStoredToken
+    (handleError: HandleErrorBuilder)
+    (getCredentialCollection: unit -> GoogleCredentialsCollection)
+    (accountId: string)
+    : Result<unit, MyDogsbodyException> =
+    let action = ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.removeStoredToken
+
+    handleError {
+        try
+            let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
+            dataStore.DeleteAsync<TokenResponse>(accountId) |> Async.AwaitTask |> Async.RunSynchronously
+            return ()
+        with ex ->
+            return! MyDogsbodyException(action, "Failed to delete the stored Google credential.", ex)
+    }
+
+/// `authoriseWith` for an account that does not exist yet, under an id minted for it - plus the
+/// one clean-up only this adapter can do.
+///
+/// Consent persists a token under `accountId` before the email is read, so a failure from that
+/// point on (the email unreadable, the userinfo call failing) leaves a token behind. An `Error`
+/// never carries the id, so `RegisterGoogleAccountWorkflow`'s `DiscardAuthorisation` - which
+/// covers every step *after* this one - cannot reach it, and neither can removing an account,
+/// because no account row will ever carry this id. The id was minted for this one attempt and is
+/// never handed out on failure, so nothing else can refer to a token under it: handing it back is
+/// always safe. A failure before consent wrote anything finds nothing to delete, and that logs
+/// nothing.
+///
+/// The removal's own result is discarded for the reason the workflow discards its discard: a
+/// failed clean-up must not replace the answer the user needs, and its `handleError` has already
+/// recorded it.
+///
+/// `reauthorise` deliberately does not go through this: its id belongs to a registered account,
+/// and whether a failed re-authorisation should delete that account's token is a decision for the
+/// change that makes re-authorisation reachable (nothing sets `NeedsReauthorisation` yet).
+let authoriseNewAccountWith
+    (handleError: HandleErrorBuilder)
+    (getCredentialCollection: unit -> GoogleCredentialsCollection)
+    (runConsentFlow: string -> string -> IDataStore -> Task<UserCredential>)
+    (fetchAccountEmail: UserCredential -> Task<string>)
+    (clientSecretJson: string)
+    (accountId: string)
+    ()
+    : Result<string * string, MyDogsbodyException> =
+    match authoriseWith handleError getCredentialCollection runConsentFlow fetchAccountEmail clientSecretJson accountId () with
+    | Ok authorised -> Ok authorised
+    | Error ex ->
+        removeStoredToken handleError getCredentialCollection accountId |> ignore
+        Error ex
+
 /// The composition root's entry point for registering a new account - the real consent flow and
-/// the real email fetch, bound, with a freshly minted account id.
+/// the real email fetch, bound, with a freshly minted account id whose token is handed back if
+/// the authorisation fails after consent (`authoriseNewAccountWith`).
 let authorise
     (handleError: HandleErrorBuilder)
     (getCredentialCollection: unit -> GoogleCredentialsCollection)
@@ -148,7 +226,7 @@ let authorise
     : Result<string * string, MyDogsbodyException> =
     let accountId = string (ObjectId.NewObjectId())
 
-    authoriseWith
+    authoriseNewAccountWith
         handleError
         getCredentialCollection
         runRealConsentFlow
@@ -234,30 +312,4 @@ let loadCredential
             return UserCredential(flow, accountId, storedToken)
         with ex ->
             return! MyDogsbodyException(action, "Authorisation failed.", ex)
-    }
-
-/// Deletes the stored token for an account being removed (requirements.md: "deletes its local
-/// token and its record"), and discards the token a refused registration left behind
-/// (`RegisterGoogleAccountWorkflow`'s `DiscardAuthorisation` dependency).
-///
-/// Outer-ring shape, like every other function here. It used to return `unit` on the reasoning
-/// that a leftover token row is inert - but `GoogleCredentialDataStore` is exception-based by
-/// construction (`IDataStore` is not `Result`-based), so an unreachable store *raised* straight
-/// out of `GoogleAccountApi.RemoveAccount`, past its declared `Result<unit, MyDogsbodyException>`
-/// and past the UI's error branch. A failure here is now a value like every other, and its
-/// caller decides what it is worth; nothing escapes as control flow.
-let removeStoredToken
-    (handleError: HandleErrorBuilder)
-    (getCredentialCollection: unit -> GoogleCredentialsCollection)
-    (accountId: string)
-    : Result<unit, MyDogsbodyException> =
-    let action = ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.removeStoredToken
-
-    handleError {
-        try
-            let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
-            dataStore.DeleteAsync<TokenResponse>(accountId) |> Async.AwaitTask |> Async.RunSynchronously
-            return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to delete the stored Google credential.", ex)
     }

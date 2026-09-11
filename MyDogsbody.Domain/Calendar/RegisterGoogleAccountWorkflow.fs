@@ -27,6 +27,10 @@ open MyDogsbody.Domain.Calendar
 /// reading the existing accounts and saving the new one can both fail too, and each strands the
 /// same token for the same reason. So the discard covers the whole post-consent tail rather than
 /// one branch of it - anything that leaves without an account row hands the token back.
+///
+/// The one post-consent step this workflow cannot see is inside `authoriseAccount` itself:
+/// reading the account's email once consent has already written the token. An `Error` from it
+/// carries no id to discard, so that step is the adapter's to clean up - see `AuthoriseAccount`.
 let registerGoogleAccount
     (loadClientSecret: LoadClientSecret)
     (listGoogleAccounts: ListGoogleAccounts)

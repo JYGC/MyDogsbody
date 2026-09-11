@@ -311,7 +311,10 @@ cannot supply.
    after consent is grouped, and **any** exit from that group without an account row hands the token
    consent wrote to `DiscardAuthorisation` rather than leaving it in the store. The duplicate is the
    most likely of those exits, not the only one: an unreadable account list and a refused save
-   strand the same token the same way.
+   strand the same token the same way. The one post-consent step the workflow cannot group is
+   inside `AuthoriseAccount` itself — reading the email after consent has written the token. Its
+   `Error` carries no id to discard, so the adapter hands that token back itself
+   (`GoogleAuthorization.authoriseNewAccountWith`, PR review round 4).
 6. **`SetDefaultInvoiceCalendarWorkflow` verifies the calendar exists before storing it.** Otherwise
    change #7 discovers a dead calendar id halfway through a sync batch, which is the worst possible
    moment.
