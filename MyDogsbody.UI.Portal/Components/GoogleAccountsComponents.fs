@@ -8,13 +8,41 @@ open MyDogsbody.UI.Types.Module
 /// What to say under an account's calendar picker when there is nothing in it to pick
 /// (requirements.md: "WHEN an account has no calendars at all THE SYSTEM SHALL show an empty picker
 /// with a message, not an error"). Only an account whose calendars have *loaded* and come back empty
-/// earns it: `CalendarsByAccountIdAval` has no entry for an account still loading, or whose fetch
-/// failed - and a failure is already the page's `MudAlert`, so claiming "no calendars" there would
-/// state something nobody has checked.
+/// earns it: `CalendarsByAccountIdAval` has no entry for an account whose calendars have not loaded
+/// yet, or whose only fetch so far failed - and a failure is already the page's `MudAlert`, so
+/// claiming "no calendars" there would state something nobody has checked. A reload keeps the last
+/// list that did load until a new one replaces it (the picker's options too), so a re-fetch that
+/// fails leaves the last answer showing beside the alert rather than blanking it.
 let noCalendarsMessage (calendarsByAccountId: Map<string, CalendarUiType list>) (accountId: string) : string option =
     match Map.tryFind accountId calendarsByAccountId with
     | Some [] -> Some "No calendars were found for this account."
     | _ -> None
+
+/// The remove confirmation's sentence (requirements.md: "SHALL say that access is still granted at
+/// Google and can be revoked there - so the user is not left believing more happened than did",
+/// Q3.6). Names the account by its email, the way the table tells accounts apart.
+let removeConfirmationMessage (account: GoogleAccountUiType) : string =
+    $"Remove '{account.EmailAddress}'? Its local token and record are deleted, but access remains granted at Google - you can revoke it there."
+
+/// Asks before removing (requirements.md: "ask for confirmation, stating that access remains granted
+/// at Google"), and removes only on a yes. The removal arrives as a callback - the page passes the
+/// module's `RemoveAccount` - so this reaches no API itself, and an E2E test drives the same dialog
+/// production shows.
+let confirmAndRemove (dialogService: IDialogService) (removeAccount: string -> unit) (account: GoogleAccountUiType) : unit =
+    task {
+        let! confirmed =
+            dialogService.ShowMessageBox(
+                title = "Remove Google account",
+                message = removeConfirmationMessage account,
+                yesText = "Remove",
+                cancelText = "Cancel"
+            )
+
+        if confirmed.HasValue && confirmed.Value then
+            removeAccount account.Id
+    }
+    :> System.Threading.Tasks.Task
+    |> ignore
 
 let googleAccountsBrowser
     (m: GoogleAccountsBrowserModule)

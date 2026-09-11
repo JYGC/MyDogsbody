@@ -1158,3 +1158,129 @@ run to report.
 Per level, each measured with `--filter "Level=..."`: Unit **802** (+4, carrying the one
 pre-existing failure, which is tagged `Unit`), Integration **324**, Contract **349** (+1), E2E **37**
 (two existing flows gained assertions). 1512 in total.
+
+---
+
+## PR review, round 9 — three defects found in the diff, all fixed
+
+A ninth cold read of the whole PR diff, rounds 1–8 included. PR #21 still carries **no review
+comments** (0 review comments; 8 issue comments, which are rounds 1–8's own summaries), so every
+finding comes from reading the diff. Round 8's picker message was checked first. All three findings
+are the same kind: a UI requirement that no test would notice breaking.
+
+### Round 8's `noCalendarsMessage`, re-checked
+
+- **Correct in every state the page reaches.** Loading, before any list has arrived: no entry,
+  nothing said. Loaded empty: the message. Loaded with calendars: nothing. A first fetch that
+  failed: no entry, and the alert says why. Removal: the entry goes with the account. Another
+  account's list: keyed by that account's own id. An account flagged `NeedsReauthorisation` never
+  renders the picker at all.
+- **One claim in its doc comment was wrong.** A *re-fetch* that fails does not drop the entry. A
+  reload keeps the last list that loaded until a new one replaces it, as a non-empty picker's
+  options do too. So an account that last loaded empty keeps its message beside the new alert. That
+  is the last answer Google gave, not an unchecked claim, and blanking it would also blank every
+  non-empty picker on a transient failure. Comment corrected; behaviour unchanged.
+- **Its test file is sound.** It is tagged `Unit` and compiled above `Program.fs`. It sits in
+  `UI/Components/` beside `MailAccountsComponentsTests`, mirroring the source layout. The component
+  reaches no API: it reads the module's avals and calls the module's commands.
+
+### The build's two test-file warnings are `main`'s, not this PR's
+
+`git diff origin/main...HEAD` touches neither `Integrations/Documents/PdfDocumentReaderTests.fs` nor
+`Database/ScanWindowStoreTests.fs`, nor what their warning lines call (`PdfDocumentBuilder`,
+`ScanWindowStore.deleteScanWindow`). Measured as well as inferred: an export of `origin/main`
+(`git archive`, built in a scratch directory outside the repository) reports the same FS0760
+(`PdfDocumentReaderTests.fs(27,19)`) and FS0020 (`ScanWindowStoreTests.fs(76,9)`). Left alone, as
+someone else's. `CLAUDE-project.md` now says they were verified on `main`.
+
+### 1. The E2E failure flow could not fail on the alert it is named for
+
+`a failure is shown as an alert, cleared by the next success` asserted that the page contained "No
+Google client secret has been supplied yet" after `RegisterAccount`, and did not once a secret was
+saved. But the information panel shown whenever no secret is stored says that sentence, in the
+refusal's exact words, before anything has been pressed, and it goes when a secret is saved. So the
+test passed whether or not the error `MudAlert` ever rendered, and the "failure showing an alert"
+flow that requirements.md's *Testing* section asks of the E2E level was not proven. Its precondition,
+"WHEN no client secret has been supplied THE SYSTEM SHALL say so and disable account registration",
+had no test of the *disabled* half at any level.
+
+Measured before changing anything: with the error alert suppressed (the component reading
+`ErrorAval` as always `None`) and `secret.IsNone` dropped from the button's `Disabled`, the old test
+still passed.
+
+Fixed in the test. It now asserts on the error-severity alert element (`.mud-alert-filled-error`):
+none before, exactly one carrying the sentence after the refusal, none after the next success. It
+also asserts that "Add account" is disabled without a secret and enabled once one is saved. Under the
+same mutations it fails: on the disabled assertion (`Assert.True() Failure`), and, with the button
+left alone, on the alert (`Assert.Single() Failure: The collection was empty`).
+
+### 2. The remove confirmation's wording was asserted nowhere
+
+requirements.md: "WHEN a user removes an account THE SYSTEM SHALL say that access is still granted at
+Google and can be revoked there", and "SHALL ask for confirmation, stating that access remains granted
+at Google" (Q3.6). design.md's E2E list: "remove → the row goes and the confirmation states access
+remains granted at Google". The sentence lived in a private function in `GoogleAccountsPage`. The E2E
+flow skipped the dialog, with a comment deferring the wording to "a component test" that did not
+exist. Nothing would have noticed the sentence dropped, or a removal that no longer asked first.
+
+Fixed. `GoogleAccountsComponents.removeConfirmationMessage` (pure) carries the sentence.
+`GoogleAccountsComponents.confirmAndRemove dialogService removeAccount account` is the message box,
+moved from the page with its behaviour unchanged. It takes the removal as a callback, so it reaches no
+API; the page passes `googleAccountsBrowserModule.RemoveAccount`. Tests, red first:
+
+- `removeConfirmationMessage names the account and says access remains granted at Google` and
+  `removeConfirmationMessage names the account by its email, not its opaque id` (both Unit). Both
+  failed against a stub returning `""` (`Strings differ … Actual: ""`; `Sub-string not found`), then
+  passed.
+- E2E `removing an account asks first, saying access remains granted at Google, and removes on a
+  yes`. It uses the row's own "Remove" button and the real message box inside a `MudDialogProvider`.
+  It asserts the sentence on the dialog, the store still holding the account while the dialog is
+  open, and the row and the stored account gone after "Remove".
+- E2E `cancelling the remove confirmation keeps the account`. With the confirmation mutated to remove
+  whatever the answer, it fails (`Sub-string not found`).
+
+### 3. "Show that it is in progress" was never observed
+
+requirements.md: "WHEN a user presses "Add account" THE SYSTEM SHALL start the consent flow and show
+that it is in progress", and "WHEN authorisation is running THE SYSTEM SHALL NOT block the user
+interface". Every test ran its work on the calling thread, so `IsRegisteringAval` was only ever read
+after the consent flow had finished, and only ever asserted `false`. With the
+`isRegisteringCval.Value <- true` line removed from `registerAccount`, every existing Google UI test
+(component, module creator, E2E) stayed green.
+
+Test-only: the behaviour was already right. Work is queued, the way `Async.Start` leaves it:
+
+- `RegisterAccount shows it is in progress while the consent flow runs, without blocking the caller`
+  (Unit). `RegisterAccount` returns with the API not yet called and `IsRegisteringAval = true`. Once
+  the queue drains, the API has been called once, the flag is `false` and the account is listed.
+- E2E `adding an account shows it is in progress until the consent flow finishes`. While the flow is
+  queued, the button reads "Adding account..." and is disabled. Once it runs, the row appears and the
+  button reads "Add account" again.
+
+Both fail with the line removed (`Assert.True() Failure`; `Assert.Single() Failure: The collection
+was empty`), and pass with it.
+
+### Considered and deliberately not changed
+
+- **A default calendar deleted at Google after it was chosen still reads "Ready".** requirements.md's
+  "WHEN a chosen default calendar no longer exists at Google THE SYSTEM SHALL report that specifically
+  rather than failing at the next use" is met the way design decision 6 agreed:
+  `SetDefaultInvoiceCalendarWorkflow` checks the calendar exists before storing it
+  (`CalendarNoLongerExists`). A calendar deleted after it was stored is next met by change #7's sync,
+  which is where "the next use" is. Flagging it on this page (the loaded list lacks the stored id)
+  would be a new readiness rule, a design decision rather than a review fix. Recorded here for change
+  #7.
+- **A failed re-fetch keeps the last list** — see *Round 8's `noCalendarsMessage`, re-checked* above.
+- Rounds 1–8's deferrals stand, for the reasons they give.
+
+### Round 9 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, all present on `main` (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 2m`) | 1512 → **1518** (+6), 0 skipped, 9 s. No hang, no dump. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **805** (+3, carrying the
+one pre-existing failure, which is tagged `Unit`), Integration **324**, Contract **349**,
+E2E **40** (+3; the failure flow also gained assertions). 1518 in total.

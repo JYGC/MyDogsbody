@@ -270,6 +270,57 @@ let ``RegisterAccount reloads the accounts table on success and clears the regis
     Assert.Equal(None, AVal.force browser.ErrorAval)
 
 [<Fact; Trait("Level", "Unit")>]
+let ``RegisterAccount shows it is in progress while the consent flow runs, without blocking the caller`` () =
+    // requirements.md: "WHEN a user presses "Add account" THE SYSTEM SHALL start the consent flow and
+    // show that it is in progress", and "WHEN authorisation is running THE SYSTEM SHALL NOT block the
+    // user interface". Every other RegisterAccount test runs its work on the calling thread, so the
+    // flag is only ever read after the flow has finished - which passes whether or not it was ever
+    // raised. Here the work is queued, the way Async.Start leaves it, and the flag is read while the
+    // consent flow has still to run.
+    let queued = Collections.Generic.Queue<unit -> unit>()
+
+    let rec drain () =
+        match queued.TryDequeue() with
+        | true, work ->
+            work ()
+            drain ()
+        | _ -> ()
+
+    let consentCalls = ref 0
+
+    let googleAccountApi =
+        api
+            (fun () -> Ok(Some "secret"))
+            (fun _ -> Ok())
+            (fun () -> Ok(if consentCalls.Value > 0 then [ anAccount "1" None false ] else []))
+            (fun () ->
+                consentCalls.Value <- consentCalls.Value + 1
+                Ok(anAccount "1" None false))
+            (fun _ -> failwith "unused")
+            (fun _ -> Ok())
+            (fun _ -> Ok [])
+            (fun _ _ -> failwith "unused")
+
+    let browser =
+        GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule (fun work -> queued.Enqueue work) googleAccountApi
+
+    drain ()
+    Assert.False(AVal.force browser.IsRegisteringAval)
+
+    browser.RegisterAccount()
+
+    // RegisterAccount has returned to its caller, the consent flow has not run yet, and the page
+    // already says it is in progress.
+    Assert.Equal(0, consentCalls.Value)
+    Assert.True(AVal.force browser.IsRegisteringAval)
+
+    drain ()
+
+    Assert.Equal(1, consentCalls.Value)
+    Assert.False(AVal.force browser.IsRegisteringAval)
+    Assert.Single(AVal.force browser.AccountsAval) |> ignore
+
+[<Fact; Trait("Level", "Unit")>]
 let ``a failed RegisterAccount surfaces the message and clears the registering flag`` () =
     let googleAccountApi =
         api

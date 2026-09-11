@@ -210,6 +210,9 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       and a success clears it; a ready account's calendars load automatically (populating its
       picker) while an account needing re-authorisation never has its calendars fetched;
       **no `Async.Start` in the file**. 15 tests.
+      *Since PR review round 9:* `RegisterAccount shows it is in progress while the consent flow
+      runs, without blocking the caller` reads `IsRegisteringAval` with the work still queued, the
+      way `Async.Start` leaves it. Every other test only read the flag after the flow had finished.
 - [x] **6.3** `Components/GoogleAccountsComponents.fs` — the accounts table, the client-secret entry,
       and the per-account calendar picker populated from **that account's own** calendars.
       *Since PR review round 8:* an account whose calendars loaded and came back empty shows the
@@ -223,6 +226,10 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
 - [x] **6.5** Remove-account confirmation via `dialogService.ShowMessageBox` (the same pattern
       `InvoicesPage.confirmAndDelete` uses), **stating that access remains granted at Google and can
       be revoked there** — so the user is not left believing more happened than did (Q3.6).
+      *Since PR review round 9:* the sentence is `GoogleAccountsComponents.removeConfirmationMessage`
+      and the message box is `GoogleAccountsComponents.confirmAndRemove`, moved from the page, which
+      passes the module's `RemoveAccount`. 2 unit tests, and two E2E flows drive the real dialog:
+      "Remove" removes, "Cancel" keeps.
 - [x] **6.6** Re-authorise action (button shown only when `NeedsReauthorisation`) for an account whose
       token has expired or been revoked, **keeping its chosen default calendar** — proven by
       `ReauthoriseGoogleAccountWorkflow`'s and the module creator's own tests.
@@ -278,6 +285,11 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       system browser and the real calendar client needs the network. `MudSelect` (the calendar
       picker) renders through a popover, so the view is rendered inside a `MudPopoverProvider`, the
       same fix `InvoicesFlowTests` already needed for its own `MudSelect`.
+      *Since PR review round 9:* the failure flow asserts on the error alert element and on the
+      disabled "Add account" button. The information panel repeats the refusal's sentence, so the
+      page's text could not tell whether the alert rendered. The view also renders inside a
+      `MudDialogProvider` for the two remove-confirmation flows, and a queued-work flow shows
+      "Adding account..." while consent runs.
 - [x] **9.2** Confirmed: no test opens a browser, requires network, or reaches `Startup.Startup`.
 
 ## Phase 10 — Gate (required)

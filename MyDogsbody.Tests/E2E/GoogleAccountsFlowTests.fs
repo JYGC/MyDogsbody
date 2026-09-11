@@ -4,6 +4,7 @@ open Xunit
 open Bunit
 open Fun.Blazor
 open MudBlazor
+open Microsoft.Extensions.DependencyInjection
 open MyDogsbody.Domain.Calendar
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UI.Portal.ModuleCreators
@@ -23,24 +24,27 @@ let private valueOrFail (result: Result<'T, string>) =
 let private aCalendar id name isPrimary : AvailableCalendar =
     { Id = CalendarId.create id |> valueOrFail; Name = CalendarName.create name |> valueOrFail; IsPrimary = isPrimary }
 
-/// Renders the Google accounts browser over the harness's real API, with the confirmation dialog
-/// skipped - `removeWithoutConfirming` calls `RemoveAccount` directly, since bUnit has no system
-/// dialog to click through and the confirmation wording itself belongs to a component test, not
-/// this flow.
+/// Renders the Google accounts browser over the harness's real API, inside the two providers its
+/// MudBlazor parts render through: a MudPopoverProvider for the calendar picker (a MudSelect, the
+/// same way InvoicesFlowTests renders its window picker) and a MudDialogProvider for the remove
+/// confirmation (a message box renders no markup without one, as SuppliersFlowTests found for its
+/// editor dialog).
 ///
-/// The calendar picker is a MudSelect, which renders through a popover - so the view is rendered
-/// inside a MudPopoverProvider, the same way InvoicesFlowTests renders its window picker.
-let private renderBrowser (harness: GoogleAccountsHarness) =
-    let browserModule = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule (fun work -> work ()) harness.Api
+/// A flow chooses how work runs (`startWork`) and what a row's "Remove" button does (`onRemove`,
+/// handed the module).
+let private renderBrowserWith
+    (startWork: (unit -> unit) -> unit)
+    (onRemove: MyDogsbody.UI.Types.Module.GoogleAccountsBrowserModule -> MyDogsbody.UI.Types.GoogleAccountUiType -> unit)
+    (harness: GoogleAccountsHarness)
+    =
+    let browserModule = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule startWork harness.Api
 
-    let removeWithoutConfirming (account: MyDogsbody.UI.Types.GoogleAccountUiType) =
-        browserModule.RemoveAccount account.Id
-
-    let view = GoogleAccountsComponents.googleAccountsBrowser browserModule removeWithoutConfirming
+    let view = GoogleAccountsComponents.googleAccountsBrowser browserModule (onRemove browserModule)
 
     let wrapped =
         fragment {
             MudPopoverProvider''
+            MudDialogProvider''
             view
         }
 
@@ -51,6 +55,46 @@ let private renderBrowser (harness: GoogleAccountsHarness) =
             builder.CloseComponent())
 
     browserModule, rendered
+
+/// Skips the confirmation and removes straight away - for the flows about what removal does rather
+/// than what the user is asked first.
+let private removeWithoutConfirming
+    (browserModule: MyDogsbody.UI.Types.Module.GoogleAccountsBrowserModule)
+    (account: MyDogsbody.UI.Types.GoogleAccountUiType)
+    =
+    browserModule.RemoveAccount account.Id
+
+/// Production's confirmation, shown through the harness's own dialog service.
+let private confirmFirst
+    (harness: GoogleAccountsHarness)
+    (browserModule: MyDogsbody.UI.Types.Module.GoogleAccountsBrowserModule)
+    (account: MyDogsbody.UI.Types.GoogleAccountUiType)
+    =
+    GoogleAccountsComponents.confirmAndRemove
+        (harness.Services.GetRequiredService<IDialogService>())
+        browserModule.RemoveAccount
+        account
+
+/// Work on the calling thread and removal without the dialog - what most flows need.
+let private renderBrowser (harness: GoogleAccountsHarness) =
+    renderBrowserWith (fun work -> work ()) removeWithoutConfirming harness
+
+/// The one button, among those `selector` matches, whose label is exactly `label`.
+let private buttonLabelled (selector: string) (label: string) (rendered: IRenderedFragment) =
+    Assert.Single(rendered.FindAll(selector) |> Seq.filter (fun button -> button.TextContent.Trim() = label))
+
+/// The page's error alerts - a filled, error-severity MudAlert. Asserted on as elements, not through
+/// the page's text: the information panel shown whenever no client secret is stored says "No Google
+/// client secret has been supplied yet." in the very words the refusal uses, so the text alone
+/// cannot tell whether the error alert rendered.
+let private errorAlerts (rendered: IRenderedFragment) =
+    rendered.FindAll(".mud-alert-filled-error") |> List.ofSeq
+
+/// What the store actually holds, read through the API rather than the rendered table.
+let private storedAccountCount (harness: GoogleAccountsHarness) =
+    match harness.Api.GetAccounts() with
+    | Ok accounts -> List.length accounts
+    | Error ex -> failwith ex.Message
 
 [<Fact; Trait("Level", "E2E")>]
 let ``registering an account shows it marked not ready, with no default calendar chosen`` () =
@@ -136,6 +180,110 @@ let ``removing an account makes its row disappear`` () =
         Assert.Empty harness.Logged)
 
 [<Fact; Trait("Level", "E2E")>]
+let ``removing an account asks first, saying access remains granted at Google, and removes on a yes`` () =
+    // requirements.md: "WHEN a user removes an account THE SYSTEM SHALL ask for confirmation, stating
+    // that access remains granted at Google" - and "SHALL say that access is still granted at Google
+    // and can be revoked there" (Q3.6). Driven through the row's own button and the real message box.
+    let authoriseAccount: AuthoriseAccount =
+        fun () -> Ok(GoogleEmail.create "person@gmail.com" |> valueOrFail, GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail)
+
+    let listCalendars: ListCalendars = fun _ -> Ok [ aCalendar "cal-1" "Invoices" true ]
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        harness.Api.SetClientSecret "the-secret" |> ignore
+        let browserModule, rendered = renderBrowserWith (fun work -> work ()) (confirmFirst harness) harness
+
+        browserModule.RegisterAccount()
+        rendered.WaitForAssertion(fun () -> Assert.Contains("person@gmail.com", rendered.Markup))
+
+        (buttonLabelled "td button" "Remove" rendered).Click()
+
+        rendered.WaitForAssertion(fun () ->
+            let dialog = rendered.Find(".mud-dialog")
+            Assert.Contains("Remove 'person@gmail.com'?", dialog.TextContent)
+            Assert.Contains("access remains granted at Google - you can revoke it there.", dialog.TextContent))
+
+        // Asking removed nothing.
+        Assert.Equal(1, storedAccountCount harness)
+
+        (buttonLabelled ".mud-dialog button" "Remove" rendered).Click()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Empty(rendered.FindAll(".mud-dialog"))
+            Assert.DoesNotContain("person@gmail.com", rendered.Markup))
+
+        Assert.Equal(0, storedAccountCount harness)
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
+let ``cancelling the remove confirmation keeps the account`` () =
+    let authoriseAccount: AuthoriseAccount =
+        fun () -> Ok(GoogleEmail.create "person@gmail.com" |> valueOrFail, GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail)
+
+    let listCalendars: ListCalendars = fun _ -> Ok [ aCalendar "cal-1" "Invoices" true ]
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        harness.Api.SetClientSecret "the-secret" |> ignore
+        let browserModule, rendered = renderBrowserWith (fun work -> work ()) (confirmFirst harness) harness
+
+        browserModule.RegisterAccount()
+        rendered.WaitForAssertion(fun () -> Assert.Contains("person@gmail.com", rendered.Markup))
+
+        (buttonLabelled "td button" "Remove" rendered).Click()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("access remains granted at Google", rendered.Find(".mud-dialog").TextContent))
+
+        (buttonLabelled ".mud-dialog button" "Cancel" rendered).Click()
+
+        rendered.WaitForAssertion(fun () -> Assert.Empty(rendered.FindAll(".mud-dialog")))
+        Assert.Contains("person@gmail.com", rendered.Markup)
+        Assert.Equal(1, storedAccountCount harness)
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
+let ``adding an account shows it is in progress until the consent flow finishes`` () =
+    // requirements.md: "WHEN a user presses "Add account" THE SYSTEM SHALL start the consent flow and
+    // show that it is in progress", and "WHEN authorisation is running THE SYSTEM SHALL NOT block the
+    // user interface". Work is queued, the way the page's Async.Start leaves it, so the page can be
+    // read while the consent flow has still to run.
+    let queued = System.Collections.Generic.Queue<unit -> unit>()
+
+    let rec drain () =
+        match queued.TryDequeue() with
+        | true, work ->
+            work ()
+            drain ()
+        | _ -> ()
+
+    let authoriseAccount: AuthoriseAccount =
+        fun () -> Ok(GoogleEmail.create "person@gmail.com" |> valueOrFail, GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail)
+
+    let listCalendars: ListCalendars = fun _ -> Ok [ aCalendar "cal-1" "Invoices" true ]
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        harness.Api.SetClientSecret "the-secret" |> ignore
+        let browserModule, rendered = renderBrowserWith (fun work -> queued.Enqueue work) removeWithoutConfirming harness
+
+        drain ()
+        rendered.WaitForAssertion(fun () -> Assert.False((buttonLabelled "button" "Add account" rendered).HasAttribute "disabled"))
+
+        browserModule.RegisterAccount()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.True((buttonLabelled "button" "Adding account..." rendered).HasAttribute "disabled"))
+
+        Assert.DoesNotContain("person@gmail.com", rendered.Markup)
+
+        drain ()
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Contains("person@gmail.com", rendered.Markup)
+            Assert.False((buttonLabelled "button" "Add account" rendered).HasAttribute "disabled"))
+
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``a failure is shown as an alert, cleared by the next success`` () =
     let authoriseAccount: AuthoriseAccount = fun () -> failwith "must not be called - no client secret is set"
     let listCalendars: ListCalendars = fun _ -> Ok []
@@ -143,15 +291,24 @@ let ``a failure is shown as an alert, cleared by the next success`` () =
     withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
         let browserModule, rendered = renderBrowser harness
 
-        // No client secret has been supplied yet - the workflow itself refuses, so the fake
-        // authoriser above is never called.
+        // requirements.md: "WHEN no client secret has been supplied THE SYSTEM SHALL say so and
+        // disable account registration" - and nothing has failed yet.
+        rendered.WaitForAssertion(fun () -> Assert.True((buttonLabelled "button" "Add account" rendered).HasAttribute "disabled"))
+        Assert.Empty(errorAlerts rendered)
+
+        // The button cannot be pressed, but the refusal does not rest on it: the workflow itself
+        // refuses, so the fake authoriser above is never called.
         browserModule.RegisterAccount()
 
-        rendered.WaitForAssertion(fun () -> Assert.Contains("No Google client secret has been supplied yet", rendered.Markup))
+        rendered.WaitForAssertion(fun () ->
+            let alert = Assert.Single(errorAlerts rendered)
+            Assert.Contains("No Google client secret has been supplied yet.", alert.TextContent))
 
         browserModule.SetClientSecret "the-secret"
 
-        rendered.WaitForAssertion(fun () -> Assert.DoesNotContain("No Google client secret has been supplied yet", rendered.Markup))
+        rendered.WaitForAssertion(fun () ->
+            Assert.Empty(errorAlerts rendered)
+            Assert.False((buttonLabelled "button" "Add account" rendered).HasAttribute "disabled"))
 
         Assert.Empty harness.Logged)
 

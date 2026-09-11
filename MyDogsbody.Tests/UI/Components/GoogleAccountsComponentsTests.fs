@@ -46,3 +46,28 @@ let ``noCalendarsMessage reads only that account's own calendars`` () =
         Some "No calendars were found for this account.",
         GoogleAccountsComponents.noCalendarsMessage calendarsByAccountId "acc-empty"
     )
+
+// requirements.md -> Removing and re-authorising: "WHEN a user removes an account THE SYSTEM SHALL
+// say that access is still granted at Google and can be revoked there - so the user is not left
+// believing more happened than did" (Q3.6), and User interface: "ask for confirmation, stating that
+// access remains granted at Google".
+
+let private anAccount id email : GoogleAccountUiType =
+    { Id = id; EmailAddress = email; DefaultInvoiceCalendarId = None; NeedsReauthorisation = false }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``removeConfirmationMessage names the account and says access remains granted at Google`` () =
+    Assert.Equal(
+        "Remove 'person@gmail.com'? Its local token and record are deleted, but access remains granted at Google - you can revoke it there.",
+        GoogleAccountsComponents.removeConfirmationMessage (anAccount "acc-1" "person@gmail.com")
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``removeConfirmationMessage names the account by its email, not its opaque id`` () =
+    // Accounts are told apart on screen by email address (requirements.md), so the confirmation
+    // must say which one is going in the same terms.
+    let message =
+        GoogleAccountsComponents.removeConfirmationMessage (anAccount "507f1f77bcf86cd799439011" "other@gmail.com")
+
+    Assert.Contains("'other@gmail.com'", message)
+    Assert.DoesNotContain("507f1f77bcf86cd799439011", message)
