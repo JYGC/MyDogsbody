@@ -12,6 +12,7 @@ module MyDogsbody.Integrations.Google.GoogleCalendarClient
 open System
 open System.Net
 open Google.Apis.Auth.OAuth2
+open Google.Apis.Auth.OAuth2.Responses
 open Google.Apis.Calendar.v3
 open Google.Apis.Http
 open Google.Apis.Services
@@ -117,6 +118,21 @@ let listCalendarsVia
         | :? Google.GoogleApiException as ex when
             ex.HttpStatusCode = HttpStatusCode.Unauthorized || ex.HttpStatusCode = HttpStatusCode.Forbidden
             ->
+            return! MyDogsbodyException(action, "The stored Google credential is no longer authorised.", ex)
+        // Not an answer from the Calendar API at all: the credential tried to refresh its access
+        // token and Google's token endpoint refused the refresh token - "invalid_grant", "Token has
+        // been expired or revoked." That is requirements.md's "a stored token has expired or been
+        // revoked", and while a refresh token is stored it arrives this way rather than as a 401 from
+        // the call itself (the credential answers a 401 by refreshing). It is also the common case: a
+        // Testing-mode OAuth client's refresh tokens last seven days. Without this clause it fell
+        // to the catch-all below and read as "Could not reach Google Calendar." - a revoked grant
+        // reported as a network problem. Google.Apis.Auth has already deleted the stored token by
+        // the time this runs, so re-authorising is the only remedy left, and the one reported.
+        //
+        // Only invalid_grant: the token endpoint's other refusals (invalid_client,
+        // unauthorized_client) implicate the client secret rather than this account's grant, and
+        // keep the catch-all with Google's code appended.
+        | :? TokenResponseException as ex when not (isNull ex.Error) && ex.Error.Error = "invalid_grant" ->
             return! MyDogsbodyException(action, "The stored Google credential is no longer authorised.", ex)
         | ex ->
             // Google's own text appended, because "could not reach" on its own leaves a user with

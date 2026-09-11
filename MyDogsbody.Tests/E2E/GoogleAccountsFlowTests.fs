@@ -152,3 +152,41 @@ let ``a failure is shown as an alert, cleared by the next success`` () =
         rendered.WaitForAssertion(fun () -> Assert.DoesNotContain("No Google client secret has been supplied yet", rendered.Markup))
 
         Assert.Empty harness.Logged)
+
+let private replacementWarning = "Replacing the client secret may mean existing accounts need re-authorising."
+
+[<Fact; Trait("Level", "E2E")>]
+let ``replacing a stored client secret states that existing accounts may need re-authorising`` () =
+    // requirements.md: "WHEN a user replaces the client secret THE SYSTEM SHALL ... state that
+    // existing accounts may need re-authorising." A replacement can belong to a different OAuth
+    // client, and a token Google issued to the old client will not refresh under the new one.
+    let authoriseAccount: AuthoriseAccount = fun () -> failwith "must not be called - nothing is registered here"
+    let listCalendars: ListCalendars = fun _ -> Ok []
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        harness.Api.SetClientSecret "the-first-secret" |> ignore
+        let browserModule, rendered = renderBrowser harness
+
+        rendered.WaitForAssertion(fun () -> Assert.Contains("the-first-secret", rendered.Markup))
+        // Read-only: nothing is being replaced yet.
+        Assert.DoesNotContain(replacementWarning, rendered.Markup)
+
+        browserModule.StartEditingClientSecret()
+
+        rendered.WaitForAssertion(fun () -> Assert.Contains(replacementWarning, rendered.Markup))
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
+let ``supplying the first client secret does not warn about existing accounts`` () =
+    // No secret means no account could have been registered, so there is nothing to re-authorise.
+    let authoriseAccount: AuthoriseAccount = fun () -> failwith "must not be called - nothing is registered here"
+    let listCalendars: ListCalendars = fun _ -> Ok []
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        let browserModule, rendered = renderBrowser harness
+
+        browserModule.StartEditingClientSecret()
+
+        rendered.WaitForAssertion(fun () -> Assert.Contains("Client secret (JSON)", rendered.Markup))
+        Assert.DoesNotContain(replacementWarning, rendered.Markup)
+        Assert.Empty harness.Logged)

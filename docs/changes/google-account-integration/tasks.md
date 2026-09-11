@@ -154,6 +154,7 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       | Case | `Message` |
       | --- | --- |
       | `401` / `403` | `The stored Google credential is no longer authorised.` |
+      | A refresh Google's token endpoint refuses as `invalid_grant` *(since PR review round 6)* | `The stored Google credential is no longer authorised.` |
       | `429`, or a `403` whose reason is a usage limit *(since PR review round 5)* | `Google is rate-limiting this account; try again shortly.` |
       | Anything else (`500`, network failure, etc.) | `Could not reach Google Calendar.` |
 - [x] **4.2** `ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars`.

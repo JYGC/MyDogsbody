@@ -142,7 +142,7 @@ chosen by the adapters that construct them:
 | | *(anything else)* `Authorisation failed.` | `AuthorisationFailed` carrying the **inner exception's** message | Yes |
 | `GoogleAuthorization.loadCredential` | `No stored credential for this account.` | `NotAuthorised` | No |
 | | `The stored Google client secret is malformed.` | `ClientSecretInvalid` | No |
-| `GoogleCalendarClient.listCalendars` | `The stored Google credential is no longer authorised.` | `NotAuthorised` | Yes¹ |
+| `GoogleCalendarClient.listCalendars` | `The stored Google credential is no longer authorised.` — a `401`/`403`, or a refresh Google refuses as `invalid_grant`⁴ | `NotAuthorised` | Yes¹ |
 | | `Google is rate-limiting this account; try again shortly.` — a `429`, or a `403` whose reason is a usage limit³ | `CalendarRateLimited` | Yes |
 | | *(anything else)* `Could not reach Google Calendar.` | `CalendarUnreachable` | Yes |
 
@@ -162,6 +162,13 @@ logged — the user did consent, so it is not reported as their choice.
 ³ Since PR review round 5. Google documents `rateLimitExceeded`, `userRateLimitExceeded`,
 `quotaExceeded` (and, API-wide, `dailyLimitExceeded`) as **403**s as well as 429s; before round 5
 every one of them read as `NotAuthorised`. Any other 401/403 is still `NotAuthorised`.
+
+⁴ Since PR review round 6. An expired or revoked grant does not reach the Calendar API as a `401`:
+the credential refreshes first (or refreshes in answer to the `401`), Google's token endpoint answers
+`invalid_grant`, and the failure is a `TokenResponseException`. Before round 6 that fell to the
+catch-all and read `Could not reach Google Calendar. Error:"invalid_grant", ...` →
+`CalendarUnreachable`. The token endpoint's other refusals (`invalid_client`, `unauthorized_client`)
+still fall to the catch-all.
 
 ---
 
@@ -756,6 +763,8 @@ reachable until that change exists:
   calendar fetch: the refresh fails with a `TokenResponseException` (`invalid_grant`) that
   `GoogleCalendarClient`'s catch-all maps to "Could not reach Google Calendar.", logged. The library
   also deletes the stored token when that happens, so the *next* fetch reads `NotAuthorised`.
+  **Overturned by PR review round 6:** unlike the bullet above, this path does not wait on the
+  `NeedsReauthorisation` change — the calendar fetch runs for every account on every page load.
 
 ### Round 4 gate
 
@@ -852,3 +861,105 @@ the existing `toListCalendarsError maps a 429-shaped message to CalendarRateLimi
 Per level, each measured with `--filter "Level=..."`: Unit **792** (carrying the one pre-existing
 failure, which is tagged `Unit`), Integration **321** (+5), Contract **346** (+4), E2E **35** — 1494
 in total.
+
+---
+
+## PR review, round 6 — two defects found in the diff, both fixed
+
+A cold sixth read of the whole PR diff, rounds 1–5 included and judged on the code. PR #21 still
+carries **no review comments** (0 review comments; 5 issue comments, which are rounds 1–5's own
+summaries), so both findings are from reading the diff. Both were reproduced against the
+checked-out head before anything was changed.
+
+### 1. An expired or revoked refresh token read as "Could not reach Google Calendar."
+
+**This overturns a recorded decision.** Round 4 measured this exact behaviour and listed it under
+*Considered and deliberately not changed*, as a path not reachable until the `NeedsReauthorisation`
+change exists. That holds for the bullet beside it (re-authorising), not for this one: the calendar
+fetch runs for every account on every load of `/settings/google-accounts` (`loadAccounts` →
+`GetCalendarsFor`), so a revoked grant reaches it the next time the page opens. It is also the most
+common way a token stops working here — an OAuth client left in Testing publishing status, the
+likely state of a single user's own Desktop client, issues refresh tokens that expire after seven
+days.
+
+With Google an expired or revoked grant does not arrive as a `401` from the Calendar API: the
+`UserCredential` refreshes first (or refreshes in answer to the `401`), Google's token endpoint
+answers `400 invalid_grant` ("Token has been expired or revoked."), and the failure is a
+`TokenResponseException` — which no `GoogleApiException` clause matches, so it fell to the
+catch-all. requirements.md: "WHEN a stored token has expired or been revoked THE SYSTEM SHALL report
+the account as needing re-authorisation", and "report a rate-limit or transient error distinctly
+from a permission failure" — broken here in the direction round 5 did not look at: a permission
+failure reported as a transient one.
+
+Measured with a throwaway script driving the real `listCalendarsVia` with a real `UserCredential`
+(its token endpoint stubbed to Google's `invalid_grant` body), then the real `toListCalendarsError`
+and `toMyDogsbodyException` — the string the `MudAlert` renders:
+
+| Path | Before | After |
+| --- | --- | --- |
+| Access token lapsed — refreshed before the call | `Could not reach Google Calendar. Error:"invalid_grant", Description:"Token has been expired or revoked.", Uri:""` (`CalendarUnreachable`), logged 1 | `The account '…' needs to be re-authorised.` (`NotAuthorised`), logged 1 |
+| Access token still live — Google answers `401`, refreshed in response | same, `CalendarUnreachable`, logged 1 | same, `NotAuthorised`, logged 1 |
+
+Both are logged by the adapter's own `handleError`, like every other `listCalendars` failure
+(footnote ¹). In both paths the library deletes the stored token, which is why the *next* fetch
+already read `NotAuthorised` through `No stored credential for this account.` — before the fix the
+same account got two different diagnoses on consecutive loads.
+
+Fixed by one clause in `GoogleCalendarClient.listCalendarsVia`: a `TokenResponseException` carrying
+`invalid_grant` reports `The stored Google credential is no longer authorised.`, the message
+`toListCalendarsError` already maps to `NotAuthorised`. **Not widened:** the token endpoint's other
+refusals (`invalid_client`, `unauthorized_client`) implicate the client secret rather than the
+account's grant, and which instruction they deserve belongs with the `NeedsReauthorisation`
+change; they keep the catch-all, with Google's code appended.
+
+Tests, written red first (3 failing before the fix, each because the adapter returned the "Could
+not reach" message): a two-path theory in `GoogleCalendarClientTests` asserting the exact message,
+the `ActionName` and the preserved `TokenResponseException` carrying `invalid_grant`; and the same
+case in the `ListCalendars` contract suite, asserting `Error (NotAuthorised accountId)` whole. As in
+round 5, no E2E test: the E2E harness substitutes `ListCalendars` with a fake, so the adapter →
+mapper → alert chain is covered link by link — these tests, plus the existing
+`toListCalendarsError maps a 401/403-shaped message to NotAuthorised`.
+
+### 2. Replacing the client secret did not say what it can cost
+
+requirements.md: "WHEN a user replaces the client secret THE SYSTEM SHALL accept the new value,
+return the field to its read-only display, **and state that existing accounts may need
+re-authorising**." Nothing on the page said so, and neither tasks.md nor this file recorded it as
+deferred — a requirement with no behaviour. The cost is real: a replacement can belong to a
+different OAuth client, Google will not refresh a token issued to the old one, and every registered
+account's next calendar fetch then fails with nothing on screen connecting it to the replacement.
+
+Fixed in `GoogleAccountsComponents.fs`: the edit panel says "Replacing the client secret may mean
+existing accounts need re-authorising." whenever it is opened over an already-stored secret — not
+when the first secret is supplied, since no account can exist before one. It is said while the user
+is replacing, before Save, which needs no new module state.
+
+Tests (E2E, bUnit over the real harness): `replacing a stored client secret states that existing
+accounts may need re-authorising`, red first (the sentence not found), and a control, `supplying the
+first client secret does not warn about existing accounts`, green before and after.
+
+### Considered and deliberately not changed
+
+- **Round 5's usage-limit matching stands.** Its four reasons are Google's `usageLimits` reasons,
+  disjoint from the other 403 reasons the Calendar API documents (`insufficientPermissions`,
+  `accessNotConfigured`, `forbidden`, `domainPolicy`), so no other 403 changed behaviour; and its
+  test bodies are Google's own shape, which still carries `errors[].reason` beside the newer
+  `status`/`details` fields. A `403 domainPolicy` (a Workspace admin blocking the app) still reads
+  `NotAuthorised`, which re-authorising cannot fix — the pre-existing "any other 401/403" rule, not
+  something round 5 changed, and not reachable for a personal account.
+- `NotAuthorised`'s sentence names the account by its opaque id rather than its email — a payload
+  choice shared with `AccountNotRegistered` and `NoDefaultCalendar`, not something this round
+  introduced.
+- Rounds 1–5's deferrals stand, for the reasons they give.
+
+### Round 6 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, none in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 2m`) | 1494 → **1499** (+5), 0 skipped, 11 s wall. No hang, no dump. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **792** (carrying the one pre-existing
+failure, which is tagged `Unit`), Integration **323** (+2), Contract
+**347** (+1), E2E **37** (+2) — 1499 in total.

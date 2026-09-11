@@ -36,6 +36,15 @@ let googleAccountsBrowser
                     Severity Severity.Info
                     fragment {
                         MudText'' { "Google client secret (JSON)" }
+                        // requirements.md: replacing the secret states that existing accounts may
+                        // need re-authorising - a replacement can belong to a different OAuth
+                        // client, and Google will not refresh a token issued to the old one. Only
+                        // when a secret is already stored: a first one has no accounts behind it.
+                        if secret.IsSome then
+                            MudText'' {
+                                Typo Typo.caption
+                                "Replacing the client secret may mean existing accounts need re-authorising."
+                            }
                         MudStack'' {
                             Row true
                             class' "pt-2"

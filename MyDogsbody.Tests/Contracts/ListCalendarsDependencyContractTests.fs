@@ -50,11 +50,14 @@ let private accountId = GoogleAccountId.create "507f1f77bcf86cd799439011" |> val
 
 // ---------- the real adapter, driven by a stubbed HttpMessageHandler ----------
 
-let private withRealListCalendars (respond: HttpRequestMessage -> HttpResponseMessage) (test: ListCalendars -> unit) =
+let private withRealListCalendarsAs
+    (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
+    (respond: HttpRequestMessage -> HttpResponseMessage)
+    (test: ListCalendars -> unit)
+    =
     let handleError = HandleErrorBuilder(fun _ -> ())
     let handler = new RespondingHandler(respond)
     let factory = StubHttpClientFactory handler :> Google.Apis.Http.IHttpClientFactory
-    let credential = NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer
 
     let listCalendars: ListCalendars =
         fun accountId ->
@@ -67,6 +70,9 @@ let private withRealListCalendars (respond: HttpRequestMessage -> HttpResponseMe
                     CalendarUnreachable ex.Message)
 
     test listCalendars
+
+let private withRealListCalendars (respond: HttpRequestMessage -> HttpResponseMessage) (test: ListCalendars -> unit) =
+    withRealListCalendarsAs (NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer) respond test
 
 // ---------- the in-memory fake ----------
 
@@ -143,4 +149,71 @@ let ``the real adapter maps a usage-limit 403 to CalendarRateLimited, not NotAut
             Error(CalendarRateLimited "Google is rate-limiting this account; try again shortly."),
             listCalendars accountId
         )
+    )
+
+/// Somewhere for the library to delete a token from: Google.Apis.Auth deletes the stored token
+/// itself when the token endpoint refuses a refresh, so the flow needs a data store to call.
+type private InMemoryDataStore() =
+    let entries = System.Collections.Concurrent.ConcurrentDictionary<string, obj>()
+
+    interface Google.Apis.Util.Store.IDataStore with
+        member _.StoreAsync<'T>(key: string, value: 'T) : Task =
+            entries.[$"{typeof<'T>.FullName}:{key}"] <- box value
+            Task.CompletedTask
+
+        member _.GetAsync<'T>(key: string) : Task<'T> =
+            match entries.TryGetValue $"{typeof<'T>.FullName}:{key}" with
+            | true, value -> Task.FromResult(unbox<'T> value)
+            | _ -> Task.FromResult(Unchecked.defaultof<'T>)
+
+        member _.DeleteAsync<'T>(key: string) : Task =
+            entries.TryRemove $"{typeof<'T>.FullName}:{key}" |> ignore
+            Task.CompletedTask
+
+        member _.ClearAsync() : Task =
+            entries.Clear()
+            Task.CompletedTask
+
+/// A real `UserCredential` whose refresh token Google's token endpoint refuses - `invalid_grant`,
+/// "Token has been expired or revoked.", which is Google's answer once the user revokes the app at
+/// Google, or once a Testing-mode OAuth client's seven-day refresh-token lifetime runs out.
+let private credentialGoogleWillNotRefresh (accessTokenIssuedUtc: System.DateTime) =
+    let tokenEndpoint (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.BadRequest
+            """{ "error": "invalid_grant", "error_description": "Token has been expired or revoked." }"""
+
+    let flow =
+        new Google.Apis.Auth.OAuth2.Flows.GoogleAuthorizationCodeFlow(
+            Google.Apis.Auth.OAuth2.Flows.GoogleAuthorizationCodeFlow.Initializer(
+                ClientSecrets = Google.Apis.Auth.OAuth2.ClientSecrets(ClientId = "client-id", ClientSecret = "client-secret"),
+                Scopes = GoogleAuthorization.scopes,
+                DataStore = InMemoryDataStore(),
+                HttpClientFactory = StubHttpClientFactory(new RespondingHandler(tokenEndpoint))
+            )
+        )
+
+    let token =
+        Google.Apis.Auth.OAuth2.Responses.TokenResponse(
+            AccessToken = "access-token",
+            RefreshToken = "refresh-token",
+            ExpiresInSeconds = System.Nullable 3599L,
+            IssuedUtc = accessTokenIssuedUtc
+        )
+
+    Google.Apis.Auth.OAuth2.UserCredential(flow, "account-1", token)
+    :> Google.Apis.Http.IConfigurableHttpClientInitializer
+
+[<Fact; Trait("Level", "Contract")>]
+let ``the real adapter maps a refresh token Google has expired or revoked to NotAuthorised carrying the account id`` () =
+    // requirements.md: "WHEN a stored token has expired or been revoked THE SYSTEM SHALL report the
+    // account as needing re-authorisation" - and with Google, that refusal comes from the token
+    // endpoint during a refresh, not as a 401 from the Calendar API itself.
+    let respond (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.Unauthorized
+            """{ "error": { "code": 401, "message": "Invalid Credentials", "errors": [] } }"""
+
+    withRealListCalendarsAs (credentialGoogleWillNotRefresh (System.DateTime.UtcNow.AddHours -2.0)) respond (fun listCalendars ->
+        Assert.Equal(Error(NotAuthorised accountId), listCalendars accountId)
     )

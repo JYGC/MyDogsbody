@@ -50,13 +50,18 @@ let private errorBody (code: int) (message: string) =
 let private errorBodyWithReason (code: int) (reason: string) (message: string) =
     $"""{{ "error": {{ "code": {code}, "message": "{message}", "errors": [ {{ "domain": "usageLimits", "reason": "{reason}", "message": "{message}" }} ] }} }}"""
 
-let private listCalendars (respond: HttpRequestMessage -> HttpResponseMessage) =
+let private listCalendarsAs
+    (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
+    (respond: HttpRequestMessage -> HttpResponseMessage)
+    =
     let handler = new RespondingHandler(respond)
     let factory = StubHttpClientFactory handler :> Google.Apis.Http.IHttpClientFactory
-    let credential = NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer
     let handleError = HandleErrorBuilder(fun _ -> ())
 
     GoogleCalendarClient.listCalendarsVia (Some factory) handleError credential ()
+
+let private listCalendars (respond: HttpRequestMessage -> HttpResponseMessage) =
+    listCalendarsAs (NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer) respond
 
 let private okOrFail label result =
     match result with
@@ -198,4 +203,83 @@ let ``listCalendars still maps a 403 for too-narrow scopes to the not-authorised
 
     match listCalendars respond with
     | Error ex -> Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+/// Somewhere for the library to delete a token from: Google.Apis.Auth deletes the stored token
+/// itself when the token endpoint refuses a refresh, so the flow needs a data store to call.
+type private InMemoryDataStore() =
+    let entries = System.Collections.Concurrent.ConcurrentDictionary<string, obj>()
+
+    interface Google.Apis.Util.Store.IDataStore with
+        member _.StoreAsync<'T>(key: string, value: 'T) : Task =
+            entries.[$"{typeof<'T>.FullName}:{key}"] <- box value
+            Task.CompletedTask
+
+        member _.GetAsync<'T>(key: string) : Task<'T> =
+            match entries.TryGetValue $"{typeof<'T>.FullName}:{key}" with
+            | true, value -> Task.FromResult(unbox<'T> value)
+            | _ -> Task.FromResult(Unchecked.defaultof<'T>)
+
+        member _.DeleteAsync<'T>(key: string) : Task =
+            entries.TryRemove $"{typeof<'T>.FullName}:{key}" |> ignore
+            Task.CompletedTask
+
+        member _.ClearAsync() : Task =
+            entries.Clear()
+            Task.CompletedTask
+
+/// A real `UserCredential` whose refresh token Google's token endpoint refuses - `invalid_grant`,
+/// "Token has been expired or revoked.", which is Google's answer once the user revokes the app at
+/// Google, or once a Testing-mode OAuth client's seven-day refresh-token lifetime runs out.
+let private credentialGoogleWillNotRefresh (accessTokenIssuedUtc: System.DateTime) =
+    let tokenEndpoint (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.BadRequest
+            """{ "error": "invalid_grant", "error_description": "Token has been expired or revoked." }"""
+
+    let flow =
+        new Google.Apis.Auth.OAuth2.Flows.GoogleAuthorizationCodeFlow(
+            Google.Apis.Auth.OAuth2.Flows.GoogleAuthorizationCodeFlow.Initializer(
+                ClientSecrets = Google.Apis.Auth.OAuth2.ClientSecrets(ClientId = "client-id", ClientSecret = "client-secret"),
+                Scopes = GoogleAuthorization.scopes,
+                DataStore = InMemoryDataStore(),
+                HttpClientFactory = StubHttpClientFactory(new RespondingHandler(tokenEndpoint))
+            )
+        )
+
+    let token =
+        Google.Apis.Auth.OAuth2.Responses.TokenResponse(
+            AccessToken = "access-token",
+            RefreshToken = "refresh-token",
+            ExpiresInSeconds = System.Nullable 3599L,
+            IssuedUtc = accessTokenIssuedUtc
+        )
+
+    Google.Apis.Auth.OAuth2.UserCredential(flow, "account-1", token)
+    :> Google.Apis.Http.IConfigurableHttpClientInitializer
+
+[<Theory; Trait("Level", "Integration")>]
+[<InlineData(2.0)>]
+[<InlineData(0.0)>]
+let ``listCalendars maps a refresh token Google has expired or revoked to the not-authorised message``
+    (accessTokenAgeInHours: float)
+    =
+    // 2 hours: the access token has lapsed, so the credential refreshes before the call is sent.
+    // 0 hours: the access token still looks live, Google answers 401, and the credential refreshes
+    // in response. Either way it is Google's token endpoint that refuses, not the Calendar API, so
+    // the failure is a TokenResponseException rather than a GoogleApiException - and it used to
+    // fall to the catch-all as "Could not reach Google Calendar.": a revoked grant reported as a
+    // network problem, where requirements.md asks for "needing re-authorisation".
+    let credential =
+        credentialGoogleWillNotRefresh (System.DateTime.UtcNow.AddHours(-accessTokenAgeInHours))
+
+    let respond (_: HttpRequestMessage) =
+        jsonResponse HttpStatusCode.Unauthorized (errorBody 401 "Invalid Credentials")
+
+    match listCalendarsAs credential respond with
+    | Error ex ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, ex.ActionName)
+        Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
+        let inner = Assert.IsType<Google.Apis.Auth.OAuth2.Responses.TokenResponseException>(ex.InnerException)
+        Assert.Equal("invalid_grant", inner.Error.Error)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
