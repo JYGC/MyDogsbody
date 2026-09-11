@@ -136,6 +136,32 @@ let ``the message a user is shown for the two named authorisation failures is th
     Assert.Equal("The consent flow timed out.", userSees "The consent flow timed out." (OperationCanceledException()))
 
 [<Fact; Trait("Level", "Contract")>]
+let ``toAuthorisationError keeps the calendar-access-not-granted sentence, which carries the remedy`` () =
+    // A consent that completed without the calendar scope (Google's granular consent screen, box
+    // left unticked). The adapter's sentence says what to do about it; the inner exception only
+    // lists the scopes that were granted, which is diagnostics, not an instruction.
+    let sentence =
+        "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again."
+
+    let ex =
+        MyDogsbodyException(
+            authoriseAction,
+            sentence,
+            ApplicationException "Granted scopes: https://www.googleapis.com/auth/userinfo.email openid"
+        )
+
+    Assert.Equal(AuthorisationFailed sentence, GoogleAccountApiMappers.toAuthorisationError ex)
+
+    // And the whole inbound-then-outbound chain, which is what the MudAlert renders.
+    let userSees =
+        ex
+        |> GoogleAccountApiMappers.toAuthorisationError
+        |> GoogleAccountApiMappers.toMyDogsbodyException anAction
+
+    Assert.Equal(sentence, userSees.Message)
+    Assert.Equal(anAction, userSees.ActionName)
+
+[<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError maps anything else to AuthorisationFailed, preferring the inner exception's message`` () =
     // Unchanged: "Authorisation failed." is the adapter's catch-all and carries nothing, so the
     // inner exception is the only place the real reason lives.

@@ -131,6 +131,7 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       | Cancelled/denied consent | `The consent flow was cancelled or denied.` | No (bypasses the outer `with`, returned as a plain `Error` value) |
       | Malformed client secret | `The stored Google client secret is malformed.` | No |
       | Email unreadable | `The authorised account's email address could not be read.` | No |
+      | Consent completed without the calendar scope *(since PR review round 7)* | `Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again.` | No |
       | Loopback port in use | `The loopback port is already in use.` | Yes |
       | Consent timed out (5-minute internal timeout) | `The consent flow timed out.` | Yes |
       | Anything else | `Authorisation failed.` | Yes |

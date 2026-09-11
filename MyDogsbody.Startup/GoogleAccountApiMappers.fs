@@ -53,6 +53,10 @@ let toAuthorisationError (ex: MyDogsbodyException) : CalendarError =
     // The full exception is still logged by the adapter's own handleError.
     | "The loopback port is already in use."
     | "The consent flow timed out." -> AuthorisationFailed ex.Message
+    // A consent completed without the calendar scope. Same reasoning: the sentence carries the
+    // remedy, while the inner exception only lists the scopes that were granted.
+    | "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again." ->
+        AuthorisationFailed ex.Message
     | _ ->
         let reason = match ex.InnerException with null -> ex.Message | inner -> inner.Message
         AuthorisationFailed reason

@@ -36,6 +36,17 @@ let scopes: string list =
 /// edge case).
 let private consentTimeout = TimeSpan.FromMinutes 5.0
 
+/// Whether a token grants the calendar scope. Google reports what was actually granted in the
+/// token response's space-delimited `scope`, and only the exact scope counts - not one that merely
+/// shares its prefix (`.../calendar.readonly`). A token reporting nothing is let through: Google's
+/// code exchange always sends `scope`, so silence is not a refusal, and refusing on it would refuse
+/// every registration were it ever missing. The calendar fetch still reports an insufficient scope
+/// as needing re-authorisation.
+let private grantsCalendarAccess (token: TokenResponse) : bool =
+    String.IsNullOrWhiteSpace token.Scope
+    || token.Scope.Split([| ' '; '\t'; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
+       |> Array.contains CalendarService.Scope.Calendar
+
 /// The real consent flow: parses the pasted client secret, then runs
 /// `GoogleWebAuthorizationBroker`'s system-browser + loopback dance, storing the resulting
 /// token through whichever `IDataStore` it is given - `GoogleCredentialDataStore` in production.
@@ -129,6 +140,26 @@ let authoriseWith
                     Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
                 | :? FormatException as ex ->
                     Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
+
+            // Completing consent is not the same as granting what was asked for. Google's granular
+            // consent screen gives the calendar scope its own checkbox - a sign-in scope plus a
+            // non-sign-in scope is exactly the request that gets one - so a user can finish consent
+            // having granted only the sign-in scopes. Registering that would put an account in the
+            // table whose every calendar fetch fails: requirements.md's "half-registered account".
+            // Refused before the email is read, and unlogged - it is the user's choice, like a
+            // cancelled consent - with a sentence saying how to make the other one. The granted
+            // scopes go in the inner exception, for whoever reads it.
+            do!
+                if grantsCalendarAccess credential.Token then
+                    Ok()
+                else
+                    Error(
+                        MyDogsbodyException(
+                            action,
+                            "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again.",
+                            ApplicationException $"Granted scopes: {credential.Token.Scope}"
+                        )
+                    )
 
             let! email =
                 (fetchAccountEmail credential).GetAwaiter().GetResult()

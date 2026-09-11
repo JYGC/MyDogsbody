@@ -137,6 +137,7 @@ chosen by the adapters that construct them:
 | `GoogleAuthorization.authorise`/`.reauthorise` | `The consent flow was cancelled or denied.` — OAuth `access_denied` only² | `AuthorisationCancelled` | No |
 | | `The stored Google client secret is malformed.` | `ClientSecretInvalid` | No |
 | | `The authorised account's email address could not be read.` | `AccountEmailUnavailable` | No |
+| | `Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again.` — consent completed without the calendar scope⁵ | `AuthorisationFailed` **carrying that sentence** | No |
 | | `The loopback port is already in use.` | `AuthorisationFailed` **carrying that sentence** | Yes |
 | | `The consent flow timed out.` | `AuthorisationFailed` **carrying that sentence** | Yes |
 | | *(anything else)* `Authorisation failed.` | `AuthorisationFailed` carrying the **inner exception's** message | Yes |
@@ -169,6 +170,11 @@ the credential refreshes first (or refreshes in answer to the `401`), Google's t
 catch-all and read `Could not reach Google Calendar. Error:"invalid_grant", ...` →
 `CalendarUnreachable`. The token endpoint's other refusals (`invalid_client`, `unauthorized_client`)
 still fall to the catch-all.
+
+⁵ Since PR review round 7. Google's granular consent screen lets a user finish consent without
+ticking Calendar; before round 7 that registered the account anyway, and every calendar fetch for it
+then read `NotAuthorised` (`403 insufficientPermissions`). Only the exact calendar scope counts; a
+token whose `scope` is absent is let through.
 
 ---
 
@@ -963,3 +969,96 @@ first client secret does not warn about existing accounts`, green before and aft
 Per level, each measured with `--filter "Level=..."`: Unit **792** (carrying the one pre-existing
 failure, which is tagged `Unit`), Integration **323** (+2), Contract
 **347** (+1), E2E **37** (+2) — 1499 in total.
+
+---
+
+## PR review, round 7 — one defect found in the diff, fixed
+
+A cold seventh read of the whole PR diff, rounds 1–6 included and judged on the code. PR #21 still
+carries **no review comments** (0 review comments; 6 issue comments, which are rounds 1–6's own
+summaries), so the finding is from reading the diff. It was reproduced against the checked-out head
+before anything was changed.
+
+### A consent that did not grant Calendar access still registered the account
+
+`authoriseWith` treated *completing* consent as *granting* it. Google's granular consent screen
+gives each non-sign-in scope its own checkbox whenever a request carries one to three sign-in scopes
+plus at least one non-sign-in scope (Google's "granular permissions" guide). That is exactly
+`GoogleAuthorization.scopes`: `userinfo.email` (sign-in) plus `calendar`. The guide says granular
+permissions are always on for newly created OAuth client IDs, which is what a user of this app
+pastes. In Google's words, "users may not grant all scopes your app requests", and the installed-app
+guide says the app "must verify which scopes were actually granted". Nothing here read the token's
+`scope`.
+
+So a user who left Calendar unticked got an account in the table, against requirements.md's "a
+half-registered account must not appear in the table". Every calendar fetch for it then answered
+`403 insufficientPermissions` → `NotAuthorised` → "needs to be re-authorised", on a page that offers
+no way to re-authorise (nothing sets `NeedsReauthorisation`). The only way out was Remove, then Add
+again.
+
+Measured with a throwaway script driving the real `authoriseNewAccountWith` over a temp `Google.db`
+(a consent that persists a token granting `userinfo.email openid` only), then the real
+`RegisterGoogleAccountWorkflow`:
+
+| | Before | After |
+| --- | --- | --- |
+| `authoriseNewAccountWith` | `Ok ("person@gmail.com", <id>)` | `Error`: `Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again.` |
+| Tokens left in `Credentials` | 1 | 0 |
+| `registerGoogleAccount` | `Ok`, registered with no default calendar | `Error (AuthorisationFailed "<that sentence>")` |
+| Logged | 0 | 0 |
+
+Fixed in `GoogleAuthorization.authoriseWith`: after consent and before the email is read, a token
+whose `scope` does not contain the exact calendar scope is refused with that sentence, unlogged (an
+`ApplicationException` inner carrying the granted scopes). It is the user's choice, like a cancelled
+consent. `authoriseNewAccountWith` already hands back the token for any post-consent failure, so
+none is stranded. `toAuthorisationError` keeps the sentence (`AuthorisationFailed`), as it does for
+the loopback-port and timed-out sentences, because the inner exception carries no instruction.
+`reauthorise` goes through `authoriseWith` too, so it gets the same check.
+
+Two deliberate choices. Only the exact scope counts: `.../calendar.readonly` shares its prefix and
+must not pass a substring match. And a token whose `scope` is absent is let through: Google's code
+exchange always reports it, so refusing on silence would only risk refusing every registration, and
+the calendar fetch still reports an insufficient scope.
+
+Tests, written red first. Four failed before the fix, each for the predicted reason: the two refused
+cases returned `Ok`, the mapper took the inner exception's text, and the integration case reached
+its must-not-be-called email fake. They are:
+
+- a two-case unit theory asserting the exact message, the `ActionName`, the preserved inner
+  exception, nothing logged and the email never read;
+- a four-case unit control (calendar granted in either order; `scope` empty or absent), green
+  before and after;
+- an integration test proving the token is handed back;
+- a contract test over `toAuthorisationError` and the whole chain to the `MudAlert` string.
+
+`GoogleAuthorizationTests`' shared fake credential is now a real `UserCredential` carrying every
+requested scope rather than `null`, since `authoriseWith` now reads it. No E2E test: the E2E harness
+substitutes `AuthoriseAccount` with a fake, so it never reaches this adapter.
+
+### Considered and deliberately not changed
+
+- **Round 6's `invalid_grant` clause stands.** Its test drives a real `UserCredential` over a real
+  `GoogleAuthorizationCodeFlow` whose token endpoint is stubbed, so the exception shape is the
+  library's own (`TokenResponseException`, unwrapped by `ClientServiceRequest.Execute`) on both the
+  proactive-refresh and the refresh-on-`401` paths. It is guarded to `invalid_grant` only, and no
+  other failure changed message: a `GoogleApiException` never matches it, and every other
+  `TokenResponseException` code still reaches the catch-all.
+- **Round 6's client-secret warning stands.** It is shown in the edit panel, while replacing, and
+  only over an already-stored secret.
+- **`ReauthoriseGoogleAccountWorkflow` saves whichever email the re-consent returns.** Choosing a
+  different Google account in the browser would re-key the row to another address, possibly one
+  already registered. Not reachable until something sets `NeedsReauthorisation`, so it joins that
+  change's list next to round 4's two measured facts.
+- Rounds 1–6's deferrals stand, for the reasons they give.
+
+### Round 7 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. The same 3 pre-existing warnings, none in a file this change touches (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 2m`) | 1499 → **1507** (+8), 0 skipped, 8 s. No hang, no dump. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **798** (+6, carrying the one
+pre-existing failure, which is tagged `Unit`), Integration **324** (+1), Contract **348** (+1),
+E2E **37**. 1507 in total.

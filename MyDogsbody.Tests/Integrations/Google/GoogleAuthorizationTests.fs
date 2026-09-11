@@ -13,10 +13,32 @@ open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Integrations.Google
 
-/// The fake consent flow never needs a real credential - `fetchAccountEmail` is faked too, and
-/// nothing in `authoriseWith` inspects the credential value itself. A null `UserCredential`
-/// keeps these tests from having to construct one of Google.Apis's own flow objects.
-let private fakeCredential : UserCredential = null
+/// What Google's token endpoint reports as granted when the user grants everything asked for -
+/// the space-delimited `scope` field of the code exchange's response.
+let private everyScopeGranted = String.Join(" ", GoogleAuthorization.scopes)
+
+/// What Google's granular consent screen hands back when the user leaves the Calendar box
+/// unticked: the sign-in scopes only. Google shows per-scope checkboxes when a request carries a
+/// sign-in scope plus a non-sign-in scope - which is exactly what `GoogleAuthorization.scopes` is.
+let private signInScopesOnly = "https://www.googleapis.com/auth/userinfo.email openid"
+
+/// A real `UserCredential` whose token carries the given granted scopes - `authoriseWith` reads
+/// them to decide whether the consent is usable. Nothing reaches the network: the flow object is
+/// only ever asked for a token refresh, and nothing here asks for one.
+let private credentialGranting (scope: string) : UserCredential =
+    let flow =
+        new Flows.GoogleAuthorizationCodeFlow(
+            Flows.GoogleAuthorizationCodeFlow.Initializer(
+                ClientSecrets = ClientSecrets(ClientId = "client-id", ClientSecret = "client-secret"),
+                Scopes = GoogleAuthorization.scopes
+            )
+        )
+
+    UserCredential(flow, "account-1", TokenResponse(AccessToken = "at", RefreshToken = "rt", Scope = scope))
+
+/// The credential a consent that granted everything returns. `fetchAccountEmail` is faked too, so
+/// the only thing `authoriseWith` reads off it is the granted scope.
+let private fakeCredential : UserCredential = credentialGranting everyScopeGranted
 
 /// No collection is ever touched in these tests: every fake `runConsentFlow` either returns
 /// before `GoogleCredentialDataStore` would be used, or (for the success path) never calls
@@ -551,6 +573,108 @@ let ``authoriseNewAccountWith reports a failure before consent wrote anything ex
         with
         | Error ex ->
             Assert.Equal("The consent flow was cancelled or denied.", ex.Message)
+            Assert.Empty logged
+        | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+        Assert.Equal(0, context.GetCredentialCollection().Count()))
+
+/// A consent flow that completes, persisting its token the way the real one does, but grants only
+/// the scopes it is given.
+let private consentGranting (scope: string) : string -> string -> IDataStore -> Task<UserCredential> =
+    fun _ accountId dataStore ->
+        task {
+            do! dataStore.StoreAsync(accountId, TokenResponse(AccessToken = "at", RefreshToken = "rt", Scope = scope))
+            return credentialGranting scope
+        }
+
+let private calendarAccessNotGranted =
+    "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again."
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("https://www.googleapis.com/auth/userinfo.email openid")>]
+[<InlineData("https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email")>]
+let ``authoriseWith refuses a consent that did not grant Calendar access, unlogged, without reading the email``
+    (grantedScope: string)
+    =
+    // Google's granular consent screen gives each non-sign-in scope its own checkbox, and "users may
+    // not grant all scopes your app requests" - Google's own guide says an app must check which were
+    // granted. Leaving Calendar unticked still completes consent, so before this check the account
+    // was registered with a token that can never list a calendar, and every later fetch told the user
+    // to re-authorise an account the page offers no way to re-authorise. The second case is a
+    // near-miss by prefix: only the exact calendar scope counts, not one that merely starts with it.
+    let logged = ResizeArray<MyDogsbodyException>()
+    let emailReads = ResizeArray<UserCredential>()
+
+    let runConsentFlow: string -> string -> IDataStore -> Task<UserCredential> =
+        fun _ _ _ -> Task.FromResult(credentialGranting grantedScope)
+
+    let fetchAccountEmail: UserCredential -> Task<string> =
+        fun credential ->
+            emailReads.Add credential
+            Task.FromResult "person@gmail.com"
+
+    match
+        GoogleAuthorization.authoriseWith
+            (HandleErrorBuilder logged.Add)
+            unreachableCollection
+            runConsentFlow
+            fetchAccountEmail
+            "{}"
+            "account-1"
+            ()
+    with
+    | Error ex ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
+        Assert.Equal(calendarAccessNotGranted, ex.Message)
+        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        Assert.Equal($"Granted scopes: {grantedScope}", inner.Message)
+        Assert.Empty logged
+        Assert.Empty emailReads
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Theory; Trait("Level", "Unit")>]
+[<InlineData("https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email")>]
+[<InlineData("openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar")>]
+[<InlineData("")>]
+[<InlineData(null)>]
+let ``authoriseWith accepts a consent that granted Calendar access, or whose token does not say`` (grantedScope: string) =
+    // Order is Google's business. A token with no `scope` at all is let through rather than refused:
+    // Google's code exchange always reports it, so silence is not evidence of a refusal, and refusing
+    // on it would refuse every registration were it ever missing - the calendar fetch still reports
+    // an insufficient scope as needing re-authorisation.
+    let actual =
+        GoogleAuthorization.authoriseWith
+            (HandleErrorBuilder(fun _ -> ()))
+            unreachableCollection
+            (fun _ _ _ -> Task.FromResult(credentialGranting grantedScope))
+            (fun _ -> Task.FromResult "person@gmail.com")
+            "{}"
+            "account-1"
+            ()
+        |> okOrFail "authoriseWith"
+
+    Assert.Equal(("person@gmail.com", "account-1"), actual)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``authoriseNewAccountWith hands back the token consent wrote when Calendar access was not granted`` () =
+    // The refusal happens after consent persisted a token under the minted id, so it is one more
+    // post-consent failure only this adapter can clean up.
+    withCredentialStore (fun context ->
+        let logged = ResizeArray<MyDogsbodyException>()
+
+        match
+            GoogleAuthorization.authoriseNewAccountWith
+                (HandleErrorBuilder logged.Add)
+                context.GetCredentialCollection
+                (consentGranting signInScopesOnly)
+                (fun _ -> failwith "must not be called")
+                "{}"
+                "minted-id"
+                ()
+        with
+        | Error ex ->
+            Assert.Equal(calendarAccessNotGranted, ex.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
             Assert.Empty logged
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
