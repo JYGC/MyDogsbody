@@ -114,6 +114,19 @@ and the userinfo fetch — are substituted at the function-parameter seam) plus
 `GoogleAccountApiFactoryTests.fs`'s precondition tests. This is stated here and in `tasks.md`
 rather than left as a quietly-thinner contract suite.
 
+**`ReauthoriseAccount` has the same gap, and until PR review round 10 it was not recorded.** It is
+the dependency type deviation 2 added, and its real binding is `GoogleAccountApiFactory`'s
+`reauthoriseAccountDependency`: the stored client secret, `GoogleAuthorization.reauthorise` (which
+is `authoriseWith` over the real consent flow and email fetch, under the account's existing id), then
+`GoogleEmail.create`. There is no browser to stub, for the reason above. The adapter half is
+`authoriseWith`, whose suite in `GoogleAuthorizationTests.fs` covers it at the same seam as
+`AuthoriseAccount`. The binding itself is reached by a test only through the unregistered-account
+refusal (`GoogleAccountApiFactoryTests`, `GoogleAccountApiContractTests`), which stops before it.
+Nothing reaches it in production either: the "Re-authorise" button renders only for an account
+flagged `NeedsReauthorisation`, which nothing sets. **Its shared contract suite is deferred to the
+change that sets that flag**, beside the other re-authorisation items rounds 2-7 recorded, rather
+than written now against a path no user can take.
+
 ### One implementation refinement, not a spec deviation
 
 `GoogleAuthorization.authoriseWith` takes the OAuth datastore key (`accountId: string`) as a
@@ -1284,3 +1297,107 @@ was empty`), and pass with it.
 Per level, each measured with `--filter "Level=..."`: Unit **805** (+3, carrying the
 one pre-existing failure, which is tagged `Unit`), Integration **324**, Contract **349**,
 E2E **40** (+3; the failure flow also gained assertions). 1518 in total.
+
+---
+
+## PR review, round 10 — two defects found in the diff, both fixed
+
+A tenth cold read of the whole PR diff, rounds 1–9 included. PR #21 still carries **no review
+comments** (0 review comments; 9 issue comments, which are rounds 1–9's own summaries), so every
+finding comes from reading the diff and from running the suite. Round 9's change was checked first.
+
+### Round 9's change, re-checked
+
+- **`confirmAndRemove` keeps the UI rule.** It takes `IDialogService` and the removal as a callback,
+  reaches no API, and the page passes the module's `RemoveAccount`. The message box offers "Remove"
+  and "Cancel" and no "No", so `ShowMessageBox` returns `true` or `null`. `Cancel` and a dismissed
+  dialog both give `null`, and `HasValue && Value` removes nothing. The code after the answer
+  resumes on the renderer's context, so `RemoveAccount`'s `transact` runs there, and `startWork`
+  (`Async.Start`) takes the store call off it. Behaviour is identical to the page code it replaced.
+- **The unit test `RegisterAccount shows it is in progress…` is deterministic.** Its queue is used
+  on one thread. It fails without the flag and is tagged `Unit`. The E2E `adding an account shows
+  it is in progress…` and the rewritten failure-alert flow run their work on the test's own thread
+  (`RegisterAccount`/`SetClientSecret` are called directly, not from a click), and both are tagged.
+  One of the two confirmation flows is not deterministic: see 1.
+- **The deferral of "a default calendar deleted at Google after it was chosen" is consistent with
+  the specs.** design.md's decision 6 and sequence diagram, and tasks.md's Phase 1 test list
+  ("`CalendarNoLongerExists` when the calendar is absent"), map requirements.md's "a chosen default
+  calendar no longer exists at Google" to the check `SetDefaultInvoiceCalendarWorkflow` makes while
+  the calendar is being chosen. No EARS statement asks this page to re-check a stored default.
+
+### 1. A round 9 E2E flow failed under the full suite
+
+The first full-suite run of this round failed `removing an account asks first, saying access
+remains granted at Google, and removes on a yes`. It failed at the wait after the dialog's "Remove"
+click, with `WaitForFailedException … Check count: 0`: the assertion had not been evaluated even
+once in the second allowed. It passed in the E2E-only run. Across nine full-suite runs of round 9's
+head it failed once. The other failures in those runs were the known flakes: the LiteDB `BsonMapper`
+race (`ThunderbirdDependencyContractTests` real adapter; `ThunderbirdStoreTests.loadProfileRoot
+returns None for a fresh database`) and the `icacls` race (`ThunderbirdFolderScannerTests.scan
+records an unreadable directory and continues the walk`).
+
+**Why.** bUnit 1.40.0 runs every `WaitForAssertion` check through the renderer's dispatcher
+(`renderedFragment.InvokeAsync`), with a one-second default timeout. MudBlazor 8.13.0's
+`DialogReference` completes a dialog's result with a plain `TaskCompletionSource`, with no
+`RunContinuationsAsynchronously`. `MudDialogProvider.DismissInstance` calls `Dismiss(result)`
+before it removes the dialog. So the code awaiting `ShowMessageBox` resumes inline, inside the
+click, and with `fun work -> work ()` the whole removal ran there: the store, the token deletion,
+the reload and every re-render. bUnit's synchronous `Click()` discards its task. Blazor's dispatcher
+runs dispatched work inline on the calling thread when it is idle, so usually the removal had
+finished before the wait began. But whenever the dispatcher was busy as "Remove" was clicked, the
+click was queued and `Click()` returned at once. The check then queued behind the whole removal,
+and the removal took more than a second under the full suite's load. Production never runs work
+there: its `startWork` is `Async.Start`.
+
+**Reproduced before changing anything**, with two temporary probes, both since removed. Making the
+harness's `RemoveAccount` take 1.5 s alone did not fail the flow, because the click ran inline. With
+the dispatcher also held from another thread as "Remove" was clicked, the flow failed exactly as the
+gate did: `Check count: 0`, at the same wait.
+
+**Fixed in the test.** Both confirmation flows now hand work off the way production does:
+`handOffWork` puts it in a `BlockingCollection`, and the test runs it on its own thread,
+waiting up to ten seconds for the answer to hand it off. Under the same two probes all ten Google
+flows pass. The change adds two assertions:
+
+- the "Remove" flow asserts that nothing was handed off while the dialog was asking;
+- the "Cancel" flow asserts that nothing was handed off once the dialog closed. That check is
+  deterministic because the answer is acted on before the dialog is removed.
+
+Checked against temporary mutations of `confirmAndRemove`, both reverted:
+
+- **Never remove:** the "Remove" flow fails 3 runs in 3 (`No work was handed off within ten
+  seconds.`).
+- **Always remove:** the "Cancel" flow fails 5 runs in 5 (`Assert.Equal() Failure … Expected: 0,
+  Actual: 1`).
+
+### 2. `ReauthoriseAccount`'s contract level was dropped without being recorded
+
+CLAUDE.md: "a dependency function type is a published interface", owing one shared suite over its
+real adapter and every fake; "if a level genuinely cannot be exercised, say which one and why".
+`ReauthoriseAccount`, added by deviation 2, has no contract suite, and deviation 3 recorded the gap
+for `AuthoriseAccount` alone. Fixed as a record: deviation 3 now names it, says what does cover its
+adapter half, and **defers the suite itself** to the change that sets `NeedsReauthorisation`. Until
+then the path is unreachable, and that change will decide its failure handling (round 4's and
+round 7's notes). Documentation only; no behaviour changed.
+
+### Considered and deliberately not changed
+
+- **`confirmAndRemove` discards its `Task`**, so an exception from the message box would go
+  unobserved. No input raises one on this page: `MudDialogProvider` is in `Frame.razor`, and
+  `RemoveAccount` only transacts and hands work off. Returning the `Task` for Blazor to await would
+  change the component's parameter type for no failing input.
+- **The in-progress flows' `Queue` is not thread-safe.** Only the test thread touches it, because
+  `RegisterAccount` is called directly rather than from a click.
+- Rounds 1–9's deferrals stand, for the reasons they give.
+
+### Round 10 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, 0 new warnings. Production code is unchanged this round. The test project's recompile reported only the two test-file warnings present on `main` (`PdfDocumentReaderTests.fs` FS0760, `ScanWindowStoreTests.fs` FS0020), and `PdfProcessing\Program.fs` FS0025 is untouched. |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 2m`) | **1518**, unchanged: no test added or removed, two rewritten. 0 skipped, 9 s. No hang, no dump. |
+| Reproducible failures | One: the same pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. |
+| Repeat runs after the fix | 8 further full-suite runs: both confirmation flows passed in every one. Apart from the pre-existing failure, run 4 hung in `MailAccountsFlowTests.a walk hitting an unreadable directory lists it and the other accounts still appear`, whose `icacls /reset` never exited while `WaitForExit()` waits with no timeout (stacks captured with `dotnet-stack`; the file is unchanged from `main`). The stuck `icacls` was stopped by hand so the run could finish. Run 5 hit the known `icacls` race in `ThunderbirdFolderScannerTests`. Neither is from this PR. |
+
+Per level, each measured with `--filter "Level=..."`: Unit **805** (carrying the one pre-existing
+failure, which is tagged `Unit`), Integration **324**, Contract **349**, E2E **40**. 1518 in total.

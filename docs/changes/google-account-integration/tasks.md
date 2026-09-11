@@ -324,7 +324,7 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       matches on; **that OAuth refresh tokens are stored unencrypted, as a deliberate, accepted risk**
       (Q5.6) with the DPAPI retrofit and its re-authorise-everything cost; the three documented
       deviations (Phase 1's ordering, the added `ReauthoriseAccount`/workflow, `AuthoriseAccount`'s
-      contract-suite gap); and task 10.4's manual verification, later completed against a real
+      contract-suite gap, which since PR review round 10 also names `ReauthoriseAccount`'s); and task 10.4's manual verification, later completed against a real
       account, with the two real bugs it found and fixed (a swallowed calendar-fetch error, and
       every 403 reading as `NotAuthorised` regardless of cause).
 - [x] **11.3** Opened `change/google-account-integration` for review, with this file's checkboxes

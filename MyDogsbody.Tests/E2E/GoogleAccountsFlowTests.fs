@@ -79,6 +79,46 @@ let private confirmFirst
 let private renderBrowser (harness: GoogleAccountsHarness) =
     renderBrowserWith (fun work -> work ()) removeWithoutConfirming harness
 
+/// Work handed off where it is started, the way production's `startWork` (`Async.Start`) hands it
+/// to the thread pool - then run by the test itself, on its own thread, when it calls
+/// `runHandedOffWork`. `pendingWork` says how much is waiting.
+///
+/// The two confirmation flows need this rather than `fun work -> work ()`. MudBlazor completes a
+/// message box's result on the renderer's dispatcher and the code awaiting it resumes right there,
+/// so work run where it is started would run the removal - the store, the reload, every re-render -
+/// on the dispatcher. bUnit runs each `WaitForAssertion` check on that same dispatcher, with a
+/// one-second timeout. Whenever the dispatcher was busy as "Remove" was clicked, the click was
+/// queued instead of running on the test's thread, `Click()` returned at once, and the check waited
+/// behind the whole removal: under the full suite's load it failed with "Check count: 0", the check
+/// never having run at all.
+let private handOffWork () =
+    let handedOff = new System.Collections.Concurrent.BlockingCollection<unit -> unit>()
+
+    let startWork (work: unit -> unit) = handedOff.Add work
+
+    /// Waits for work to be handed off, then runs it - and whatever it hands off in turn - here.
+    let runHandedOffWork () =
+        use timeout = new System.Threading.CancellationTokenSource(System.TimeSpan.FromSeconds 10.0)
+
+        let first =
+            try
+                handedOff.Take(timeout.Token)
+            with :? System.OperationCanceledException ->
+                failwith "No work was handed off within ten seconds."
+
+        let rec runFrom (work: unit -> unit) =
+            work ()
+
+            match handedOff.TryTake() with
+            | true, next -> runFrom next
+            | _ -> ()
+
+        runFrom first
+
+    let pendingWork () = handedOff.Count
+
+    startWork, runHandedOffWork, pendingWork
+
 /// The one button, among those `selector` matches, whose label is exactly `label`.
 let private buttonLabelled (selector: string) (label: string) (rendered: IRenderedFragment) =
     Assert.Single(rendered.FindAll(selector) |> Seq.filter (fun button -> button.TextContent.Trim() = label))
@@ -191,9 +231,12 @@ let ``removing an account asks first, saying access remains granted at Google, a
 
     withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
         harness.Api.SetClientSecret "the-secret" |> ignore
-        let browserModule, rendered = renderBrowserWith (fun work -> work ()) (confirmFirst harness) harness
+        let startWork, runHandedOffWork, pendingWork = handOffWork ()
+        let browserModule, rendered = renderBrowserWith startWork (confirmFirst harness) harness
 
+        runHandedOffWork ()
         browserModule.RegisterAccount()
+        runHandedOffWork ()
         rendered.WaitForAssertion(fun () -> Assert.Contains("person@gmail.com", rendered.Markup))
 
         (buttonLabelled "td button" "Remove" rendered).Click()
@@ -203,10 +246,14 @@ let ``removing an account asks first, saying access remains granted at Google, a
             Assert.Contains("Remove 'person@gmail.com'?", dialog.TextContent)
             Assert.Contains("access remains granted at Google - you can revoke it there.", dialog.TextContent))
 
-        // Asking removed nothing.
+        // Asking removed nothing, and started nothing.
+        Assert.Equal(0, pendingWork ())
         Assert.Equal(1, storedAccountCount harness)
 
         (buttonLabelled ".mud-dialog button" "Remove" rendered).Click()
+
+        // The yes hands the removal off; it runs here, on the test's own thread.
+        runHandedOffWork ()
 
         rendered.WaitForAssertion(fun () ->
             Assert.Empty(rendered.FindAll(".mud-dialog"))
@@ -224,9 +271,12 @@ let ``cancelling the remove confirmation keeps the account`` () =
 
     withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
         harness.Api.SetClientSecret "the-secret" |> ignore
-        let browserModule, rendered = renderBrowserWith (fun work -> work ()) (confirmFirst harness) harness
+        let startWork, runHandedOffWork, pendingWork = handOffWork ()
+        let browserModule, rendered = renderBrowserWith startWork (confirmFirst harness) harness
 
+        runHandedOffWork ()
         browserModule.RegisterAccount()
+        runHandedOffWork ()
         rendered.WaitForAssertion(fun () -> Assert.Contains("person@gmail.com", rendered.Markup))
 
         (buttonLabelled "td button" "Remove" rendered).Click()
@@ -237,6 +287,11 @@ let ``cancelling the remove confirmation keeps the account`` () =
         (buttonLabelled ".mud-dialog button" "Cancel" rendered).Click()
 
         rendered.WaitForAssertion(fun () -> Assert.Empty(rendered.FindAll(".mud-dialog")))
+
+        // The answer is acted on before the dialog closes - MudBlazor completes the dialog's result,
+        // and the code awaiting it resumes, before it removes the dialog - so a removal would already
+        // have been handed off by now.
+        Assert.Equal(0, pendingWork ())
         Assert.Contains("person@gmail.com", rendered.Markup)
         Assert.Equal(1, storedAccountCount harness)
         Assert.Empty harness.Logged)
