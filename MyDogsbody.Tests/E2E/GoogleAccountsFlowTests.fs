@@ -404,3 +404,56 @@ let ``supplying the first client secret does not warn about existing accounts`` 
         rendered.WaitForAssertion(fun () -> Assert.Contains("Client secret (JSON)", rendered.Markup))
         Assert.DoesNotContain(replacementWarning, rendered.Markup)
         Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
+let ``correcting a malformed client secret fills the calendar picker it had left empty`` () =
+    // requirements.md: "WHEN the stored client secret is malformed THE SYSTEM SHALL report that", and
+    // the report clears on the next success. The correction is that success - and it must also
+    // bring back what the malformed secret stopped, or the picker is left empty with nothing saying
+    // why.
+    let authoriseAccount: AuthoriseAccount =
+        fun () -> Ok(GoogleEmail.create "person@gmail.com" |> valueOrFail, GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail)
+
+    // Stands in for the real adapter, which parses the stored secret before calling Google.
+    let storedSecret: (unit -> string option) ref = ref (fun () -> None)
+
+    let listCalendars: ListCalendars =
+        fun _ ->
+            match storedSecret.Value () with
+            | Some "not-json" -> Error(ClientSecretInvalid "The stored Google client secret is malformed.")
+            | _ -> Ok [ aCalendar "cal-1" "Invoices" true ]
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        storedSecret.Value <-
+            fun () ->
+                match harness.Api.GetClientSecret() with
+                | Ok secret -> secret
+                | Error ex -> failwith ex.Message
+
+        harness.Api.SetClientSecret "the-secret" |> ignore
+        harness.Api.RegisterAccount() |> ignore
+        harness.Api.SetClientSecret "not-json" |> ignore
+
+        let browserModule, rendered = renderBrowser harness
+
+        rendered.WaitForAssertion(fun () ->
+            let alert = Assert.Single(errorAlerts rendered)
+            Assert.Contains("The stored Google client secret is malformed.", alert.TextContent))
+
+        browserModule.StartEditingClientSecret()
+        browserModule.SetClientSecret "the-corrected-secret"
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Empty(errorAlerts rendered)
+            Assert.Contains("the-corrected-secret", rendered.Markup)
+
+            let calendars =
+                FSharp.Data.Adaptive.AVal.force browserModule.CalendarsByAccountIdAval
+                |> Map.tryFind "507f1f77bcf86cd799439011"
+
+            Assert.Equal<MyDogsbody.UI.Types.CalendarUiType list option>(
+                Some [ ({ Id = "cal-1"; Name = "Invoices"; IsPrimary = true }: MyDogsbody.UI.Types.CalendarUiType) ],
+                calendars
+            ))
+
+        Assert.Empty harness.Logged)

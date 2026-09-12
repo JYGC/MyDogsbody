@@ -1475,3 +1475,78 @@ summaries. Both findings below are this round's own, from reading the diff.
 
 Per level, each measured with `--filter "Level=..."`: Unit **806** (including the one pre-existing
 failure, which is tagged `Unit`), Integration **325**, Contract **350**, E2E **40**. 1521 in total.
+
+---
+
+## PR review, series 2 round 2 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 11 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `969e6ec` before anything changed.
+
+### Round 1's two fixes, re-checked
+
+- **The lock around the calendars map stands.** `calendarsGate` is only taken on a work thread,
+  always before `transact` takes the adaptive objects' own locks, and nothing that holds an adaptive
+  lock ever takes it. So it adds no lock cycle. Every read-then-write of the map goes through it,
+  and the other cells are written whole, never read and rewritten.
+- **`minAccessRole=writer` stands.** It narrows only which calendars are offered, and
+  `SetDefaultInvoiceCalendarWorkflow`'s existence check reads the same list, so a calendar can only
+  be chosen if the picker could have offered it.
+
+### Saving the client secret did not fetch the calendars again
+
+- **The defect.** Every calendar fetch parses the stored client secret before it calls Google. So
+  the secret decides what every picker can show, but `SetClientSecret` re-read only the secret
+  itself. Two user-visible results:
+  - **Correcting a malformed secret left every picker empty with nothing saying why.** The page
+    loads, each fetch fails, and the alert reads "The stored Google client secret is malformed."
+    Saving a good secret clears that alert, but nothing fetches the calendars again. Each picker
+    stays empty with no alert and no no-calendars caption, until the user leaves the page and comes
+    back. That is the unexplained empty picker round 8 fixed, reached a different way.
+  - **A bad paste over a working secret said nothing.** Pickers kept the lists fetched with the old
+    secret and no alert appeared. The failure only showed at the next page load.
+- **Measured before the fix**, through the real module creator with a fake API that fails calendar
+  fetches while the stored secret is malformed:
+
+  | Scenario | After page load | After `SetClientSecret` |
+  | --- | --- | --- |
+  | malformed → corrected | no calendars, alert shown, 1 fetch | **no calendars, no alert, still 1 fetch** |
+  | working → malformed | calendars shown, no alert, 1 fetch | **old calendars, no alert, still 1 fetch** |
+
+- **Fix.** A successful save re-reads the secret, then reloads the accounts, which fetches each
+  account's calendars. This is the page's "a write reloads" rule, applied to what the write
+  affects. Both reloads run inside the save's own work item. Starting them as two separate work
+  items would race: re-reading the secret succeeds and clears the alert, and it could finish after
+  a failing fetch had set the alert. So `loadClientSecret` is now `startWork` over a synchronous
+  `reloadClientSecret`, and the save calls `reloadClientSecret ()`, then `loadAccounts ()`.
+- **Cost.** One `GetCalendarsFor` per account each time a secret is saved, the same as every other
+  write on this page. A secret is rarely saved, and with no accounts yet it is one local read.
+- **Tests, written red first:**
+  - `correcting a malformed client secret loads the calendars it could not` (Unit). Red:
+    `Expected: Some([{ Id = "cal-1" ... }]) Actual: null`.
+  - `replacing the client secret with one that does not work says so straight away` (Unit). It runs
+    work newest first, which is the order a pool thread can finish it in. Red: `Expected: 2 Actual: 1`
+    fetches.
+  - `correcting a malformed client secret fills the calendar picker it had left empty` (E2E, through
+    the real store and workflows). Red: the wait timed out with the account's calendars `null` after
+    the alert had cleared.
+- **The ordering test was checked against the racy fix.** Starting the two reloads as separate work
+  items makes both other tests pass. The newest-first test then fails at the alert: `Expected:
+  Some(The stored Google client secret is malformed.) Actual: null`. That mutation was reverted and
+  never committed.
+
+### Considered and deliberately not changed
+
+- Series 1's deferrals and series 2 round 1's stand, for the reasons they give.
+
+### Series 2 round 2 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors, and no warnings re-emitted: the test project was already up to date from the red-first builds. That earlier build reported only `main`'s two test-file warnings (`PdfDocumentReaderTests.fs` FS0760, `ScanWindowStoreTests.fs` FS0020), and `PdfProcessing\Program.fs` FS0025 is untouched |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | **1524** (+3), 1523 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **808** (including the one pre-existing
+failure, which is tagged `Unit`), Integration **325**, Contract **350**, E2E **41**. 1524 in total.

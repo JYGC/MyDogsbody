@@ -35,16 +35,18 @@ let getGoogleAccountsBrowserModule
                 calendarsByAccountIdCval.Value <- change calendarsByAccountIdCval.Value
                 alsoInTransaction ()))
 
-    let loadClientSecret () =
-        startWork (fun () ->
-            let result = googleAccountApi.GetClientSecret()
+    /// Reads the stored client secret into the page, on whichever thread calls it.
+    let reloadClientSecret () =
+        let result = googleAccountApi.GetClientSecret()
 
-            transact (fun _ ->
-                match result with
-                | Ok secret ->
-                    clientSecretCval.Value <- secret
-                    errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message))
+        transact (fun _ ->
+            match result with
+            | Ok secret ->
+                clientSecretCval.Value <- secret
+                errorCval.Value <- None
+            | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message)
+
+    let loadClientSecret () = startWork reloadClientSecret
 
     /// Loads the calendars for one account, so its picker shows that account's own list
     /// (requirements.md: "populate it from that account's own calendars"). A failure here does
@@ -102,7 +104,13 @@ let getGoogleAccountsBrowserModule
                     isEditingClientSecretCval.Value <- false
                     isLoadingCval.Value <- false)
 
-                loadClientSecret ()
+                // Every calendar fetch parses the stored secret first, so the calendars are fetched
+                // again: a corrected secret fills the pickers a malformed one left empty, and a bad
+                // paste is reported now rather than at the next page load. The secret is re-read
+                // first, here rather than as work of its own - its success clears the alert, so it
+                // has to finish before a failing fetch can set one.
+                reloadClientSecret ()
+                loadAccounts ()
             | Error ex ->
                 transact (fun _ ->
                     errorCval.Value <- Some ex.Message

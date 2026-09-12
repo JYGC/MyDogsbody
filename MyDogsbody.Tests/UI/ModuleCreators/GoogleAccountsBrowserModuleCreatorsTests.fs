@@ -563,3 +563,111 @@ let ``calendars fetched for several accounts at once all reach the picker map`` 
 
         for id in ids do
             Assert.Equal<CalendarUiType list>([ aCalendar $"cal-{id}" $"Calendar {id}" true ], Map.find id byAccount)
+
+/// Holds work back and runs it newest first when the test says so - a pool thread can finish work in
+/// the opposite order it was started, and this is that order made deterministic.
+let private newestFirst () =
+    let pending = Collections.Generic.Stack<unit -> unit>()
+    let startWork (work: unit -> unit) = pending.Push work
+
+    let rec runAll () =
+        if pending.Count > 0 then
+            (pending.Pop()) ()
+            runAll ()
+
+    startWork, runAll
+
+let private malformedSecret = "The stored Google client secret is malformed."
+
+[<Fact; Trait("Level", "Unit")>]
+let ``correcting a malformed client secret loads the calendars it could not`` () =
+    // Every calendar fetch parses the stored client secret first, so a malformed one leaves every
+    // picker empty beside the alert. Fixing the secret clears that alert - and unless the calendars
+    // are fetched again, leaves each picker empty with neither the alert nor the no-calendars caption.
+    let stored = ref (Some "not-json")
+
+    let googleAccountApi =
+        api
+            (fun () -> Ok stored.Value)
+            (fun secret ->
+                stored.Value <- Some secret
+                Ok())
+            (fun () -> Ok [ anAccount "1" None false ])
+            (fun () -> failwith "unused")
+            (fun _ -> failwith "unused")
+            (fun _ -> Ok())
+            (fun _ ->
+                if stored.Value = Some "not-json" then
+                    Error(failure malformedSecret)
+                else
+                    Ok [ aCalendar "cal-1" "Invoices" true ])
+            (fun _ _ -> failwith "unused")
+
+    let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule runSynchronously googleAccountApi
+
+    Assert.Equal(Some malformedSecret, AVal.force browser.ErrorAval)
+    Assert.Equal<CalendarUiType list option>(None, Map.tryFind "1" (AVal.force browser.CalendarsByAccountIdAval))
+
+    browser.StartEditingClientSecret()
+    browser.SetClientSecret "the-corrected-secret"
+
+    Assert.Equal<CalendarUiType list option>(
+        Some [ aCalendar "cal-1" "Invoices" true ],
+        Map.tryFind "1" (AVal.force browser.CalendarsByAccountIdAval)
+    )
+
+    Assert.Equal(None, AVal.force browser.ErrorAval)
+    Assert.Equal(Some "the-corrected-secret", AVal.force browser.ClientSecretAval)
+    Assert.False(AVal.force browser.IsEditingClientSecretAval)
+    Assert.False(AVal.force browser.IsLoadingAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``replacing the client secret with one that does not work says so straight away`` () =
+    // SetClientSecret stores whatever it is given. A bad paste over a working secret breaks every
+    // calendar fetch, and the page has to say so when it happens rather than at the next page load.
+    // Work finishes newest first here: re-reading the secret succeeds and clears the alert, so it has
+    // to be done before the calendars are fetched, never alongside them.
+    let stored = ref (Some "the-working-secret")
+    let fetches = ref 0
+
+    let googleAccountApi =
+        api
+            (fun () -> Ok stored.Value)
+            (fun secret ->
+                stored.Value <- Some secret
+                Ok())
+            (fun () -> Ok [ anAccount "1" None false ])
+            (fun () -> failwith "unused")
+            (fun _ -> failwith "unused")
+            (fun _ -> Ok())
+            (fun _ ->
+                fetches.Value <- fetches.Value + 1
+
+                if stored.Value = Some "the-working-secret" then
+                    Ok [ aCalendar "cal-1" "Invoices" true ]
+                else
+                    Error(failure malformedSecret))
+            (fun _ _ -> failwith "unused")
+
+    let startWork, runAll = newestFirst ()
+    let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule startWork googleAccountApi
+    runAll ()
+
+    Assert.Equal(1, fetches.Value)
+    Assert.Equal(None, AVal.force browser.ErrorAval)
+
+    browser.StartEditingClientSecret()
+    browser.SetClientSecret "not-json"
+    runAll ()
+
+    Assert.Equal(2, fetches.Value)
+    Assert.Equal(Some malformedSecret, AVal.force browser.ErrorAval)
+    Assert.Equal(Some "not-json", AVal.force browser.ClientSecretAval)
+    // The last list that did load stays beside the alert until a fetch replaces it.
+    Assert.Equal<CalendarUiType list option>(
+        Some [ aCalendar "cal-1" "Invoices" true ],
+        Map.tryFind "1" (AVal.force browser.CalendarsByAccountIdAval)
+    )
+
+    Assert.False(AVal.force browser.IsEditingClientSecretAval)
+    Assert.False(AVal.force browser.IsLoadingAval)
