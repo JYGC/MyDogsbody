@@ -64,6 +64,17 @@ module MyDogsbody =
             let countMessages = $"{mailAccountApi}.countMessages"
             let clearWatermarks = $"{mailAccountApi}.clearWatermarks"
 
+        module GoogleAccountApi =
+            let private googleAccountApi = $"{startup}.GoogleAccountApi"
+            let getClientSecret = $"{googleAccountApi}.getClientSecret"
+            let setClientSecret = $"{googleAccountApi}.setClientSecret"
+            let getAccounts = $"{googleAccountApi}.getAccounts"
+            let registerAccount = $"{googleAccountApi}.registerAccount"
+            let reauthoriseAccount = $"{googleAccountApi}.reauthoriseAccount"
+            let removeAccount = $"{googleAccountApi}.removeAccount"
+            let getCalendarsFor = $"{googleAccountApi}.getCalendarsFor"
+            let setDefaultInvoiceCalendar = $"{googleAccountApi}.setDefaultInvoiceCalendar"
+
     /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
     /// it - MyDogsbody.Database is the application's main store, not an integration, so its
     /// entries do not go under Integrations.
@@ -116,6 +127,24 @@ module MyDogsbody =
                 let getAll = $"{googleCredentialStore}.getAll"
                 let insertOne = $"{googleCredentialStore}.insertOne"
                 let updateOne = $"{googleCredentialStore}.updateOne"
+
+            module GoogleAccountStore =
+                let private googleAccountStore = $"{google}.GoogleAccountStore"
+                let loadClientSecret = $"{googleAccountStore}.loadClientSecret"
+                let saveClientSecret = $"{googleAccountStore}.saveClientSecret"
+                let getAll = $"{googleAccountStore}.getAll"
+                let saveOne = $"{googleAccountStore}.saveOne"
+                let removeOne = $"{googleAccountStore}.removeOne"
+
+            module GoogleAuthorization =
+                let private googleAuthorization = $"{google}.GoogleAuthorization"
+                let authorise = $"{googleAuthorization}.authorise"
+                let loadCredential = $"{googleAuthorization}.loadCredential"
+                let removeStoredToken = $"{googleAuthorization}.removeStoredToken"
+
+            module GoogleCalendarClient =
+                let private googleCalendarClient = $"{google}.GoogleCalendarClient"
+                let listCalendars = $"{googleCalendarClient}.listCalendars"
 
         module Documents =
             let private documents = $"{integrations}.Documents"

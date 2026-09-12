@@ -20,9 +20,11 @@ calendar chosen.
 ### The client secret
 
 WHEN the application is first used with Google THE SYSTEM SHALL ask for one application-wide OAuth client secret, pasted once (Q3.2).
-WHEN the client secret has been supplied THE SYSTEM SHALL store it in the Google integration's own database and SHALL NOT ask again.
+WHEN the client secret has been supplied THE SYSTEM SHALL store it in the Google integration's own database and display it on the page, rather than asking again from a blank field.
 WHEN no client secret has been supplied THE SYSTEM SHALL say so and disable account registration, rather than failing at the authorisation call.
-WHEN a user replaces the client secret THE SYSTEM SHALL accept the new value and state that existing accounts may need re-authorising.
+WHEN a client secret is stored THE SYSTEM SHALL show it in a read-only field, with an explicit "Edit" action needed before it becomes editable — never open for editing by default.
+WHEN a user presses "Edit" on the client secret THE SYSTEM SHALL populate the editable field with the currently stored value, so a correction does not require retyping the whole secret from memory.
+WHEN a user replaces the client secret THE SYSTEM SHALL accept the new value, return the field to its read-only display, and state that existing accounts may need re-authorising.
 
 ### The consent flow
 
@@ -89,7 +91,7 @@ WHEN the description records the decision THE SYSTEM SHALL note that DPAPI (`Pro
 ## User interface
 
 WHEN a user navigates to `/settings/google-accounts` THE SYSTEM SHALL display the registered accounts, each with its email address, its default invoice calendar, and its readiness.
-WHEN the client secret has not been supplied THE SYSTEM SHALL show that first, with somewhere to paste it.
+WHEN the client secret has not been supplied THE SYSTEM SHALL show that first, with somewhere to paste it. WHEN one has been supplied THE SYSTEM SHALL show it read-only, with an "Edit" button that reveals it, pre-filled, for changing.
 WHEN a user presses "Add account" THE SYSTEM SHALL start the consent flow and show that it is in progress.
 WHEN a user opens an account's calendar picker THE SYSTEM SHALL populate it from **that account's own** calendars.
 WHEN a user removes an account THE SYSTEM SHALL ask for confirmation, stating that access remains granted at Google.

@@ -34,6 +34,11 @@ let settingsNavMenu(body: NodeRenderFragment) =
                         Icon Icons.Material.TwoTone.DateRange
                         "Scan windows"
                     }
+                    MudNavLink'' {
+                        Href "/settings/google-accounts"
+                        Icon Icons.Material.TwoTone.Event
+                        "Google accounts"
+                    }
                     MudNavGroup'' {
                         Title "Logs"
                         Icon Icons.Material.TwoTone.MonitorHeart
