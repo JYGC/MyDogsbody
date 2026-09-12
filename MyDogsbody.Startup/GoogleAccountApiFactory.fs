@@ -15,11 +15,55 @@ open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database.Types
 open MyDogsbody.UI.Types
 
-/// The stored client secret as the `LoadClientSecret` dependency - GoogleAccountStore speaks
-/// MyDogsbodyException, the dependency type speaks CalendarError.
-let private clientSecretFrom (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : LoadClientSecret =
+// ---------- Storage dependencies, as the composition root binds them. GoogleAccountStore and
+// GoogleAuthorization.removeStoredToken speak MyDogsbodyException; every dependency type here
+// speaks CalendarError, so each is translated on the way out.
+//
+// Public so that GoogleAccountDependencyContractTests and the E2E harness run these bindings rather
+// than copies of them. No factory test reaches SaveGoogleAccount or DiscardAuthorisation: only
+// registering, re-authorising and choosing a calendar use them, and each of those goes through
+// Google first. With copies in both places, a SaveGoogleAccount that never saved, and a
+// DiscardAuthorisation that never discarded, each passed the whole suite (PR review series 2
+// round 8). ----------
+
+/// The stored client secret, if one has been supplied.
+let bindLoadClientSecret (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : LoadClientSecret =
     fun () ->
         GoogleAccountStore.loadClientSecret handleError googleContext.GetClientSecretCollection ()
+        |> Result.mapError GoogleAccountApiMappers.toStoreError
+
+let bindSaveClientSecret (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : SaveClientSecret =
+    fun secret ->
+        GoogleAccountStore.saveClientSecret handleError googleContext.GetClientSecretCollection secret
+        |> Result.mapError GoogleAccountApiMappers.toStoreError
+
+let bindListGoogleAccounts (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : ListGoogleAccounts =
+    fun () ->
+        GoogleAccountStore.getAll handleError googleContext.GetAccountCollection ()
+        |> Result.mapError GoogleAccountApiMappers.toStoreError
+
+let bindSaveGoogleAccount (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : SaveGoogleAccount =
+    fun account ->
+        GoogleAccountStore.saveOne handleError googleContext.GetAccountCollection account
+        |> Result.mapError GoogleAccountApiMappers.toStoreError
+
+let bindRemoveGoogleAccount (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : RemoveGoogleAccount =
+    fun accountId ->
+        GoogleAccountStore.removeOne handleError googleContext.GetAccountCollection accountId
+        |> Result.mapError GoogleAccountApiMappers.toStoreError
+
+/// Throws away the token a completed consent flow left behind when the registration it was for is
+/// refused. Same adapter `RemoveAccount` uses to delete a removed account's token - an authorisation
+/// with no account row is exactly what removing an account leaves behind.
+let bindDiscardAuthorisation
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    : DiscardAuthorisation =
+    fun accountId ->
+        GoogleAuthorization.removeStoredToken
+            handleError
+            googleContext.GetCredentialCollection
+            (GoogleAccountId.value accountId)
         |> Result.mapError GoogleAccountApiMappers.toStoreError
 
 /// The client secret's raw string, for the adapter calls that need it directly rather than
@@ -55,7 +99,7 @@ let bindListCalendars
             -> unit
             -> Result<AvailableCalendar list, MyDogsbodyException>)
     : ListCalendars =
-    let loadClientSecretValue = clientSecretValueFrom (clientSecretFrom handleError googleContext)
+    let loadClientSecretValue = clientSecretValueFrom (bindLoadClientSecret handleError googleContext)
 
     fun accountId ->
         result {
@@ -76,30 +120,14 @@ let bindListCalendars
 
 let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : GoogleAccountApi =
 
-    // ---------- Storage dependencies: GoogleAccountStore speaks MyDogsbodyException; every
-    // dependency type here speaks CalendarError, so each is translated on the way out. ----------
+    // ---------- Storage dependencies: the bindings above, the ones the contract suite runs. ----------
 
-    let loadClientSecret: LoadClientSecret = clientSecretFrom handleError googleContext
-
-    let saveClientSecretDependency: SaveClientSecret =
-        fun secret ->
-            GoogleAccountStore.saveClientSecret handleError googleContext.GetClientSecretCollection secret
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
-
-    let listGoogleAccounts: ListGoogleAccounts =
-        fun () ->
-            GoogleAccountStore.getAll handleError googleContext.GetAccountCollection ()
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
-
-    let saveGoogleAccount: SaveGoogleAccount =
-        fun account ->
-            GoogleAccountStore.saveOne handleError googleContext.GetAccountCollection account
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
-
-    let removeGoogleAccountDependency: RemoveGoogleAccount =
-        fun accountId ->
-            GoogleAccountStore.removeOne handleError googleContext.GetAccountCollection accountId
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
+    let loadClientSecret = bindLoadClientSecret handleError googleContext
+    let saveClientSecretDependency = bindSaveClientSecret handleError googleContext
+    let listGoogleAccounts = bindListGoogleAccounts handleError googleContext
+    let saveGoogleAccount = bindSaveGoogleAccount handleError googleContext
+    let removeGoogleAccountDependency = bindRemoveGoogleAccount handleError googleContext
+    let discardAuthorisation = bindDiscardAuthorisation handleError googleContext
 
     let loadClientSecretValue = clientSecretValueFrom loadClientSecret
 
@@ -135,17 +163,6 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
 
                 return! GoogleEmail.create emailRaw |> Result.mapError (fun _ -> AccountEmailUnavailable)
             }
-
-    /// Throws away the token a completed consent flow left behind when the registration it was
-    /// for is refused. Same adapter `RemoveAccount` uses to delete a removed account's token -
-    /// an authorisation with no account row is exactly what removing an account leaves behind.
-    let discardAuthorisation: DiscardAuthorisation =
-        fun accountId ->
-            GoogleAuthorization.removeStoredToken
-                handleError
-                googleContext.GetCredentialCollection
-                (GoogleAccountId.value accountId)
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
 
     let listCalendarsDependency: ListCalendars =
         bindListCalendars handleError googleContext GoogleCalendarClient.listCalendars

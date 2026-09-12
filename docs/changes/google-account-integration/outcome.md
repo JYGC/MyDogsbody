@@ -2021,3 +2021,107 @@ against `76f2117` before anything changed.
 Per level, each measured with `--filter "Level=..."`: Unit **817** (including the one
 pre-existing failure, which is tagged `Unit`), Integration **327**, Contract
 **361** (+8), E2E **43**. 1548 in total.
+
+---
+
+## PR review, series 2 round 8 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 17 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `7ce8db3` before anything changed.
+
+### Rounds 1–7, re-checked
+
+- **The lock around the calendars map stands.** Both writers of the map (`loadCalendarsFor`'s
+  success and `removeAccount`) go through `changeCalendars`. The lock is only taken on a work
+  thread, before `transact`, and nothing inside it takes another.
+- **`minAccessRole=writer` stands.** `listAllPages` sets it inside the paging loop, so every page's
+  request carries it.
+- **The save path and the page load stand.** Each reads the secret and then loads the accounts in
+  one work item, and the spinner is set before any work runs.
+- **`SetClientSecretWorkflow` stands.** It refuses a null or blank secret without reaching the
+  store, and the factory's `SetClientSecret` and the E2E harness both go through it.
+- **`summaryOverride` stands.** `toAvailableCalendar` takes it when it is set, and `summary`
+  otherwise.
+- **Round 6's prefix and sentence stand.** Every calendar-fetch failure names the account by email,
+  and `NotAuthorised`'s outbound sentence names no id.
+- **Round 7's binding stands.** `createGoogleAccountApi` passes `GoogleCalendarClient.listCalendars`
+  to `bindListCalendars`, so production is unchanged, and the suite's three shared cases run the
+  binding and the fake alike. Its one adapter-level case (`invalid_grant`) says why in the file: the
+  binding's credential would refresh against Google's real token endpoint.
+
+### No test reached the factory's `SaveGoogleAccount` or `DiscardAuthorisation` binding
+
+- **The defect.** Round 7 found that the `ListCalendars` suite ran a copy of the composition root's
+  binding. The other Google dependency suite did the same, and there the copy hid more.
+  `GoogleAccountDependencyContractTests` said its real side was "the real bindings
+  (GoogleAccountApiFactory over a temp LiteDB)". It never called the factory: it re-composed each
+  binding in the test file. The E2E harness re-composed them too. And no other test can reach two of
+  the factory's bindings:
+  - `SaveGoogleAccount` is used only by registering, re-authorising and choosing a calendar.
+  - `DiscardAuthorisation` is used only by registering.
+
+  Each of those goes through Google (the browser, or the calendar list) before the binding runs, and
+  the factory tests stop at the refusals that come first.
+- **Measured before the fix**, with temporary mutations of the factory, reverted and never
+  committed:
+
+  | Mutation of `GoogleAccountApiFactory` | Whole suite, before |
+  | --- | --- |
+  | `saveGoogleAccount` returns `Ok` without saving: every registration and every default-calendar choice is lost | **0 failing**, apart from the pre-existing `SqliteConnectionPoolingTests` (1547 of 1548 passed) |
+  | `discardAuthorisation` returns `Ok` without discarding: every refused registration strands its refresh token, series 1 round 1's defect | **0 failing**, the same 1547 of 1548 |
+
+- **Fix.**
+  - The factory's six storage-facing bindings are public functions: `bindLoadClientSecret`,
+    `bindSaveClientSecret`, `bindListGoogleAccounts`, `bindSaveGoogleAccount`,
+    `bindRemoveGoogleAccount` and `bindDiscardAuthorisation`. Each takes `handleError` and the
+    context, and returns its dependency type. `createGoogleAccountApi` binds through them. They are
+    the closures it already had, so production behaviour is unchanged.
+  - The contract suite's real side is those functions, over a temp `Google.db`. The copies are
+    deleted, and the file's header says what it runs.
+- **Widening, noted.** The E2E harness's six storage dependencies are the same functions, so every
+  E2E flow that registers an account or chooses a calendar runs production's `SaveGoogleAccount`.
+  The API record around them is still composed in the harness (tasks.md 9.1).
+- **Tests.**
+  - Red first, with the suite and the harness moved onto the bindings before they existed: 12
+    compile errors, one per name in each file, each `error FS0039: The value, constructor,
+    namespace or type 'bindSaveGoogleAccount' is not defined` (and the same for the other five).
+  - **The mutations again, after the fix:** The never-saving
+    `saveGoogleAccount` now fails **12** tests: the suite's three that save an account
+    (`SaveGoogleAccount then ListGoogleAccounts returns every field intact`, `saving an account
+    twice updates rather than duplicating`, `RemoveGoogleAccount deletes a known account and reports
+    true`) and 9 of the 13 E2E flows. The never-discarding `discardAuthorisation` fails **2**:
+    `DiscardAuthorisation removes the authorisation it names` and `... leaves every other account's
+    authorisation alone`. The pre-existing `SqliteConnectionPoolingTests` failure is set aside in
+    both counts. Both mutations were reverted and never committed, and the factory was compared
+    byte-for-byte with the fixed version afterwards.
+  - No new test, and no behavioural red run, because no behaviour changed. The 22 shared-suite tests
+    now run the factory's bindings rather than copies of them.
+- **Also corrected.** tasks.md 7.1 gave that suite as 12 tests over five dependency types. It is 22
+  over six: `DiscardAuthorisation` joined it in series 1 round 1.
+
+### Considered and deliberately not changed
+
+- **The factory's members are still reached by no test past their preconditions.**
+  `RegisterAccount`, `ReauthoriseAccount` and `SetDefaultInvoiceCalendar` are only driven as far as
+  their refusals (no client secret, an unregistered account), and the E2E harness composes its own
+  API record. Measured: after the fix, with the `RegisterAccount` member
+  handing the workflow a discard that does nothing (`fun _ -> Ok ()`), no test fails (1547 of 1548
+  pass, the pre-existing failure aside). Closing that means the factory taking its three Google-facing
+  dependencies (`AuthoriseAccount`, `ReauthoriseAccount`, `ListCalendars`) as parameters, so that
+  the E2E harness goes through the composition root with fakes in their place. That reverses
+  tasks.md 9.1's recorded choice, so it is flagged rather than folded in. Change #7 adds four
+  Google-facing dependency types to this factory and meets the same question for its own flows.
+- Series 1's deferrals and series 2 rounds 1–7's stand, for the reasons they give.
+
+### Series 2 round 8 gate
+
+| Check | Result |
+| --- | --- |
+| Baseline over `7ce8db3`, measured before anything changed | 1548 tests, 1547 passed, 0 skipped. The one failure is the pre-existing `SqliteConnectionPoolingTests`. Build: 0 errors, and only `main`'s three warnings |
+| `dotnet build MyDogsbody.sln` | 0 errors. 2 warnings re-emitted, both pre-existing and present on `main`: `Tests\Database\ScanWindowStoreTests.fs` FS0020 and `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760. `PdfProcessing\Program.fs` FS0025 is untouched and was not rebuilt (the baseline build reported it) |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1548 → **1548**, 1547 passed, 0 skipped, no hang. No test was added or removed: the 22 contract tests and the E2E harness now run the factory's bindings |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **817** (including the one pre-existing failure, which is tagged `Unit`), Integration **327**, Contract
+**361**, E2E **43**. 1548 in total, unchanged.

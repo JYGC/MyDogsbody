@@ -243,8 +243,14 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
 - [x] **7.1** One shared suite per dependency function type. **Split across two files, not one, by
       what "real" means for each:**
       - `GoogleAccountDependencyContractTests.fs` — `LoadClientSecret`, `SaveClientSecret`,
-        `ListGoogleAccounts`, `SaveGoogleAccount`, `RemoveGoogleAccount`: pure LiteDB CRUD, real
-        bindings over a temp file + an in-memory fake. 12 tests.
+        `ListGoogleAccounts`, `SaveGoogleAccount`, `RemoveGoogleAccount`, `DiscardAuthorisation`:
+        pure LiteDB CRUD, real bindings over a temp file + an in-memory fake. 22 tests.
+        *Since PR review series 2 round 8:* the real side is the composition root's own bindings,
+        `GoogleAccountApiFactory.bindLoadClientSecret` and the other five `bind*` functions. It used
+        to run a copy of each, written in the test file. No other test reaches the factory's
+        `SaveGoogleAccount` or `DiscardAuthorisation`, since only members that go through Google
+        first use them, so a factory that never saved an account, or never discarded a refused
+        registration's token, passed the whole suite.
       - `ListCalendarsDependencyContractTests.fs` — `ListCalendars`: the real adapter
         (`GoogleCalendarClient.listCalendarsVia`) over a **stubbed `HttpMessageHandler`** + an
         in-memory fake. 4 tests.
@@ -288,7 +294,9 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       *Outcome:* the harness does **not** go through `GoogleAccountApiFactory` — it re-composes the
       same real `GoogleAccountStore` bindings and domain workflows directly, with `AuthoriseAccount`
       and `ListCalendars` supplied as test-controlled fakes, because the real consent flow needs a
-      system browser and the real calendar client needs the network. `MudSelect` (the calendar
+      system browser and the real calendar client needs the network. *Since PR review series 2
+      round 8* its six storage-facing dependencies are the factory's own `bind*` functions, not
+      copies; the API record around them is still composed in the harness. `MudSelect` (the calendar
       picker) renders through a popover, so the view is rendered inside a `MudPopoverProvider`, the
       same fix `InvoicesFlowTests` already needed for its own `MudSelect`.
       *Since PR review round 9:* the failure flow asserts on the error alert element and on the

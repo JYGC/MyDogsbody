@@ -14,13 +14,21 @@ open MyDogsbody.Startup
 // LoadClientSecret, SaveClientSecret, ListGoogleAccounts, SaveGoogleAccount, RemoveGoogleAccount
 // and DiscardAuthorisation are dependency function types a domain workflow consumes - published
 // interfaces, so CLAUDE.md's shared-suite rule applies: the same suite runs against the real
-// bindings (GoogleAccountApiFactory over a temp LiteDB) and an in-memory fake, so a workflow unit
-// test's fake cannot drift into a shape the real store never produces.
+// bindings and an in-memory fake, so a workflow unit test's fake cannot drift into a shape the
+// real store never produces.
+//
+// The real bindings are the composition root's own - GoogleAccountApiFactory's bind* functions,
+// over a temp LiteDB - never a re-composition written here. No factory test can reach
+// SaveGoogleAccount or DiscardAuthorisation: only registering, re-authorising and choosing a
+// calendar use them, and each of those goes through Google first. Until PR review series 2 round 8
+// this suite ran a copy of each binding, and a factory whose SaveGoogleAccount never saved, or
+// whose DiscardAuthorisation never discarded, passed the whole test suite.
 //
 // AuthoriseAccount and ListCalendars are not here - the real Google network/browser cannot run in
 // an automated test. AuthoriseAccount's real-side coverage is `GoogleAuthorizationTests`
 // (`authoriseWith` bound to fakes at the innermost SDK seam); ListCalendars' is
-// `ListCalendarsDependencyContractTests` (the real adapter over a stubbed HttpMessageHandler).
+// `ListCalendarsDependencyContractTests` (the composition root's binding over a stubbed
+// HttpMessageHandler).
 
 let private handleError = HandleErrorBuilder(fun _ -> ())
 
@@ -47,7 +55,7 @@ type private GoogleAccountDependencies =
         AuthorisationCount: unit -> int
     }
 
-// ---------- the real bindings, over a temp LiteDB file ----------
+// ---------- the composition root's own bindings, over a temp LiteDB file ----------
 
 let private withRealDependencies (test: GoogleAccountDependencies -> unit) =
     let databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
@@ -56,33 +64,12 @@ let private withRealDependencies (test: GoogleAccountDependencies -> unit) =
     try
         test
             {
-                LoadClientSecret =
-                    fun () ->
-                        GoogleAccountStore.loadClientSecret handleError context.GetClientSecretCollection ()
-                        |> Result.mapError GoogleAccountApiMappers.toStoreError
-                SaveClientSecret =
-                    fun secret ->
-                        GoogleAccountStore.saveClientSecret handleError context.GetClientSecretCollection secret
-                        |> Result.mapError GoogleAccountApiMappers.toStoreError
-                ListGoogleAccounts =
-                    fun () ->
-                        GoogleAccountStore.getAll handleError context.GetAccountCollection ()
-                        |> Result.mapError GoogleAccountApiMappers.toStoreError
-                SaveGoogleAccount =
-                    fun account ->
-                        GoogleAccountStore.saveOne handleError context.GetAccountCollection account
-                        |> Result.mapError GoogleAccountApiMappers.toStoreError
-                RemoveGoogleAccount =
-                    fun accountId ->
-                        GoogleAccountStore.removeOne handleError context.GetAccountCollection accountId
-                        |> Result.mapError GoogleAccountApiMappers.toStoreError
-                DiscardAuthorisation =
-                    fun accountId ->
-                        GoogleAuthorization.removeStoredToken
-                            handleError
-                            context.GetCredentialCollection
-                            (GoogleAccountId.value accountId)
-                        |> Result.mapError GoogleAccountApiMappers.toStoreError
+                LoadClientSecret = GoogleAccountApiFactory.bindLoadClientSecret handleError context
+                SaveClientSecret = GoogleAccountApiFactory.bindSaveClientSecret handleError context
+                ListGoogleAccounts = GoogleAccountApiFactory.bindListGoogleAccounts handleError context
+                SaveGoogleAccount = GoogleAccountApiFactory.bindSaveGoogleAccount handleError context
+                RemoveGoogleAccount = GoogleAccountApiFactory.bindRemoveGoogleAccount handleError context
+                DiscardAuthorisation = GoogleAccountApiFactory.bindDiscardAuthorisation handleError context
                 StoreAuthorisationFor =
                     fun accountId ->
                         let dataStore =

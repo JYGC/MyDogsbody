@@ -20,10 +20,12 @@ open MyDogsbody.UI.Types
 /// `RegisterAccount`/`GetCalendarsFor`/`SetDefaultInvoiceCalendar` are built here rather than via
 /// `GoogleAccountApiFactory`, because the real consent flow needs a system browser and the real
 /// calendar client needs a network connection - neither of which any test may require
-/// (tasks.md's own header rule). Everything storage-facing (`GoogleAccountStore`, the LiteDB
-/// context, the domain workflows, the error translation) is exactly what production runs; only
-/// the two network-touching adapter calls are replaced by test-controlled fakes, matching the
-/// same seam `GoogleAuthorizationTests`/`GoogleAccountApiFactoryTests` already exercise.
+/// (tasks.md's own header rule). Everything storage-facing is what production runs: the
+/// dependencies are the factory's own bindings (`GoogleAccountApiFactory.bind*`, since PR review
+/// series 2 round 8, rather than copies of them), over the real LiteDB context, with the real
+/// domain workflows and error translation. Only the two network-touching dependencies are
+/// test-controlled fakes, matching the same seam `GoogleAuthorizationTests`/
+/// `GoogleAccountApiFactoryTests` already exercise.
 type GoogleAccountsHarness
     (
         authoriseAccount: AuthoriseAccount,
@@ -57,35 +59,16 @@ let withGoogleAccountsHarness
     let logged = ResizeArray<MyDogsbodyException>()
     let handleError = HandleErrorBuilder logged.Add
 
-    let loadClientSecret: LoadClientSecret =
-        fun () ->
-            GoogleAccountStore.loadClientSecret handleError context.GetClientSecretCollection ()
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
-
-    let saveClientSecretDependency: SaveClientSecret =
-        fun secret ->
-            GoogleAccountStore.saveClientSecret handleError context.GetClientSecretCollection secret
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
-
-    let listGoogleAccounts: ListGoogleAccounts =
-        fun () ->
-            GoogleAccountStore.getAll handleError context.GetAccountCollection ()
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
-
-    let saveGoogleAccount: SaveGoogleAccount =
-        fun account ->
-            GoogleAccountStore.saveOne handleError context.GetAccountCollection account
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
+    let loadClientSecret: LoadClientSecret = GoogleAccountApiFactory.bindLoadClientSecret handleError context
+    let saveClientSecretDependency: SaveClientSecret = GoogleAccountApiFactory.bindSaveClientSecret handleError context
+    let listGoogleAccounts: ListGoogleAccounts = GoogleAccountApiFactory.bindListGoogleAccounts handleError context
+    let saveGoogleAccount: SaveGoogleAccount = GoogleAccountApiFactory.bindSaveGoogleAccount handleError context
 
     let removeGoogleAccountDependency: RemoveGoogleAccount =
-        fun accountId ->
-            GoogleAccountStore.removeOne handleError context.GetAccountCollection accountId
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
+        GoogleAccountApiFactory.bindRemoveGoogleAccount handleError context
 
     let discardAuthorisation: DiscardAuthorisation =
-        fun accountId ->
-            GoogleAuthorization.removeStoredToken handleError context.GetCredentialCollection (GoogleAccountId.value accountId)
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
+        GoogleAccountApiFactory.bindDiscardAuthorisation handleError context
 
     let toException = GoogleAccountApiMappers.toMyDogsbodyException
 
