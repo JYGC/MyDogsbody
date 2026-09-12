@@ -242,3 +242,22 @@ let ``the real adapter lists only calendars the account can add events to`` () =
         Assert.Equal("My Calendar", CalendarName.value calendar.Name)
         Assert.True calendar.IsPrimary
     )
+
+[<Fact; Trait("Level", "Contract")>]
+let ``the real adapter names a calendar the way the account's own list does`` () =
+    // ListCalendars' names are what the picker shows. Google Calendar shows the user the name the
+    // account gave a calendar (`summaryOverride`) over its owner's title (`summary`), and two shared
+    // calendars with the same title are told apart only by those names.
+    let renamed =
+        """{ "kind": "calendar#calendarListEntry", "id": "alice@group.calendar.google.com", "summary": "Invoices", "summaryOverride": "Invoices - Alice", "primary": false, "accessRole": "writer" }"""
+
+    let respond (_: HttpRequestMessage) =
+        jsonResponse HttpStatusCode.OK (calendarListPage renamed)
+
+    withRealListCalendars respond (fun listCalendars ->
+        let actual = listCalendars accountId |> okOrFail "listCalendars"
+        let calendar = Assert.Single actual
+        Assert.Equal("alice@group.calendar.google.com", CalendarId.value calendar.Id)
+        Assert.Equal("Invoices - Alice", CalendarName.value calendar.Name)
+        Assert.False calendar.IsPrimary
+    )

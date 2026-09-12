@@ -314,3 +314,38 @@ let ``listCalendars offers only calendars the account can add events to, on ever
 
     let ids = actual |> List.map (fun c -> CalendarId.value c.Id) |> List.sort
     Assert.Equal<string list>([ "primary"; "team@group.calendar.google.com" ], ids)
+
+let private calendarEntryRenamed id summary summaryOverride isPrimary =
+    $"""{{ "kind": "calendar#calendarListEntry", "id": "{id}", "summary": "{summary}", "summaryOverride": "{summaryOverride}", "primary": {isPrimary}, "accessRole": "writer" }}"""
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listCalendars names each calendar the way the account's own calendar list does`` () =
+    // `summary` is the title the calendar's owner gave it; `summaryOverride` is the name this account
+    // gave it in its own list, which is what Google Calendar shows the user. Two people's shared
+    // calendars, both titled "Invoices" and renamed by this account to tell them apart, reached the
+    // picker as two indistinguishable "Invoices" - a choice the user could get wrong with nothing to
+    // say so. A calendar with no override keeps its title.
+    let respond (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.OK
+            (calendarListPage
+                (calendarEntryRenamed "alice@group.calendar.google.com" "Invoices" "Invoices - Alice" "false"
+                 + ","
+                 + calendarEntryRenamed "bob@group.calendar.google.com" "Invoices" "Invoices - Bob" "false"
+                 + ","
+                 + calendarEntryWithRole "primary" "person@example.com" "true" "owner")
+                None)
+
+    let actual =
+        listCalendars respond
+        |> okOrFail "listCalendars"
+        |> List.map (fun c -> CalendarId.value c.Id, CalendarName.value c.Name, c.IsPrimary)
+
+    Assert.Equal<(string * string * bool) list>(
+        [
+            "alice@group.calendar.google.com", "Invoices - Alice", false
+            "bob@group.calendar.google.com", "Invoices - Bob", false
+            "primary", "person@example.com", true
+        ],
+        actual
+    )

@@ -1713,3 +1713,89 @@ Per level, each measured with `--filter "Level=..."`: Unit **816** (+6, includin
 failure, which is tagged `Unit`), Integration **326** (+1), Contract **352** (+2), E2E **42** (+1).
 1536 in total. The new E2E flow, which clicks through the renderer's dispatcher, passed in 5 further
 runs of its class.
+
+---
+
+## PR review, series 2 round 5 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 14 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `d3e6d49` before anything changed.
+
+### Rounds 1–4, re-checked
+
+- **The lock around the calendars map stands.** Both writers of the map (`loadCalendarsFor`'s
+  success and `removeAccount`) go through `changeCalendars`, and nothing inside the lock takes
+  another one.
+- **`minAccessRole=writer` stands.** It is set on every page's request, and this round's change
+  touches only what a listed calendar is called, not which calendars are listed.
+- **The save path and the page load stand.** Each reads the secret and then loads the accounts in
+  one work item, and the spinner is still set before any work runs.
+- **`SetClientSecretWorkflow` stands.** It refuses a null or blank secret without reaching the
+  store and stores anything else verbatim. The factory's `SetClientSecret` and the E2E harness both
+  go through it, and `ClientSecretInvalid` stays an expected, unlogged case.
+
+### The calendar picker named calendars by their owner's title, not the account's own name for them
+
+- **The defect.** `GoogleCalendarClient` named each calendar from `summary`, the title its owner
+  gave it. Google's calendar list also carries `summaryOverride`, "the summary that the
+  authenticated user has set for this calendar", and that is the name Google Calendar shows the
+  user. `CalendarName`'s own doc comment promises "a calendar's display name, as Google shows it".
+  Writable calendars shared by other people are exactly the ones `minAccessRole=writer` keeps, and
+  their titles are chosen by other people. Two people's shared calendars, both titled "Invoices" and
+  renamed by this account to tell them apart, reached the picker as two identical "Invoices". A
+  user could choose the wrong one, and nothing would say so.
+- **Measured before the fix**, with a scratch script driving the real `listCalendarsVia` over a
+  stubbed handler that returned Google's own entry shape:
+
+  | Entry (`summary` / `summaryOverride`) | Name in the picker, before | After |
+  | --- | --- | --- |
+  | `Invoices` / `Invoices - Alice` | `Invoices` | `Invoices - Alice` |
+  | `Invoices` / `Invoices - Bob` | `Invoices` | `Invoices - Bob` |
+  | `person@example.com` / *(none)* | `person@example.com` | `person@example.com` |
+
+- **Fix.** `toAvailableCalendar` takes `summaryOverride` when the account has set one, and `summary`
+  otherwise. Only the name changes: ids, `IsPrimary`, paging and `minAccessRole` are untouched.
+- **Tests:**
+  - `listCalendars names each calendar the way the account's own calendar list does`
+    (Integration, `GoogleCalendarClientTests`), written red first. It asserts every field of all
+    three entries. Red: `Expected: [("alice@...", "Invoices - Alice", False); ("bob@...", "Invoices
+    - Bob", False); ("primary", "person@example.com", True)]`, `Actual: [("alice@...", "Invoices",
+    False); ("bob@...", "Invoices", False); ...]`.
+  - `the real adapter names a calendar the way the account's own list does` (Contract, real adapter
+    only, like the writer-access test: `AvailableCalendar` has no override for a fake to express).
+    Written after the fix, so it was checked against the original adapter restored from git: red,
+    `Expected: "Invoices - Alice"`, `Actual: "Invoices"`. That restore was reverted and never
+    committed.
+  - No Unit test: `toAvailableCalendar` is private, and the stubbed-handler tests above are how this
+    adapter is exercised everywhere else. No E2E test: the E2E harness substitutes `ListCalendars`
+    with a fake, so it never reaches the adapter (the same reason rounds 5 and 6 of series 1 give).
+- **Not checked against a real Google account.** Task 10.4's manual coverage is where that belongs.
+
+### Considered and deliberately not changed
+
+- **A successful accounts load wipes the alert a failed secret read set.** The page reads the secret
+  and then loads the accounts, and the accounts load's success clears the alert. If the read failed
+  and the load then succeeded, the page would say no secret has been supplied. Both read the same
+  `Google.db`, so one failing while the other succeeds takes a damaged `ClientSecret` document that
+  nothing in the app can write. This is the class series 1 round 3 deferred ("a success clears
+  another operation's error"), and the reverse of the ordering series 2 round 3 fixed.
+- **Each calendar fetch builds a `GoogleAuthorizationCodeFlow` and never disposes it.** Its
+  `HttpClient` is only used to refresh the access token, which happens at most about once an hour
+  per account, because a refreshed token is stored for the next fetch. The cost is negligible.
+- **Calendars the user has hidden in Google Calendar are not offered** (`showHidden` defaults to
+  false). Hiding is the user's own choice in Google's list. A stored default that is hidden later
+  joins series 1 round 9's "a calendar deleted after it was stored" deferral.
+- Series 1's deferrals and series 2 rounds 1–4's stand, for the reasons they give.
+
+### Series 2 round 5 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. 2 warnings re-emitted, both pre-existing and present on `main`: `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020. `PdfProcessing\Program.fs` FS0025 is untouched and was not rebuilt |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1536 → **1538** (+2), 1536 passed, 0 skipped, no hang |
+| Failures | Two, neither in code this round touched. The pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. And the known LiteDB flake: `ThunderbirdStoreTests.loadProfileRoot returns None for a fresh database` threw `Collection was modified` from `BsonMapper.SerializeObject` at `ThunderbirdDatabaseContextModule.fs:16`'s warm-up, the global `BsonMapper` race *Per-integration databases* documents. It was not re-run; the Integration-level count taken straight afterwards passed it (327 of 327) |
+
+Per level, each measured with `--filter "Level=..."`: Unit **816** (unchanged, including the one
+pre-existing failure, which is tagged `Unit`), Integration **327** (+1), Contract
+**353** (+1), E2E **42** (unchanged). 1538 in total.

@@ -56,8 +56,19 @@ let private googleMessage (ex: Google.GoogleApiException) =
 /// A calendar entry the domain's rules reject (an empty id or name, which Google never actually
 /// sends) is dropped rather than failing the whole list - the same "be lenient reading, strict
 /// writing" posture the rest of this codebase's bottom mappers take.
+///
+/// Named the way the account's own calendar list names it, which is what Google Calendar shows the
+/// user: `summaryOverride` when the account has renamed the calendar, its owner's `summary`
+/// otherwise. Two people's shared calendars can both be titled "Invoices", and the account's own
+/// names for them are what tell them apart in the picker.
 let private toAvailableCalendar (entry: Data.CalendarListEntry) : AvailableCalendar option =
-    match CalendarId.create entry.Id, CalendarName.create entry.Summary with
+    let name =
+        if String.IsNullOrWhiteSpace entry.SummaryOverride then
+            entry.Summary
+        else
+            entry.SummaryOverride
+
+    match CalendarId.create entry.Id, CalendarName.create name with
     | Ok id, Ok name -> Some { Id = id; Name = name; IsPrimary = entry.Primary.GetValueOrDefault() }
     | _ -> None
 
