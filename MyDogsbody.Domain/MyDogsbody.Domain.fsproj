@@ -61,6 +61,7 @@
     <Compile Include="Calendar\SetDefaultInvoiceCalendarWorkflow.fs" />
     <Compile Include="Calendar\RemoveGoogleAccountWorkflow.fs" />
     <Compile Include="Calendar\ReauthoriseGoogleAccountWorkflow.fs" />
+    <Compile Include="Calendar\SetClientSecretWorkflow.fs" />
   </ItemGroup>
 
   <Target Name="AssertDomainReferencesNothing" BeforeTargets="Build">

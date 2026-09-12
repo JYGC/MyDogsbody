@@ -139,6 +139,7 @@ tells the user to do the wrong thing.
 | `ListGoogleAccountsWorkflow.fs` | `ListGoogleAccounts -> unit -> Result<RegisteredGoogleAccount list, CalendarError>` | Ordered by email |
 | `SetDefaultInvoiceCalendarWorkflow.fs` | `ListGoogleAccounts -> ListCalendars -> SaveGoogleAccount -> string -> string -> Result<RegisteredGoogleAccount, CalendarError>` | Confirms the calendar still exists at Google before storing it |
 | `RemoveGoogleAccountWorkflow.fs` | `RemoveGoogleAccount -> string -> Result<unit, CalendarError>` | Local only. No revoke |
+| `SetClientSecretWorkflow.fs` *(PR review series 2 round 4)* | `SaveClientSecret -> string -> Result<unit, CalendarError>` | Refuses a blank secret with `ClientSecretInvalid`, without reaching the store: a stored secret reads as a supplied one, so a blank one must never be stored. Anything else is stored verbatim |
 
 ### LiteDB, added to change #5's context
 

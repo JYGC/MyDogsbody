@@ -46,8 +46,11 @@ let private withFakeApi (test: GoogleAccountApi -> unit) =
             GetClientSecret = fun () -> Ok clientSecret
             SetClientSecret =
                 fun secret ->
-                    clientSecret <- Some secret
-                    Ok()
+                    if String.IsNullOrWhiteSpace secret then
+                        fail ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret "Google client secret must not be empty."
+                    else
+                        clientSecret <- Some secret
+                        Ok()
             GetAccounts = fun () -> Ok(List.ofSeq accounts)
             RegisterAccount =
                 fun () ->
@@ -116,6 +119,26 @@ let ``SetClientSecret then GetClientSecret returns the stored value`` (implement
     withImplementation implementation (fun api ->
         api.SetClientSecret sampleClientSecret |> okOrFail "SetClientSecret"
         Assert.Equal(Some sampleClientSecret, api.GetClientSecret() |> okOrFail "GetClientSecret")
+    )
+
+[<Theory; Trait("Level", "Contract")>]
+[<MemberData(nameof implementations)>]
+let ``SetClientSecret refuses a blank secret as an unlogged exception, keeping what was stored`` (implementation: string) =
+    // The page reads "a secret is stored" as "one has been supplied", so a blank one must never be
+    // stored - not over nothing, and not over a secret that works.
+    withImplementation implementation (fun api ->
+        let refusedOverNothing = api.SetClientSecret "" |> errorOrFail "SetClientSecret"
+        Assert.Equal(None, api.GetClientSecret() |> okOrFail "GetClientSecret")
+
+        api.SetClientSecret sampleClientSecret |> okOrFail "SetClientSecret"
+        let refusedOverWorking = api.SetClientSecret "   " |> errorOrFail "SetClientSecret"
+        Assert.Equal(Some sampleClientSecret, api.GetClientSecret() |> okOrFail "GetClientSecret")
+
+        for ex in [ refusedOverNothing; refusedOverWorking ] do
+            Assert.Equal("Google client secret must not be empty.", ex.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret, ex.ActionName)
+            let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+            Assert.Equal("Google client secret must not be empty.", inner.Message)
     )
 
 [<Theory; Trait("Level", "Contract")>]

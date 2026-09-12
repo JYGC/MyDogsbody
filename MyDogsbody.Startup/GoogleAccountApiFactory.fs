@@ -135,7 +135,7 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
 
         SetClientSecret =
             fun secret ->
-                saveClientSecretDependency secret
+                SetClientSecretWorkflow.setClientSecret saveClientSecretDependency secret
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret)
 
         GetAccounts =

@@ -1623,3 +1623,93 @@ against `648c04c` before anything changed.
 
 Per level, each measured with `--filter "Level=..."`: Unit **810** (including the one pre-existing
 failure, which is tagged `Unit`), Integration **325**, Contract **350**, E2E **41**. 1526 in total.
+
+---
+
+## PR review, series 2 round 4 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 13 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `4856f9b` before anything changed.
+
+### Rounds 1–3, re-checked
+
+- **The lock around the calendars map stands.** Both writers of the map (`loadCalendarsFor`'s
+  success and `removeAccount`) go through `changeCalendars`, and nothing inside the lock takes
+  another one.
+- **`minAccessRole=writer` stands.** Google's `writer` is a minimum: owned calendars come back too,
+  which the contract test's owned entry covers.
+- **The save path and the page load stand.** Each reads the secret and then loads the accounts in
+  one work item, and the spinner is still set before any work runs.
+
+### Saving the client secret field blank stored it as a supplied secret
+
+- **The defect.** `SetClientSecret` stored whatever it was given, and a stored secret is what both
+  the page and `RegisterGoogleAccountWorkflow` read as "a secret has been supplied". Pressing
+  **Add client secret** then **Save** without pasting stores `""`. The page then drops "No Google
+  client secret has been supplied yet.", shows an empty read-only field, and enables **Add
+  account**, and registering fails at the authorisation call as "The stored Google client secret is
+  malformed.". requirements.md: "WHEN no client secret has been supplied THE SYSTEM SHALL say so
+  and disable account registration, rather than failing at the authorisation call." The same
+  save over a working secret replaced it with nothing.
+- **Measured** with a scratch script over the real `GoogleAccountApiFactory`, a temp `Google.db`,
+  and the real module creator and component rendered through bUnit:
+
+  | Input | `SetClientSecret` | Stored afterwards | Page says none supplied | **Add account** | `RegisterAccount` |
+  | --- | --- | --- | --- | --- | --- |
+  | `""`, `"   "`, `"\r\n"`, before | `Ok` | `Some <blank>` | no | enabled | "The stored Google client secret is malformed." |
+  | the same three, after | `Error` "Google client secret must not be empty." | `None` | yes | disabled | "No Google client secret has been supplied yet.", before any browser opens |
+
+  Nothing was logged in any of the six runs.
+- **Fix.** A new domain workflow, `SetClientSecretWorkflow.setClientSecret`. It refuses a null or
+  blank secret with `ClientSecretInvalid "Google client secret must not be empty."` and never
+  reaches the store. Anything else it stores verbatim. The factory's `SetClientSecret` goes through
+  it, and so does the E2E harness, which mirrors the factory. `ClientSecretInvalid` was already an
+  expected, unlogged case, so no mapper changed.
+- **Decisions the finding did not ask for:**
+  - Refuse rather than store the blank as "no secret". Refusing keeps a working secret from being
+    wiped by an accidental save, and the edit field stays open for a real paste.
+  - The rule is a workflow, not an inline check in the factory. It is a domain rule, and the
+    factory holds no business logic (deviation 2's reasoning for `ReauthoriseGoogleAccountWorkflow`).
+  - `SaveClientSecret` still takes a `string`, with no constrained type. A constrained type would
+    change a published dependency type and its contract suite for no behaviour this finding needs.
+- **Not covered:** a blank secret already stored by an earlier build of this branch still reads as
+  supplied. Only this unmerged branch could have written one, and **Edit** replaces it.
+- **Tests**, the first eight written red first against a stub holding today's behaviour:
+  - Unit, `setClientSecret refuses a blank secret and never reaches the store` (`""`, `"   "`,
+    `"\r\n\t"`) and `... refuses a null secret ...`. Red: each returned `Ok ()` where
+    `Error (ClientSecretInvalid "Google client secret must not be empty.")` was expected.
+  - Integration, `SetClientSecret refuses a blank secret without writing anything, as an unlogged
+    exception` (`GoogleAccountApiFactoryTests`). It asserts the message, the `ActionName`, the
+    `ApplicationException` inner, and that the `ClientSecret` collection is empty. Red:
+    `SetClientSecret expected Error, but got Ok`.
+  - Contract, `SetClientSecret refuses a blank secret as an unlogged exception, keeping what was
+    stored`, run against the real API and the fake. Red on both: `SetClientSecret expected Error,
+    but got Ok`. The fake now refuses a blank secret too.
+  - E2E, `saving the client secret field blank says so, and registration stays disabled`. It
+    presses the page's own **Add client secret** and **Save** buttons, with work handed off to the
+    test thread. Red: `Assert.Single() Failure: The collection was empty`, meaning no alert.
+  - Two guard unit tests, not red first because the stub already passed them:
+    `setClientSecret saves the pasted secret exactly as given` (surrounding whitespace kept) and
+    `... reports a store failure as the store gave it`.
+- `design.md`'s workflow table gains the row.
+
+### Considered and deliberately not changed
+
+- **The calendar picker shows a chosen calendar's name, not its id.** This was checked because
+  MudSelect renders the raw value when no item matches. With the calendars loaded, the field reads
+  "Invoices". Before they load, or when their fetch failed, it is blank rather than showing an id.
+- Series 1's deferrals and series 2 rounds 1–3's stand, for the reasons they give.
+
+### Series 2 round 4 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. 3 warnings, all pre-existing and all present on `main`: `PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020 |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1526 → **1536** (+10), 1535 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **816** (+6, including the one pre-existing
+failure, which is tagged `Unit`), Integration **326** (+1), Contract **352** (+2), E2E **42** (+1).
+1536 in total. The new E2E flow, which clicks through the renderer's dispatcher, passed in 5 further
+runs of its class.

@@ -90,6 +90,22 @@ let ``SetClientSecret then GetClientSecret returns the stored value`` () =
     )
 
 [<Fact; Trait("Level", "Integration")>]
+let ``SetClientSecret refuses a blank secret without writing anything, as an unlogged exception`` () =
+    // A blank save supplies nothing. Stored, it read back as Some "" - the page then claimed a secret
+    // was supplied, enabled "Add account", and registering failed at the authorisation call as
+    // "malformed", which requirements.md's "say so and disable account registration" rules out.
+    withApiOver id (fun context api ->
+        let ex = api.SetClientSecret " \r\n " |> errorOrFail "SetClientSecret"
+
+        Assert.Equal("Google client secret must not be empty.", ex.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret, ex.ActionName)
+        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        Assert.Equal("Google client secret must not be empty.", inner.Message)
+        Assert.Equal(0, context.GetClientSecretCollection().Count())
+        Assert.Equal(None, api.GetClientSecret() |> okOrFail "GetClientSecret")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
 let ``GetAccounts returns an empty list for a fresh database`` () =
     withApi (fun api -> Assert.Empty(api.GetAccounts() |> okOrFail "GetAccounts"))
 

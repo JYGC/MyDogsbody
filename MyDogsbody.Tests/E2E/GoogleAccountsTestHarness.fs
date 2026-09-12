@@ -97,7 +97,7 @@ let withGoogleAccountsHarness
                     |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.getClientSecret)
             SetClientSecret =
                 fun secret ->
-                    saveClientSecretDependency secret
+                    SetClientSecretWorkflow.setClientSecret saveClientSecretDependency secret
                     |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret)
             GetAccounts =
                 fun () ->

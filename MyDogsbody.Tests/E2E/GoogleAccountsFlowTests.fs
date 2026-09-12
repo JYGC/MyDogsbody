@@ -457,3 +457,35 @@ let ``correcting a malformed client secret fills the calendar picker it had left
             ))
 
         Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
+let ``saving the client secret field blank says so, and registration stays disabled`` () =
+    // requirements.md: "WHEN no client secret has been supplied THE SYSTEM SHALL say so and disable
+    // account registration, rather than failing at the authorisation call." Pressing Save on the
+    // empty field supplies nothing. Stored, it read back as a secret: "Add account" was enabled and
+    // registering failed at the authorisation call as "malformed". Driven through the page's own
+    // buttons, work handed off to this thread (see `handOffWork`).
+    let authoriseAccount: AuthoriseAccount = fun () -> failwith "must not be called - no client secret is stored"
+    let listCalendars: ListCalendars = fun _ -> Ok []
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        let startWork, runHandedOffWork, _ = handOffWork ()
+        let _, rendered = renderBrowserWith startWork removeWithoutConfirming harness
+
+        runHandedOffWork ()
+        (buttonLabelled "button" "Add client secret" rendered).Click()
+        rendered.WaitForAssertion(fun () -> Assert.Contains("Client secret (JSON)", rendered.Markup))
+
+        (buttonLabelled "button" "Save" rendered).Click()
+        runHandedOffWork ()
+
+        rendered.WaitForAssertion(fun () ->
+            let alert = Assert.Single(errorAlerts rendered)
+            Assert.Contains("Google client secret must not be empty.", alert.TextContent)
+            Assert.True((buttonLabelled "button" "Add account" rendered).HasAttribute "disabled"))
+
+        match harness.Api.GetClientSecret() with
+        | Ok stored -> Assert.Equal(None, stored)
+        | Error ex -> failwith ex.Message
+
+        Assert.Empty harness.Logged)

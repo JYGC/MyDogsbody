@@ -46,6 +46,7 @@
     <Compile Include="Domain\Calendar\SetDefaultInvoiceCalendarWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\RemoveGoogleAccountWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\ReauthoriseGoogleAccountWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\SetClientSecretWorkflowTests.fs" />
     <Compile Include="Fixtures\ThunderbirdFixturePaths.fs" />
     <Compile Include="Fixtures\DocumentFixtures.fs" />
     <Compile Include="Fixtures\MeasuredTemplates.fs" />
