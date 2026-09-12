@@ -248,7 +248,7 @@ CLAUDE.md requires each dependency function type's shared suite to run against t
 | Layer | How it is covered |
 | --- | --- |
 | Every **fake** | The shared suite, as normal |
-| The **real adapter** | The same shared suite, with `CalendarService` constructed over a **stubbed `HttpMessageHandler`** returning recorded Google responses. This exercises the adapter's own request-building, paging and response-parsing — the part that can actually be wrong |
+| The **real adapter** | The same shared suite, with `CalendarService` constructed over a **stubbed `HttpMessageHandler`** returning recorded Google responses. This exercises the adapter's own request-building, paging and response-parsing — the part that can actually be wrong. It runs bound exactly as the composition root binds it (`GoogleAccountApiFactory.bindListCalendars`), so the translation the page's alerts are written from is under the same suite *(since PR review series 2 round 7)* |
 | **Google itself** | **Manual, recorded in the change description**: what was run, against which account, what was observed |
 
 That last row is a real gap and is written down as one. **What it must never become is a silently

@@ -248,6 +248,12 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       - `ListCalendarsDependencyContractTests.fs` — `ListCalendars`: the real adapter
         (`GoogleCalendarClient.listCalendarsVia`) over a **stubbed `HttpMessageHandler`** + an
         in-memory fake. 4 tests.
+        *Since PR review series 2 round 7:* the real side is the composition root's own binding,
+        `GoogleAccountApiFactory.bindListCalendars` (the stored secret, the stored token, the
+        calendar client, `toListCalendarsError`), over a temp `Google.db` with only the calendar
+        client's HTTP stubbed. It used to bind the adapter to a copy of the translation written in
+        the test file, which a mis-wired factory passed. Three cases run against the binding and the
+        fake alike; 19 tests in all.
       - `AuthoriseAccount` is **not** in either file — see the deviation note below.
       **`MemberData` sources are public `let`s** in both files.
 - [x] **7.2** `GoogleAccountApiContractTests.fs` — real record (`GoogleAccountApiFactory` over a temp

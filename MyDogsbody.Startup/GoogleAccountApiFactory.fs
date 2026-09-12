@@ -15,15 +15,71 @@ open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database.Types
 open MyDogsbody.UI.Types
 
+/// The stored client secret as the `LoadClientSecret` dependency - GoogleAccountStore speaks
+/// MyDogsbodyException, the dependency type speaks CalendarError.
+let private clientSecretFrom (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : LoadClientSecret =
+    fun () ->
+        GoogleAccountStore.loadClientSecret handleError googleContext.GetClientSecretCollection ()
+        |> Result.mapError GoogleAccountApiMappers.toStoreError
+
+/// The client secret's raw string, for the adapter calls that need it directly rather than
+/// through a dependency type. A missing secret folds into `ClientSecretMissing` - the same
+/// case `RegisterGoogleAccountWorkflow`'s own check produces, since by the time any of the
+/// adapter calls that need it run, that check has already passed.
+let private clientSecretValueFrom (loadClientSecret: LoadClientSecret) () : Result<string, CalendarError> =
+    result {
+        let! secret = loadClientSecret ()
+
+        return!
+            match secret with
+            | Some value -> Ok value
+            | None -> Error ClientSecretMissing
+    }
+
+/// `ListCalendars` as the composition root binds it: the stored client secret, the account's stored
+/// token, then the calendar list - every failure on the way translated by `toListCalendarsError`,
+/// the translation that can name the account in `NotAuthorised`. `loadCredential` never opens a
+/// browser: it fails with `NotAuthorised` if no valid stored token exists, rather than starting a
+/// consent flow the caller did not ask for.
+///
+/// The calendar call is a parameter - `GoogleCalendarClient.listCalendars` in production - so that
+/// `ListCalendarsDependencyContractTests` runs this binding over `listCalendarsVia` and a stubbed
+/// `HttpMessageHandler`. It used to run a copy of it, and a mis-wired translation here passed every
+/// test in the suite (PR review series 2 round 7).
+let bindListCalendars
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (listCalendarsWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> unit
+            -> Result<AvailableCalendar list, MyDogsbodyException>)
+    : ListCalendars =
+    let loadClientSecretValue = clientSecretValueFrom (clientSecretFrom handleError googleContext)
+
+    fun accountId ->
+        result {
+            let! secret = loadClientSecretValue ()
+
+            let! credential =
+                GoogleAuthorization.loadCredential
+                    handleError
+                    googleContext.GetCredentialCollection
+                    secret
+                    (GoogleAccountId.value accountId)
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
+
+            return!
+                listCalendarsWith handleError (credential :> Google.Apis.Http.IConfigurableHttpClientInitializer) ()
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
+        }
+
 let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : GoogleAccountApi =
 
     // ---------- Storage dependencies: GoogleAccountStore speaks MyDogsbodyException; every
     // dependency type here speaks CalendarError, so each is translated on the way out. ----------
 
-    let loadClientSecret: LoadClientSecret =
-        fun () ->
-            GoogleAccountStore.loadClientSecret handleError googleContext.GetClientSecretCollection ()
-            |> Result.mapError GoogleAccountApiMappers.toStoreError
+    let loadClientSecret: LoadClientSecret = clientSecretFrom handleError googleContext
 
     let saveClientSecretDependency: SaveClientSecret =
         fun secret ->
@@ -45,19 +101,7 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
             GoogleAccountStore.removeOne handleError googleContext.GetAccountCollection accountId
             |> Result.mapError GoogleAccountApiMappers.toStoreError
 
-    /// The client secret's raw string, for the adapter calls that need it directly rather than
-    /// through a dependency type. A missing secret folds into `ClientSecretMissing` - the same
-    /// case `RegisterGoogleAccountWorkflow`'s own check produces, since by the time any of these
-    /// three dependencies run, that check has already passed.
-    let loadClientSecretValue () : Result<string, CalendarError> =
-        result {
-            let! secret = loadClientSecret ()
-
-            return!
-                match secret with
-                | Some value -> Ok value
-                | None -> Error ClientSecretMissing
-        }
+    let loadClientSecretValue = clientSecretValueFrom loadClientSecret
 
     // ---------- Authorisation: GoogleAuthorization/GoogleCalendarClient. ----------
 
@@ -103,25 +147,8 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
                 (GoogleAccountId.value accountId)
             |> Result.mapError GoogleAccountApiMappers.toStoreError
 
-    /// `loadCredential` never opens a browser - it fails with `NotAuthorised` if no valid
-    /// stored token exists, rather than starting a consent flow the caller did not ask for.
     let listCalendarsDependency: ListCalendars =
-        fun accountId ->
-            result {
-                let! secret = loadClientSecretValue ()
-
-                let! credential =
-                    GoogleAuthorization.loadCredential
-                        handleError
-                        googleContext.GetCredentialCollection
-                        secret
-                        (GoogleAccountId.value accountId)
-                    |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
-
-                return!
-                    GoogleCalendarClient.listCalendars handleError credential ()
-                    |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
-            }
+        bindListCalendars handleError googleContext GoogleCalendarClient.listCalendars
 
     // ---------- Workflows, partially applied over the dependencies above. ----------
 

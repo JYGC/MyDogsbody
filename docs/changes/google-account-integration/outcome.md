@@ -1905,3 +1905,119 @@ against `4c09970` before anything changed.
 Per level, each measured with `--filter "Level=..."`: Unit **817** (+1, including the one
 pre-existing failure, which is tagged `Unit`), Integration **327** (unchanged), Contract **353**
 (unchanged: one test replaced), E2E **43** (+1). 1540 in total.
+
+---
+
+## PR review, series 2 round 7 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 16 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `76f2117` before anything changed.
+
+### Rounds 1–6, re-checked
+
+- **The lock around the calendars map stands.** Both writers of the map (`loadCalendarsFor`'s
+  success and `removeAccount`) go through `changeCalendars`. Nothing holding the lock waits on
+  anything the render thread holds, and no other path reads and rewrites the map.
+- **`minAccessRole=writer` stands.** It is set on every page's request. The contract stub leaves out
+  read-only calendars only when the query carries `minAccessRole=writer`.
+- **The save path and the page load stand.** Each reads the secret and then loads the accounts in
+  one work item, and the spinner is set before any work runs.
+- **`SetClientSecretWorkflow` stands.** It refuses a null or blank secret without reaching the store,
+  and the factory's `SetClientSecret` and the E2E harness both go through it.
+- **`summaryOverride` stands, and the picker shows names.** A bUnit probe of the real module creator
+  and component showed a stored default as "Invoices A", its loaded name, not its id.
+- **Round 6's prefix and sentence stand.** Every calendar-fetch failure names the account by email,
+  `NotAuthorised`'s outbound sentence names no id, and the mapper test, the API contract fake and the
+  unit and E2E flows agree on the wording.
+- **A refused calendar choice does not stay in the picker.** Checked because MudSelect keeps a value
+  of its own. The same probe chose a calendar whose save failed. The picker went back to the stored
+  calendar, and stayed there after a later success cleared the alert.
+- **The Google tests are stable.** Ten further runs of the 314 Google-filtered tests were all green.
+
+### The `ListCalendars` contract suite did not run the composition root's binding
+
+- **The defect.** CLAUDE.md makes a dependency function type a published interface, whose "real
+  adapter and every fake standing in for it in a workflow test run the same suite". design.md's
+  arrangement has the real adapter run "the same shared suite" over a stubbed `HttpMessageHandler`.
+  `ListCalendarsDependencyContractTests` did neither:
+  - Its "real adapter" was `GoogleCalendarClient.listCalendarsVia` bound to a copy of the error
+    translation, written in the test file. The copy knew three of Google's answers and never read the
+    store. It had no `CalendarApiNotEnabled`, no `ClientSecretInvalid`, and no stored-secret or
+    stored-token step. The production binding was a closure inside `createGoogleAccountApi` that no
+    test reached past `loadCredential`: the factory tests stop before Google, and the E2E harness
+    replaces `ListCalendars` with a fake.
+  - Its fake ran one test of its own and none of the "shared behaviour" section.
+
+  So the translation every calendar alert is written from was untested where production wires it.
+- **Measured before the fix**, with two temporary mutations of production code, both reverted and
+  never committed:
+
+  | Mutation | Tests failing, whole suite |
+  | --- | --- |
+  | The factory translates Google's answers with the store's translation (`toStoreError`), so every calendar failure would read as a store failure | **none**, apart from the pre-existing `SqliteConnectionPoolingTests` |
+  | `toListCalendarsError` turns a rate limit into `NotAuthorised` | one, the mapper's own test. The suite's 429 test and its four usage-limit 403 tests passed, because they checked the copy |
+
+- **Fix.**
+  - `GoogleAccountApiFactory.bindListCalendars handleError googleContext listCalendarsWith` is the
+    binding, moved out of `createGoogleAccountApi` with the calendar call as its last parameter.
+    `createGoogleAccountApi` passes `GoogleCalendarClient.listCalendars`, so production behaviour is
+    unchanged. The two secret loaders it shares with the other bindings are now private helpers.
+  - The suite's real side is that binding over a temp `Google.db` holding a client secret and the
+    account's token, with only the calendar client's HTTP stubbed (`listCalendarsVia`). Every
+    existing real-side test runs through it unchanged.
+  - Three cases run against the binding and the fake alike: an authorised account's calendars with
+    every field; an authorised account with none; and an account with no stored authorisation, which
+    is `NotAuthorised` carrying its id with nothing sent to Google. The fake now holds calendars per
+    account and answers `NotAuthorised` for any other, as the binding does.
+  - The `invalid_grant` case cannot go through the binding, whose credential refreshes against
+    Google's real token endpoint. It still composes the adapter with a stubbed token endpoint, but now
+    translates with the production `toListCalendarsError` rather than the copy.
+- **Decisions the finding did not ask for:**
+  - The binding's stored token carries no refresh token. With one, a 401 from the stub would make the
+    credential refresh against Google's real token endpoint, and no test may reach the network.
+  - The copy is deleted rather than corrected. A corrected copy drifts again the next time the mapper
+    gains a case, and change #7 adds four dependency types of the same shape.
+  - `CLAUDE-project.md`'s contract guidance now says so: a network dependency's suite runs the
+    composition root's own binding with only the network call stubbed.
+- **Tests:**
+  - Red first, against the old suite: `the real binding reports a project with the Calendar API
+    switched off as CalendarApiNotEnabled, carrying Google's sentence`. Red: `Expected
+    CalendarApiNotEnabled carrying Google's sentence, got Error (CalendarUnreachable "The Google
+    Calendar API is not enabled for this project. Google Calendar API has not been used in project
+    000000000000 before or it is disabled. ...")`.
+  - Red first, with the suite moved onto the binding before it existed: `error FS0039: The value,
+    constructor, namespace or type 'bindListCalendars' is not defined.`
+  - Added with the extraction: the three shared cases (six runs), and two binding-only cases,
+    `... a malformed stored client secret as ClientSecretInvalid, without reaching Google` and
+    `... a missing client secret as ClientSecretMissing, without reaching Google`. The old fake-only
+    test is folded into the shared cases. The suite has 19 tests, up from 11.
+  - **The mutations again, against the new suite.** The swapped translation fails 7 of its 19 tests:
+    the 401, the 429, the four usage-limit 403s and the switched-off API. The mapper mutation fails 5:
+    the 429 and the four 403s. Both reverted.
+  - No new Unit, Integration or E2E test. Production behaviour is unchanged, and the extraction is
+    the only production edit. The existing factory tests still reach the binding through
+    `createGoogleAccountApi`.
+
+### Also corrected
+
+- `CLAUDE-project.md`'s *Build state* still gave series 2 round 3's counts. It now gives this round's.
+- `tasks.md` 7.1 and design.md's contract arrangement name the binding the suite runs.
+
+### Considered and deliberately not changed
+
+- Series 1's deferrals and series 2 rounds 1–6's stand, for the reasons they give.
+
+### Series 2 round 7 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. 2 warnings re-emitted, both pre-existing and present on `main`: `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760 and `Tests\Database\ScanWindowStoreTests.fs` FS0020. `PdfProcessing\Program.fs` FS0025 is untouched and was not rebuilt |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1540 → **1548** (+8), 1547 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+| Baseline over `76f2117`, measured independently before anything changed | 1540: Unit 817, Integration 327, Contract 353, E2E 43; 1539 passed, and the same one pre-existing failure. It confirms series 2 round 6's own record, which had not been re-measured |
+| Repeat runs | The 314 Google-filtered tests, 10 runs over `76f2117` before the fix: all green. The 19-test `ListCalendarsDependencyContractTests`, 5 runs after it: 5 of 5 green |
+
+Per level, each measured with `--filter "Level=..."`: Unit **817** (including the one
+pre-existing failure, which is tagged `Unit`), Integration **327**, Contract
+**361** (+8), E2E **43**. 1548 in total.
