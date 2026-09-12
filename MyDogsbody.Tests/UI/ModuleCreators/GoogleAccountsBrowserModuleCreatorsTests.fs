@@ -511,3 +511,55 @@ let ``no Async.Start appears anywhere in the module creator file`` () =
     Assert.True(IO.File.Exists sourceFilePath, $"Expected to find {sourceFilePath}")
     let source = IO.File.ReadAllText sourceFilePath
     Assert.DoesNotContain("Async.Start(", source)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``calendars fetched for several accounts at once all reach the picker map`` () =
+    // Production's startWork runs each piece of work on its own pool thread, so loadAccounts' one
+    // fetch per account finishes on several threads at once, and each adds its account's calendars
+    // to the one shared map. Two finishing together must not lose either: a lost entry is an empty
+    // picker with neither the no-calendars caption nor an alert, because for that account nothing
+    // failed and nothing came back empty - its calendars are simply not there.
+    let accountCount = 8
+    let ids = [ for i in 1..accountCount -> string i ]
+    let started = Collections.Concurrent.ConcurrentQueue<Threading.Thread>()
+
+    let onItsOwnThread (work: unit -> unit) =
+        let thread = Threading.Thread(work)
+        started.Enqueue thread
+        thread.Start()
+
+    // Work started by work (loadAccounts starting each fetch) is queued before its parent ends,
+    // so joining in queue order reaches every thread.
+    let rec waitForAllWork () =
+        match started.TryDequeue() with
+        | true, thread ->
+            Assert.True(thread.Join(TimeSpan.FromSeconds 10.0), "Work did not finish within ten seconds.")
+            waitForAllWork ()
+        | _ -> ()
+
+    for trial in 1..20 do
+        use together = new Threading.Barrier(accountCount)
+
+        let googleAccountApi =
+            api
+                (fun () -> Ok(Some "secret"))
+                (fun _ -> Ok())
+                (fun () -> Ok [ for id in ids -> anAccount id None false ])
+                (fun () -> failwith "unused")
+                (fun _ -> failwith "unused")
+                (fun _ -> Ok())
+                (fun id ->
+                    // Every fetch returns at the same instant - the moment the threads race on.
+                    together.SignalAndWait(TimeSpan.FromSeconds 10.0) |> ignore
+                    Ok [ aCalendar $"cal-{id}" $"Calendar {id}" true ])
+                (fun _ _ -> failwith "unused")
+
+        let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule onItsOwnThread googleAccountApi
+        waitForAllWork ()
+
+        let byAccount = AVal.force browser.CalendarsByAccountIdAval
+        let missing = ids |> List.filter (fun id -> not (Map.containsKey id byAccount))
+        Assert.True(List.isEmpty missing, $"Trial {trial}: calendars lost for accounts %A{missing}.")
+
+        for id in ids do
+            Assert.Equal<CalendarUiType list>([ aCalendar $"cal-{id}" $"Calendar {id}" true ], Map.find id byAccount)

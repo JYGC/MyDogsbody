@@ -1401,3 +1401,77 @@ round 7's notes). Documentation only; no behaviour changed.
 
 Per level, each measured with `--filter "Level=..."`: Unit **805** (carrying the one pre-existing
 failure, which is tagged `Unit`), Integration **324**, Contract **349**, E2E **40**. 1518 in total.
+
+---
+
+## PR review, series 2 round 1 — two defects found in the diff, both fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments. Its 10 issue comments are series 1's round
+summaries. Both findings below are this round's own, from reading the diff.
+
+### 1. Calendars fetched for several accounts at once could be lost
+
+- **The defect.** `loadAccounts` starts one `GetCalendarsFor` per account, and production's
+  `startWork` runs each one on a pool thread. Each success read `CalendarsByAccountIdAval`'s map and
+  wrote back a copy with its account added, and nothing serialised that read-then-write. Two
+  finishing together drop one of them. That account's picker is then empty with no caption, since
+  it has no entry and `noCalendarsMessage` says nothing, and with no alert, since nothing failed.
+  `RemoveAccount`'s `Map.remove` does the same read-then-write.
+- **Measured before the fix**, through the real module creator with production's `startWork` and a
+  fake API:
+  - 8 accounts whose fetches return together: calendars were lost in 99 trials of 100, with as few
+    as 3 of 8 kept.
+  - 2 accounts: one was lost in 187/200 trials at 0 µs apart, 27/200 at 10 µs, and 0/200 at 50 µs
+    and beyond. The window is tens of microseconds. That is narrow for real network completions,
+    but it is reachable, and the loss is silent when it happens.
+  - A synchronous `startWork` control lost nothing.
+- **Fix.** Every change to the map goes through one `changeCalendars` helper, which holds a lock
+  around the `transact`. Mutation still goes through `cval` + `transact`, and the lock only makes
+  each read-then-write one step. After the fix the same probes lost nothing in any scenario.
+- **Test, written red first:** `calendars fetched for several accounts at once all reach the picker
+  map` (Unit). It runs 20 trials of 8 accounts, each fetch on its own thread, all released together
+  by a barrier.
+  - Red: `Trial 1: calendars lost for accounts ["1"; "2"; "3"; "5"; "6"; "7"; "8"].`
+  - Green in 10 repeated runs of its class.
+  - The `RemoveAccount` path uses the same helper but has no red test of its own.
+
+### 2. The calendar picker offered calendars the account can only read
+
+- **The defect.** `GoogleCalendarClient` requested the calendar list without `minAccessRole`, so
+  Google returned every calendar the account can see, including read-only ones: "Holidays in ...",
+  "Birthdays", and anything subscribed to. A read-only calendar chosen as the default passes
+  `SetDefaultInvoiceCalendarWorkflow`'s existence check, and the account shows **Ready** with a
+  calendar that can never take an invoice event. Change #7's first insert would find that out,
+  which is the mid-sync failure design decision 6 checks for at choosing time.
+- **Fix.** Every page's request asks for `minAccessRole=writer`, which returns writer and owner
+  calendars. `ListCalendars`' doc comment now states that promise.
+- **Tests, written red first.** Both use a stub that answers the way Google does: read-only entries
+  are left out only when the request asks for writer access.
+  - `listCalendars offers only calendars the account can add events to, on every page`
+    (Integration, over two pages). Red: 4 ids came back, including `holidays@...` and
+    `addressbook#contacts@...`.
+  - `the real adapter lists only calendars the account can add events to` (Contract). Red:
+    `Assert.Single() Failure: The collection contained 2 items`.
+- **Not checked against a real Google account.** Task 10.4's manual coverage is where that belongs.
+  `writer` is the Calendar API's documented `minAccessRole` value, and the pinned
+  `Google.Apis.Calendar.v3` 1.69 exposes it as `MinAccessRoleEnum.Writer`.
+- **Not changed:** the no-calendars caption. Every Google account owns its primary calendar, so in
+  practice the writable list is never empty.
+
+### Considered and deliberately not changed
+
+- `removeStoredToken` logs a store failure twice: once in `GoogleCredentialStore.getAll`'s own
+  `handleError`, reached through `GoogleCredentialDataStore`, and again in its own. This is noise in
+  the diagnostics log only, and the user sees nothing different.
+- Series 1's deferrals stand, for the reasons they give.
+
+### Series 2 round 1 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. Only pre-existing warnings. `PdfProcessing\Program.fs` FS0025 was re-emitted. The test project's two warnings from `main` (FS0760, FS0020) were not re-emitted, because that project was already up to date |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | **1521** (+3), 1520 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **806** (including the one pre-existing
+failure, which is tagged `Unit`), Integration **325**, Contract **350**, E2E **40**. 1521 in total.

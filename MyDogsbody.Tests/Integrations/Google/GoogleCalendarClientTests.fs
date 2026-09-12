@@ -283,3 +283,34 @@ let ``listCalendars maps a refresh token Google has expired or revoked to the no
         let inner = Assert.IsType<Google.Apis.Auth.OAuth2.Responses.TokenResponseException>(ex.InnerException)
         Assert.Equal("invalid_grant", inner.Error.Error)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+let private calendarEntryWithRole id summary isPrimary accessRole =
+    $"""{{ "kind": "calendar#calendarListEntry", "id": "{id}", "summary": "{summary}", "primary": {isPrimary}, "accessRole": "{accessRole}" }}"""
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listCalendars offers only calendars the account can add events to, on every page`` () =
+    // Google's calendar list also holds calendars the account can only read - "Holidays in
+    // Australia", "Birthdays", anything subscribed to. Offering one in the picker lets it be chosen,
+    // and the account then shows Ready with a default calendar no invoice event can ever be written
+    // to. The stub answers the way Google does: read-only entries are left out only when the
+    // request asks for writer access, which each page's request has to do for itself.
+    let owned = calendarEntryWithRole "primary" "My Calendar" "true" "owner"
+    let holidays = calendarEntryWithRole "holidays@group.v.calendar.google.com" "Holidays in Australia" "false" "reader"
+    let shared = calendarEntryWithRole "team@group.calendar.google.com" "Team Calendar" "false" "writer"
+    let birthdays = calendarEntryWithRole "addressbook#contacts@group.v.calendar.google.com" "Birthdays" "false" "reader"
+
+    let respond (request: HttpRequestMessage) =
+        let query = request.RequestUri.Query
+        let writableOnly = query.Contains "minAccessRole=writer"
+
+        if query.Contains "pageToken=page-2" then
+            let items = if writableOnly then shared else shared + "," + birthdays
+            jsonResponse HttpStatusCode.OK (calendarListPage items None)
+        else
+            let items = if writableOnly then owned else owned + "," + holidays
+            jsonResponse HttpStatusCode.OK (calendarListPage items (Some "page-2"))
+
+    let actual = listCalendars respond |> okOrFail "listCalendars"
+
+    let ids = actual |> List.map (fun c -> CalendarId.value c.Id) |> List.sort
+    Assert.Equal<string list>([ "primary"; "team@group.calendar.google.com" ], ids)

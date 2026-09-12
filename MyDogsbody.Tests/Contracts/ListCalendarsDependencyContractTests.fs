@@ -217,3 +217,28 @@ let ``the real adapter maps a refresh token Google has expired or revoked to Not
     withRealListCalendarsAs (credentialGoogleWillNotRefresh (System.DateTime.UtcNow.AddHours -2.0)) respond (fun listCalendars ->
         Assert.Equal(Error(NotAuthorised accountId), listCalendars accountId)
     )
+
+[<Fact; Trait("Level", "Contract")>]
+let ``the real adapter lists only calendars the account can add events to`` () =
+    // ListCalendars feeds the default-invoice-calendar picker and SetDefaultInvoiceCalendar's
+    // existence check, so a calendar it returns is one invoice events can be written to. Google
+    // leaves read-only calendars (holidays, birthdays, subscriptions) out only when asked to.
+    let owned =
+        """{ "kind": "calendar#calendarListEntry", "id": "primary", "summary": "My Calendar", "primary": true, "accessRole": "owner" }"""
+
+    let holidays =
+        """{ "kind": "calendar#calendarListEntry", "id": "holidays@group.v.calendar.google.com", "summary": "Holidays in Australia", "primary": false, "accessRole": "reader" }"""
+
+    let respond (request: HttpRequestMessage) =
+        if request.RequestUri.Query.Contains "minAccessRole=writer" then
+            jsonResponse HttpStatusCode.OK (calendarListPage owned)
+        else
+            jsonResponse HttpStatusCode.OK (calendarListPage (owned + "," + holidays))
+
+    withRealListCalendars respond (fun listCalendars ->
+        let actual = listCalendars accountId |> okOrFail "listCalendars"
+        let calendar = Assert.Single actual
+        Assert.Equal("primary", CalendarId.value calendar.Id)
+        Assert.Equal("My Calendar", CalendarName.value calendar.Name)
+        Assert.True calendar.IsPrimary
+    )

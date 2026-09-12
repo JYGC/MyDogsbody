@@ -63,9 +63,16 @@ let private toAvailableCalendar (entry: Data.CalendarListEntry) : AvailableCalen
 
 /// Follows `nextPageToken` until Google reports there is no more - task 4.1's paged-list test is
 /// what proves this rather than returning only the first page.
+///
+/// Asks for calendars the account can add events to (writer or owner access), on every page's
+/// request. Left unasked, Google's list also carries the ones it can only read - "Holidays in
+/// Australia", "Birthdays", anything subscribed to - and one chosen as the default invoice calendar
+/// would show the account Ready with a calendar no invoice event can ever be written to: the
+/// mid-sync discovery design decision 6 checks at choosing time to prevent.
 let private listAllPages (service: CalendarService) : Data.CalendarListEntry list =
     let rec loop (pageToken: string) (acc: Data.CalendarListEntry list) =
         let request = service.CalendarList.List()
+        request.MinAccessRole <- CalendarListResource.ListRequest.MinAccessRoleEnum.Writer
 
         if not (String.IsNullOrEmpty pageToken) then
             request.PageToken <- pageToken

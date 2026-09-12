@@ -131,6 +131,9 @@ type AuthoriseAccount = unit -> Result<GoogleEmail * GoogleAccountId, CalendarEr
 type ListGoogleAccounts = unit -> Result<RegisteredGoogleAccount list, CalendarError>
 type SaveGoogleAccount = RegisteredGoogleAccount -> Result<RegisteredGoogleAccount, CalendarError>
 type RemoveGoogleAccount = GoogleAccountId -> Result<bool, CalendarError>
+/// The calendars an account can add events to - never one it can only read, since every calendar
+/// this returns is one the default-invoice-calendar picker offers and `SetDefaultInvoiceCalendar`
+/// accepts.
 type ListCalendars = GoogleAccountId -> Result<AvailableCalendar list, CalendarError>
 
 /// Throws away an authorisation that was completed but never became a registered account.

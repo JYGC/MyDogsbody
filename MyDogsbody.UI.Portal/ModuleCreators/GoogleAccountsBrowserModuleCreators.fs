@@ -21,6 +21,20 @@ let getGoogleAccountsBrowserModule
     let accountsCval = cval<GoogleAccountUiType list> []
     let calendarsByAccountIdCval = cval<Map<string, CalendarUiType list>> Map.empty
 
+    /// Serialises every change to the calendars map. Each change reads the map and writes back a
+    /// changed copy, and production's startWork runs work on pool threads - so loadAccounts' one
+    /// fetch per account finishes on several threads at once. Two of those read-then-writes
+    /// interleaving drop an account's calendars without a trace: its picker empties, with neither
+    /// the no-calendars caption nor an alert. The change itself still goes through transact; the
+    /// lock only makes each read-then-write one step.
+    let calendarsGate = obj ()
+
+    let changeCalendars (change: Map<string, CalendarUiType list> -> Map<string, CalendarUiType list>) (alsoInTransaction: unit -> unit) =
+        lock calendarsGate (fun () ->
+            transact (fun _ ->
+                calendarsByAccountIdCval.Value <- change calendarsByAccountIdCval.Value
+                alsoInTransaction ()))
+
     let loadClientSecret () =
         startWork (fun () ->
             let result = googleAccountApi.GetClientSecret()
@@ -40,10 +54,7 @@ let getGoogleAccountsBrowserModule
     let loadCalendarsFor (accountId: string) =
         startWork (fun () ->
             match googleAccountApi.GetCalendarsFor accountId with
-            | Ok calendars ->
-                transact (fun _ ->
-                    calendarsByAccountIdCval.Value <- calendarsByAccountIdCval.Value |> Map.add accountId calendars
-                    errorCval.Value <- None)
+            | Ok calendars -> changeCalendars (Map.add accountId calendars) (fun () -> errorCval.Value <- None)
             | Error(ex: MyDogsbodyException) -> transact (fun _ -> errorCval.Value <- Some ex.Message))
 
     /// Reloads the accounts table, then the calendars for every account that has a usable
@@ -135,9 +146,7 @@ let getGoogleAccountsBrowserModule
         startWork (fun () ->
             match googleAccountApi.RemoveAccount accountId with
             | Ok() ->
-                transact (fun _ ->
-                    errorCval.Value <- None
-                    calendarsByAccountIdCval.Value <- calendarsByAccountIdCval.Value |> Map.remove accountId)
+                changeCalendars (Map.remove accountId) (fun () -> errorCval.Value <- None)
 
                 loadAccounts ()
             | Error ex ->
