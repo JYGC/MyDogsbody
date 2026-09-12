@@ -1550,3 +1550,76 @@ against `969e6ec` before anything changed.
 
 Per level, each measured with `--filter "Level=..."`: Unit **808** (including the one pre-existing
 failure, which is tagged `Unit`), Integration **325**, Contract **350**, E2E **41**. 1524 in total.
+
+---
+
+## PR review, series 2 round 3 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 12 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `648c04c` before anything changed.
+
+### Rounds 1 and 2, re-checked
+
+- **The lock around the calendars map stands**, for the reasons series 2 round 2 gives.
+- **`minAccessRole=writer` stands.** The fakes in `ListCalendarsDependencyContractTests` cannot
+  express an access role, since `AvailableCalendar` has none. So the writer-only case is correctly a
+  real-adapter-only contract test.
+- **Round 2's save path stands.** It fixed the race it describes, but only for the save. Opening
+  the page still started the same two work items separately, which is the defect below.
+
+### Opening the page could wipe the alert a failing calendar fetch had just set
+
+- **The defect.** The module creator started two separate work items: `loadClientSecret` for the
+  secret, and `loadAccounts` for the accounts, which then starts one calendar fetch per account.
+  Reading the secret succeeds and clears the alert. With a malformed stored secret, every fetch
+  fails fast, before any network call. If the read finished last, it wiped the fetch's "The stored
+  Google client secret is malformed." Every picker was then empty, with no alert and no
+  no-calendars caption. That is the empty picker round 2 closed for the save path, reached from a
+  page load instead. A missing token takes the same fast path ("No stored credential for this
+  account."), so it is exposed the same way.
+- **Measured before the fix.** A scratch script ran the real `GoogleAccountApiFactory` over a temp
+  `Google.db` holding a malformed secret and one account, with production's `startWork`
+  (`Async.Start`). Each trial opened the page and waited for all work to finish:
+
+  | Connection | Trials | Alert lost, before | Alert lost, after |
+  | --- | --- | --- | --- |
+  | `shared` (production's) | 4512 (4000 + 500 warm, 12 in cold processes) | **1** | **0** of 4000 |
+  | `direct` | 1000 | **4** | **0** |
+
+  It is rare in production because `shared` mode serialises LiteDB operations on the file's mutex,
+  and the read is queued first. It is not impossible, and when it happens it is silent.
+- **Fix.** The page reads the secret, then loads the accounts, in one work item. This is the
+  ordering the save path already uses. `loadClientSecret` is gone, and `reloadClientSecret`'s doc
+  comment says why it is never started as work of its own. The table's spinner is still set where
+  the page is built, before any work runs.
+- **Cost.** The secret read and the accounts read now run one after the other instead of side by
+  side: one local LiteDB read, and under `shared` mode they were already serialised.
+- **Tests:**
+  - `opening the page over a malformed client secret keeps the alert its calendar fetch set`
+    (Unit), written red first. Work finishes newest first, the ordering round 2's save-path test
+    uses. Red: `Expected: Some(The stored Google client secret is malformed.) Actual: null`.
+  - `opening the page shows the accounts table loading before any work has run` (Unit). This is a
+    guard for the fix, not a red-first test: it passed before and must keep passing. It was checked
+    by deleting the fix's spinner line.
+  - No new E2E test. The E2E harness runs work where it is started, or in the order it was handed
+    off, so it cannot produce the ordering that loses the alert. The page-load and correction flows
+    already there still pass unchanged.
+
+### Considered and deliberately not changed
+
+- Series 1's deferrals and series 2 rounds 1 and 2's stand, for the reasons they give. That
+  includes round 3's "a `loadCalendarsFor` success clears another account's error". This round's
+  finding is different: the alert was cleared by reading the stored client secret, which cannot
+  report anything wrong with the calendars, not by another account's successful fetch.
+
+### Series 2 round 3 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. 3 warnings, all pre-existing and all present on `main`: `PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020 |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1524 → **1526** (+2), 1525 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **810** (including the one pre-existing
+failure, which is tagged `Unit`), Integration **325**, Contract **350**, E2E **41**. 1526 in total.

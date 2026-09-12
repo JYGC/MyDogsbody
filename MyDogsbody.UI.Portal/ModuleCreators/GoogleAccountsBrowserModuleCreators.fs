@@ -35,7 +35,10 @@ let getGoogleAccountsBrowserModule
                 calendarsByAccountIdCval.Value <- change calendarsByAccountIdCval.Value
                 alsoInTransaction ()))
 
-    /// Reads the stored client secret into the page, on whichever thread calls it.
+    /// Reads the stored client secret into the page, on whichever thread calls it. Never started as
+    /// work of its own: its success clears the alert, so it runs ahead of the calendar fetches in
+    /// the same work item - opening the page and saving a secret both do - or it can finish last and
+    /// wipe the alert a failing fetch has just set.
     let reloadClientSecret () =
         let result = googleAccountApi.GetClientSecret()
 
@@ -45,8 +48,6 @@ let getGoogleAccountsBrowserModule
                 clientSecretCval.Value <- secret
                 errorCval.Value <- None
             | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message)
-
-    let loadClientSecret () = startWork reloadClientSecret
 
     /// Loads the calendars for one account, so its picker shows that account's own list
     /// (requirements.md: "populate it from that account's own calendars"). A failure here does
@@ -178,8 +179,14 @@ let getGoogleAccountsBrowserModule
                     errorCval.Value <- Some ex.Message
                     isLoadingCval.Value <- false))
 
-    loadClientSecret ()
-    loadAccounts ()
+    // Opening the page: the secret, then the accounts and their calendars, in one work item for the
+    // reason `reloadClientSecret` gives. The spinner is set here, before any work runs, so the first
+    // render shows the table loading rather than "No Google accounts registered yet."
+    transact (fun _ -> isLoadingCval.Value <- true)
+
+    startWork (fun () ->
+        reloadClientSecret ()
+        loadAccounts ())
 
     {
         ClientSecretAval = clientSecretCval

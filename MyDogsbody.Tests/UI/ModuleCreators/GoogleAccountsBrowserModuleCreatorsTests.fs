@@ -671,3 +671,46 @@ let ``replacing the client secret with one that does not work says so straight a
 
     Assert.False(AVal.force browser.IsEditingClientSecretAval)
     Assert.False(AVal.force browser.IsLoadingAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``opening the page over a malformed client secret keeps the alert its calendar fetch set`` () =
+    // Reading the stored secret succeeds and clears the alert, while every calendar fetch fails on
+    // that same secret. Work finishes newest first here, as a pool thread can finish it: if the page
+    // starts the read as work of its own beside the accounts load, the read can finish last and wipe
+    // the fetch's alert - leaving every picker empty with neither the alert nor the no-calendars
+    // caption, which is what saving the secret already guards against.
+    let fetches = ref 0
+
+    let googleAccountApi =
+        api
+            (fun () -> Ok(Some "not-json"))
+            (fun _ -> failwith "unused")
+            (fun () -> Ok [ anAccount "1" None false ])
+            (fun () -> failwith "unused")
+            (fun _ -> failwith "unused")
+            (fun _ -> failwith "unused")
+            (fun _ ->
+                fetches.Value <- fetches.Value + 1
+                Error(failure malformedSecret))
+            (fun _ _ -> failwith "unused")
+
+    let startWork, runAll = newestFirst ()
+    let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule startWork googleAccountApi
+    runAll ()
+
+    Assert.Equal(1, fetches.Value)
+    Assert.Equal(Some malformedSecret, AVal.force browser.ErrorAval)
+    Assert.Equal(Some "not-json", AVal.force browser.ClientSecretAval)
+    Assert.Equal<GoogleAccountUiType list>([ anAccount "1" None false ], AVal.force browser.AccountsAval)
+    Assert.Equal<CalendarUiType list option>(None, Map.tryFind "1" (AVal.force browser.CalendarsByAccountIdAval))
+    Assert.False(AVal.force browser.IsLoadingAval)
+    Assert.False(AVal.force browser.IsEditingClientSecretAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``opening the page shows the accounts table loading before any work has run`` () =
+    // The table's spinner is set where the page is built, not when its work first runs - so the
+    // first render never claims "No Google accounts registered yet." for a store not read yet.
+    let startWork, _ = newestFirst ()
+    let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule startWork (defaultApi ())
+
+    Assert.True(AVal.force browser.IsLoadingAval)
