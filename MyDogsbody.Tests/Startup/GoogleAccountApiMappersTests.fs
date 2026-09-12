@@ -309,11 +309,18 @@ let ``AccountEmailUnavailable becomes an unlogged exception`` () =
     Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
 
 [<Fact; Trait("Level", "Contract")>]
-let ``NotAuthorised becomes an unlogged exception naming the id`` () =
+let ``NotAuthorised becomes an unlogged exception asking for re-authorisation, without the store's id`` () =
+    // The id is the store's ObjectId, which the page never shows: it names accounts by email. A
+    // sentence naming it told a user with two accounts nothing about which one to act on. The page
+    // says which account a failed calendar fetch was for; this sentence says what is wrong with it.
     let actual = GoogleAccountApiMappers.toMyDogsbodyException anAction (NotAuthorised(accountId "acc-1"))
 
-    Assert.Contains("acc-1", actual.Message)
-    Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
+    Assert.Equal(anAction, actual.ActionName)
+    Assert.Equal("This Google account needs to be re-authorised.", actual.Message)
+    Assert.DoesNotContain("acc-1", actual.Message)
+    let inner = Assert.IsType<ApplicationException>(actual.InnerException)
+    Assert.Equal(actual.Message, inner.Message)
+    Assert.True(MyDogsbody.Exceptions.ExceptionHelpers.isApplicationException actual)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``NoDefaultCalendar becomes an unlogged exception naming the id`` () =

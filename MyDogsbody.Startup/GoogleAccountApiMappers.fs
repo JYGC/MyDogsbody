@@ -101,7 +101,9 @@ let toMyDogsbodyException (action: string) (error: CalendarError) : MyDogsbodyEx
     | AccountAlreadyRegistered email -> expected $"The account '{GoogleEmail.value email}' is already registered."
     | AccountNotRegistered id -> expected $"No Google account was found with id '{GoogleAccountId.value id}'."
     | AccountEmailUnavailable -> expected "The authorised account's email address could not be read."
-    | NotAuthorised id -> expected $"The account '{GoogleAccountId.value id}' needs to be re-authorised."
+    // Not named by its id: that is the store's ObjectId, which the page never shows - it names
+    // accounts by email. The page says which account a failed calendar fetch was for.
+    | NotAuthorised _ -> expected "This Google account needs to be re-authorised."
     | NoDefaultCalendar id ->
         expected $"The account '{GoogleAccountId.value id}' has no default calendar chosen yet."
     | CalendarNoLongerExists calendarId ->

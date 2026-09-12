@@ -78,7 +78,7 @@ let private withFakeApi (test: GoogleAccountApi -> unit) =
                         if accounts |> Seq.exists (fun a -> a.Id = id) then
                             Ok []
                         else
-                            fail ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor $"The account '{id}' needs to be re-authorised."
+                            fail ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor "This Google account needs to be re-authorised."
             SetDefaultInvoiceCalendar =
                 fun accountId _ ->
                     if accounts |> Seq.exists (fun a -> a.Id = accountId) then

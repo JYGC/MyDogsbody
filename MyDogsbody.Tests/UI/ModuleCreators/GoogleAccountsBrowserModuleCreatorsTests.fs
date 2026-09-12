@@ -122,13 +122,49 @@ let ``a failed calendar fetch surfaces the reason instead of silently leaving th
             (fun () -> failwith "unused")
             (fun _ -> failwith "unused")
             (fun _ -> Ok())
-            (fun _ -> Error(failure "The account 'acc-1' needs to be re-authorised."))
+            (fun _ -> Error(failure "This Google account needs to be re-authorised."))
             (fun _ _ -> failwith "unused")
 
     let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule runSynchronously googleAccountApi
 
-    Assert.Equal(Some "The account 'acc-1' needs to be re-authorised.", AVal.force browser.ErrorAval)
+    Assert.Equal(
+        Some "Could not load the calendars for 1@example.com: This Google account needs to be re-authorised.",
+        AVal.force browser.ErrorAval
+    )
     Assert.Empty(AVal.force browser.CalendarsByAccountIdAval)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``a failed calendar fetch names the account it failed for`` () =
+    // The page fetches every account's calendars by itself, so nothing the user did says which
+    // account a failure belongs to - and the page names accounts only by email. The reason on its
+    // own ("needs to be re-authorised", "Google is rate-limiting this account") left a user with
+    // two accounts unable to tell which one to act on.
+    let googleAccountApi =
+        api
+            (fun () -> Ok(Some "secret"))
+            (fun _ -> Ok())
+            (fun () -> Ok [ anAccount "1" None false; anAccount "2" None false ])
+            (fun () -> failwith "unused")
+            (fun _ -> failwith "unused")
+            (fun _ -> Ok())
+            (fun id ->
+                if id = "2" then
+                    Error(failure "This Google account needs to be re-authorised.")
+                else
+                    Ok [ aCalendar "cal-1" "Invoices" true ])
+            (fun _ _ -> failwith "unused")
+
+    let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule runSynchronously googleAccountApi
+
+    Assert.Equal(
+        Some "Could not load the calendars for 2@example.com: This Google account needs to be re-authorised.",
+        AVal.force browser.ErrorAval
+    )
+
+    let byAccount = AVal.force browser.CalendarsByAccountIdAval
+    Assert.Equal<CalendarUiType list option>(Some [ aCalendar "cal-1" "Invoices" true ], Map.tryFind "1" byAccount)
+    Assert.Equal<CalendarUiType list option>(None, Map.tryFind "2" byAccount)
+    Assert.False(AVal.force browser.IsLoadingAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``an account needing re-authorisation never has its calendars fetched`` () =
@@ -605,7 +641,7 @@ let ``correcting a malformed client secret loads the calendars it could not`` ()
 
     let browser = GoogleAccountsBrowserModuleCreators.getGoogleAccountsBrowserModule runSynchronously googleAccountApi
 
-    Assert.Equal(Some malformedSecret, AVal.force browser.ErrorAval)
+    Assert.Equal(Some $"Could not load the calendars for 1@example.com: {malformedSecret}", AVal.force browser.ErrorAval)
     Assert.Equal<CalendarUiType list option>(None, Map.tryFind "1" (AVal.force browser.CalendarsByAccountIdAval))
 
     browser.StartEditingClientSecret()
@@ -661,7 +697,7 @@ let ``replacing the client secret with one that does not work says so straight a
     runAll ()
 
     Assert.Equal(2, fetches.Value)
-    Assert.Equal(Some malformedSecret, AVal.force browser.ErrorAval)
+    Assert.Equal(Some $"Could not load the calendars for 1@example.com: {malformedSecret}", AVal.force browser.ErrorAval)
     Assert.Equal(Some "not-json", AVal.force browser.ClientSecretAval)
     // The last list that did load stays beside the alert until a fetch replaces it.
     Assert.Equal<CalendarUiType list option>(
@@ -699,7 +735,7 @@ let ``opening the page over a malformed client secret keeps the alert its calend
     runAll ()
 
     Assert.Equal(1, fetches.Value)
-    Assert.Equal(Some malformedSecret, AVal.force browser.ErrorAval)
+    Assert.Equal(Some $"Could not load the calendars for 1@example.com: {malformedSecret}", AVal.force browser.ErrorAval)
     Assert.Equal(Some "not-json", AVal.force browser.ClientSecretAval)
     Assert.Equal<GoogleAccountUiType list>([ anAccount "1" None false ], AVal.force browser.AccountsAval)
     Assert.Equal<CalendarUiType list option>(None, Map.tryFind "1" (AVal.force browser.CalendarsByAccountIdAval))

@@ -1799,3 +1799,109 @@ against `d3e6d49` before anything changed.
 Per level, each measured with `--filter "Level=..."`: Unit **816** (unchanged, including the one
 pre-existing failure, which is tagged `Unit`), Integration **327** (+1), Contract
 **353** (+1), E2E **42** (unchanged). 1538 in total.
+
+---
+
+## PR review, series 2 round 6 — one defect found in the diff, fixed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 15 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `4c09970` before anything changed.
+
+### Rounds 1–5, re-checked
+
+- **The lock around the calendars map stands.** Both writers of the map (`loadCalendarsFor`'s
+  success and `removeAccount`) still go through `changeCalendars`, and this round's change keeps that.
+- **`minAccessRole=writer` stands.** It is still set on every page's request.
+- **The save path and the page load stand.** Each reads the secret and then loads the accounts in
+  one work item, and the spinner is still set before any work runs.
+- **`SetClientSecretWorkflow` stands.** It refuses a null or blank secret without reaching the store,
+  and the factory's `SetClientSecret` goes through it.
+- **`summaryOverride` stands.** `toAvailableCalendar` takes it when set and `summary` otherwise, and
+  an entry with no usable name either way is still dropped, as before.
+
+### A failed calendar fetch did not say which account it was for
+
+- **The defect.** Opening the page fetches every account's calendars, one fetch per account, with
+  nothing the user did to tie a failure to an account. The alert showed the failure's message
+  alone. For `NotAuthorised` that message was `The account '<id>' needs to be re-authorised.`, and
+  the id is the store's ObjectId. The page names accounts only by email and shows that id nowhere.
+  So a user with two accounts, one of whose tokens had expired, could not tell which account to act
+  on. A Testing-mode OAuth client's refresh tokens last seven days, so this is the common failure.
+  Nothing sets `NeedsReauthorisation` yet, so there is no **Re-authorise** button, and the only
+  remedy is to remove the account and add it again. That makes knowing which account essential.
+  `Google is rate-limiting this account; try again shortly.` had the same gap.
+- **Series 1 round 6 considered this and did not change it**, calling it "a payload choice shared
+  with `AccountNotRegistered` and `NoDefaultCalendar`, not something this round introduced". This
+  PR did introduce it. `NotAuthorised` is the one of the three that the page reaches, on every
+  page load.
+- **Measured before the fix**, with a scratch script over the real `GoogleAccountApiFactory`, a temp
+  `Google.db` holding a client secret and two accounts with no stored token, and the real module
+  creator:
+
+  | | Before | After |
+  | --- | --- | --- |
+  | The alert | `The account '66e2f0c1a2b3c4d5e6f70802' needs to be re-authorised.` | `Could not load the calendars for bob@example.com: This Google account needs to be re-authorised.` |
+  | Names `bob@example.com`, whose fetch failed | no | yes |
+  | Names the id, which the page never shows | yes | no |
+  | Names `alice@example.com` | no | no |
+  | Logged | 0 | 0 |
+
+- **Fix.** Two parts:
+  - The module creator's `loadCalendarsFor` takes the account rather than its id. A failure now
+    reads `Could not load the calendars for <email>: <message>`, naming the account the way the
+    table does.
+  - `NotAuthorised`'s sentence no longer names the store's id: `This Google account needs to be
+    re-authorised.` The page now says which account it is.
+- **Decisions the finding did not ask for:**
+  - The account is named in the UI, not in the domain error. `NotAuthorised` carries a
+    `GoogleAccountId`, and `ListCalendars` is given only that. Putting the email in the payload would
+    change a published dependency type and its contract suite. The module creator already holds the
+    account it is fetching for.
+  - The prefix is on every calendar-fetch failure, including the ones that are not about that
+    account: the malformed secret, the API not being enabled, and Google being unreachable. Each
+    still reads truly: that account's calendars could not be loaded, and why. A
+    `MyDogsbodyException` does not tell the UI which failures are global.
+  - `SetDefaultInvoiceCalendar`'s failures are not prefixed. The user chose a calendar in that
+    account's row, so the page already shows which account it is.
+- **Tests, the first three written red first:**
+  - Unit, `a failed calendar fetch names the account it failed for`, over two accounts where the
+    second's fetch fails. Red: `Expected: Some(Could not load the calendars for 2@example.com: This
+    Google account needs to be re-authorised.)`, `Actual: Some(This Google account needs to be
+    re-authorised.)`.
+  - Contract, `NotAuthorised becomes an unlogged exception asking for re-authorisation, without the
+    store's id`. It replaces `... naming the id`, and asserts the message, the `ActionName` and the
+    unlogged `ApplicationException` inner. Red: `Expected: "This Google account needs to be
+    re-author"···`, `Actual: "The account 'acc-1' needs to be re-author"···`.
+  - E2E, `a calendar fetch that fails says which account it failed for`, through the real store and
+    workflows. It registers two accounts and fails bob's fetch as `NotAuthorised`. Red: `Not found:
+    "bob@example.com"` in `"The account '507f1f77bcf86cd799439012' ne"···`.
+  - Four existing unit tests assert the alert text exactly, and now expect the account named. They
+    are the first calendar-fetch failure test and the three malformed-secret ordering tests. What
+    each is about is unchanged. The API contract fake's `GetCalendarsFor` refusal uses the new
+    sentence, so it still mirrors the real API.
+  - No Integration test: nothing that does I/O changed.
+
+### Considered and deliberately not changed
+
+- **`AccountNotRegistered` still names an id.** It is reached only for an id no registered account
+  has, so there is no email to name it by.
+- **`NoDefaultCalendar` still names an id.** Nothing in this change produces it. Change #7's sync is
+  its first producer, and its sentence belongs to that change.
+- **Only the last failure's message survives**, and a later success can clear it. That is series 1
+  round 3's "a `loadCalendarsFor` success clears another account's error". This round changes what
+  the surviving message says, not which one survives.
+- Series 1's deferrals and series 2 rounds 1–5's stand, for the reasons they give.
+
+### Series 2 round 6 gate
+
+| Check | Result |
+| --- | --- |
+| `dotnet build MyDogsbody.sln` | 0 errors. One warning re-emitted, pre-existing and present on `main`: `PdfProcessing\Program.fs` FS0025. The test project's two, also `main`'s (`PdfDocumentReaderTests.fs` FS0760, `ScanWindowStoreTests.fs` FS0020), came from the red-first build and were not re-emitted, since that project was up to date |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1538 → **1540** (+2), 1539 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+| The per-level runs | The Contract-level run on its own failed `MailAccountApiContractTests.ScanForAccounts against the committed fixture finds ten accounts, and GetAccounts sees them(implementation: "real api")` after 1 ms. That code is untouched here, and the test passed in the full run. Its `withRealApi` builds a Thunderbird context first thing, and that context's `BsonMapper.Global` warm-up is where the known race fires. `invoice-extraction`'s `outcome.md` records this same test hitting it. The stack trace was not captured, and the test was not re-run |
+
+Per level, each measured with `--filter "Level=..."`: Unit **817** (+1, including the one
+pre-existing failure, which is tagged `Unit`), Integration **327** (unchanged), Contract **353**
+(unchanged: one test replaced), E2E **43** (+1). 1540 in total.

@@ -54,11 +54,18 @@ let getGoogleAccountsBrowserModule
     /// not disturb the accounts table - it only leaves that one picker empty - but it is surfaced
     /// via ErrorAval rather than swallowed, so "the picker is empty" comes with a reason (an
     /// expired credential, a network failure, a rate limit) instead of no explanation at all.
-    let loadCalendarsFor (accountId: string) =
+    ///
+    /// The alert names the account by its email, the way the table does. Nothing the user did
+    /// starts this fetch - the page runs one per account - so the reason on its own ("needs to be
+    /// re-authorised", "Google is rate-limiting this account") leaves someone with two accounts
+    /// unable to tell which one to act on.
+    let loadCalendarsFor (account: GoogleAccountUiType) =
         startWork (fun () ->
-            match googleAccountApi.GetCalendarsFor accountId with
-            | Ok calendars -> changeCalendars (Map.add accountId calendars) (fun () -> errorCval.Value <- None)
-            | Error(ex: MyDogsbodyException) -> transact (fun _ -> errorCval.Value <- Some ex.Message))
+            match googleAccountApi.GetCalendarsFor account.Id with
+            | Ok calendars -> changeCalendars (Map.add account.Id calendars) (fun () -> errorCval.Value <- None)
+            | Error(ex: MyDogsbodyException) ->
+                transact (fun _ ->
+                    errorCval.Value <- Some $"Could not load the calendars for {account.EmailAddress}: {ex.Message}"))
 
     /// Reloads the accounts table, then the calendars for every account that has a usable
     /// credential - a NOT READY account's picker needs populating so a calendar can be chosen at
@@ -87,7 +94,7 @@ let getGoogleAccountsBrowserModule
             | Ok accounts ->
                 for account in accounts do
                     if not account.NeedsReauthorisation then
-                        loadCalendarsFor account.Id
+                        loadCalendarsFor account
             | Error _ -> ())
 
     let startEditingClientSecret () = transact (fun _ -> isEditingClientSecretCval.Value <- true)

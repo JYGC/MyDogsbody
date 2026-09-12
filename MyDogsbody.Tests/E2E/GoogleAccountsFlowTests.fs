@@ -339,6 +339,43 @@ let ``adding an account shows it is in progress until the consent flow finishes`
         Assert.Empty harness.Logged)
 
 [<Fact; Trait("Level", "E2E")>]
+let ``a calendar fetch that fails says which account it failed for`` () =
+    // The page fetches every account's calendars as it opens and names accounts only by email. An
+    // expired token - a Testing-mode OAuth client's refresh tokens last seven days - fails one
+    // account's fetch, and the alert has to name that account the way the table does, not by the
+    // store's id for it.
+    let alice = GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail
+    let bob = GoogleAccountId.create "507f1f77bcf86cd799439012" |> valueOrFail
+    let consents = System.Collections.Generic.Queue<GoogleEmail * GoogleAccountId>()
+    consents.Enqueue(GoogleEmail.create "alice@example.com" |> valueOrFail, alice)
+    consents.Enqueue(GoogleEmail.create "bob@example.com" |> valueOrFail, bob)
+
+    let authoriseAccount: AuthoriseAccount = fun () -> Ok(consents.Dequeue())
+
+    let listCalendars: ListCalendars =
+        fun accountId ->
+            if accountId = bob then
+                Error(NotAuthorised accountId)
+            else
+                Ok [ aCalendar "cal-1" "Invoices" true ]
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        harness.Api.SetClientSecret "the-secret" |> ignore
+        harness.Api.RegisterAccount() |> ignore
+        harness.Api.RegisterAccount() |> ignore
+
+        let _, rendered = renderBrowser harness
+
+        rendered.WaitForAssertion(fun () ->
+            let alert = Assert.Single(errorAlerts rendered)
+            Assert.Contains("bob@example.com", alert.TextContent)
+            Assert.Contains("needs to be re-authorised", alert.TextContent)
+            Assert.DoesNotContain("alice@example.com", alert.TextContent)
+            Assert.DoesNotContain(GoogleAccountId.value bob, alert.TextContent))
+
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``a failure is shown as an alert, cleared by the next success`` () =
     let authoriseAccount: AuthoriseAccount = fun () -> failwith "must not be called - no client secret is set"
     let listCalendars: ListCalendars = fun _ -> Ok []
