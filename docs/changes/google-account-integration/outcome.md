@@ -2125,3 +2125,82 @@ against `7ce8db3` before anything changed.
 
 Per level, each measured with `--filter "Level=..."`: Unit **817** (including the one pre-existing failure, which is tagged `Unit`), Integration **327**, Contract
 **361**, E2E **43**. 1548 in total, unchanged.
+
+---
+
+## After PR review series 2: the members that go through Google, tested past their refusals
+
+**Why.** Series 2 round 8 found that the factory's `RegisterAccount`, `ReauthoriseAccount` and
+`SetDefaultInvoiceCalendar` were tested only as far as their refusals, and round 9 agreed. The
+factory composed each of them, and the E2E harness re-composed its own copy around its fakes, so no
+test ran the factory's composition past the refusals that come before Google. Of the two remedies
+rounds 8 and 9 set out, the user chose the second: make each member's composition a public function
+that both the factory and the tests call. It keeps tasks.md 9.1's choice that the harness composes
+its own API record, which the first remedy would have reversed.
+
+**Measured before**, with a temporary mutation of `createGoogleAccountApi`, reverted from git and
+never committed: with `RegisterAccount` handed a discard that did nothing, so that every refused
+registration would leave its refresh token stored, the whole suite still passed - 1547 of 1548, the
+pre-existing `SqliteConnectionPoolingTests` aside.
+
+**What changed.**
+
+- `GoogleAccountApiFactory` gains four public functions, each taking its Google-facing dependency as
+  a parameter: `registerAccountWith` (`AuthoriseAccount`), `reauthoriseAccountWith`
+  (`ReauthoriseAccount`), and `getCalendarsForWith` and `setDefaultInvoiceCalendarWith`
+  (`ListCalendars`). Each is the workflow over the storage bindings, its answer mapped to the UI
+  record and its error translated: the code `createGoogleAccountApi` already had, moved rather than
+  changed. `createGoogleAccountApi` hands them the real consent flow and calendar client, so
+  production behaviour is unchanged.
+- The E2E harness's `RegisterAccount`, `GetCalendarsFor` and `SetDefaultInvoiceCalendar` are those
+  functions, handed its two fakes. The harness still composes the record itself and never calls
+  `createGoogleAccountApi` (tasks.md 9.1). Its storage-only members stay composed over the factory's
+  `bind*` functions, and no flow uses its `ReauthoriseAccount`.
+- **Widening, noted:** `GetCalendarsFor` was not in round 8's list. It has the same shape - a
+  Google-facing member the factory tests reached only as far as its refusals - so it is included.
+
+**Tests**, in `Startup/GoogleAccountApiFactoryTests.fs`:
+
+- **Red first.** The tests and the harness were moved onto the four functions before they existed:
+  `error FS0039: The value, constructor, namespace or type 'registerAccountWith' is not defined`, and
+  the same for the other three, in both files. No behaviour changed, so there is no behavioural red
+  run; the mutations below are what show the tests can fail.
+- **Integration**, each against a temp `Google.db` with a `handleError` that records what it logs.
+  `registerAccountWith`: storing the authorised account and keeping the token consent wrote; refusing
+  an account already registered and discarding the token consent wrote for it; refusing before any
+  consent flow when no client secret has been supplied. `reauthoriseAccountWith`: storing the email
+  Google now reports while keeping the default calendar; a cancelled consent leaving the account as
+  it was. `setDefaultInvoiceCalendarWith`: storing a calendar the account still has; refusing one it
+  no longer has, storing nothing.
+- **Unit**, since `getCalendarsForWith` touches no store: every calendar field mapped; a blank account
+  id refused without asking for calendars; a failed fetch passed on with its own message.
+- Every success asserts every field of the returned record and of the stored row. Every refusal
+  asserts the message, the `ActionName` and the inner exception.
+
+**The mutations again, after the change.** Each was made in the working tree, run against the whole
+suite, and undone by restoring a copy of the finished file, compared byte for byte afterwards.
+
+| Mutation | Whole suite, after (the pre-existing failure aside) |
+| --- | --- |
+| `registerAccountWith`'s discard does nothing | **1 failing**: `registerAccountWith refuses an account already registered, and discards the token consent wrote for it` |
+| `registerAccountWith`'s save does nothing | **10 failing**: `registerAccountWith stores the authorised account, not ready, and keeps the token consent wrote` and 9 E2E flows |
+| `reauthoriseAccountWith`'s save does nothing | **1 failing**: `reauthoriseAccountWith stores the email Google now reports, keeping the default calendar` |
+| `setDefaultInvoiceCalendarWith`'s save does nothing | **2 failing**: `setDefaultInvoiceCalendarWith stores a calendar the account still has` and E2E `choosing a default calendar makes a not-ready account ready` |
+
+**What stays untested, and why.** `createGoogleAccountApi` now only chooses which real adapter each
+function is handed. The consent flow needs a system browser (tasks.md 7.3), and the calendar list's
+real binding, `bindListCalendars`, has its own contract suite over a stubbed `HttpMessageHandler`.
+
+**Also updated:** tasks.md 5.2 and 9.1, and CLAUDE-project.md's contract guidance, since change #7
+adds four Google-facing dependency types to this same factory.
+
+### Gate
+
+| Check | Result |
+| --- | --- |
+| Baseline over `d62afe3`, measured before anything changed | 1548 tests, 1547 passed, 0 skipped. The one failure is the pre-existing `SqliteConnectionPoolingTests` |
+| `dotnet build MyDogsbody.sln` | 0 errors. 2 warnings re-emitted, both pre-existing and present on `main`: `Tests\Database\ScanWindowStoreTests.fs` FS0020 and `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760. `PdfProcessing\Program.fs` FS0025 is untouched and was not rebuilt |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1548 → **1558** (+10), 1557 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **820** (+3, including the one pre-existing failure, which is tagged `Unit`), Integration **334** (+7), Contract **361**, E2E **43**. 1558 in total.

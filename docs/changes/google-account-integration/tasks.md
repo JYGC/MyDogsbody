@@ -192,6 +192,13 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       it silently — never `AuthorizeAsync`, which would open a browser if the token were missing) is
       what `ListCalendars`'/`GetCalendarsFor`'s real binding uses; a missing stored credential is
       indistinguishable, by design, from Google itself reporting 401/403 - both map to `NotAuthorised`.
+      *Since the follow-up to PR review series 2 rounds 8–9:* the four members that go through Google
+      are composed by public functions taking the Google-facing dependency as a parameter
+      (`registerAccountWith`, `reauthoriseAccountWith`, `getCalendarsForWith`,
+      `setDefaultInvoiceCalendarWith`). `createGoogleAccountApi` hands them the real consent flow and
+      calendar client; `GoogleAccountApiFactoryTests` and the E2E harness hand them fakes, so each is
+      tested past its refusals. Before, "every member" held only up to the refusals that come before
+      Google, and a `RegisterAccount` handed a discard that did nothing passed the whole suite.
 - [x] **5.3** `ActionNames.MyDogsbody.Startup.GoogleAccountApi.*`.
 - [x] **5.4** `Startup.fs`: `Google.db` context (`connection=shared`, matching Thunderbird.db/the log
       database's convention), `googleAccountApi`, one more registration.
@@ -291,12 +298,17 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       temp LiteDB: register → the row appears marked not-ready; choose a calendar → it shows and the
       account becomes ready; an account with no calendar stays not-ready with its reason; remove →
       the row goes; a failure → `MudAlert`, cleared by the next success. 5 tests.
-      *Outcome:* the harness does **not** go through `GoogleAccountApiFactory` — it re-composes the
-      same real `GoogleAccountStore` bindings and domain workflows directly, with `AuthoriseAccount`
-      and `ListCalendars` supplied as test-controlled fakes, because the real consent flow needs a
-      system browser and the real calendar client needs the network. *Since PR review series 2
-      round 8* its six storage-facing dependencies are the factory's own `bind*` functions, not
-      copies; the API record around them is still composed in the harness. `MudSelect` (the calendar
+      *Outcome:* the harness does **not** go through `GoogleAccountApiFactory.createGoogleAccountApi`
+      — it composes its own API record over the same real `GoogleAccountStore` bindings and domain
+      workflows, with `AuthoriseAccount` and `ListCalendars` supplied as test-controlled fakes,
+      because the real consent flow needs a system browser and the real calendar client needs the
+      network. *Since PR review series 2 round 8* its six storage-facing dependencies are the
+      factory's own `bind*` functions, not copies. *Since the follow-up to series 2 rounds 8–9* its
+      `RegisterAccount`, `GetCalendarsFor` and `SetDefaultInvoiceCalendar` are the factory's own
+      compositions too (`registerAccountWith`, `getCalendarsForWith`, `setDefaultInvoiceCalendarWith`),
+      handed those two fakes: re-composed in the harness, a factory whose `RegisterAccount` never
+      discarded a refused registration's token passed every test. The record itself is still composed
+      in the harness. `MudSelect` (the calendar
       picker) renders through a popover, so the view is rendered inside a `MudPopoverProvider`, the
       same fix `InvoicesFlowTests` already needed for its own `MudSelect`.
       *Since PR review round 9:* the failure flow asserts on the error alert element and on the

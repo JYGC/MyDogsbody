@@ -7,7 +7,6 @@ open Microsoft.Extensions.DependencyInjection
 open MudBlazor.Services
 open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
-open MyDogsbody.Domain
 open MyDogsbody.Domain.Calendar
 open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database
@@ -17,15 +16,22 @@ open MyDogsbody.UI.Types
 /// A bUnit TestContext subclass wired for MudBlazor (AddMudServices, JSRuntimeMode.Loose), over
 /// the Google integration's own LiteDB database.
 ///
-/// `RegisterAccount`/`GetCalendarsFor`/`SetDefaultInvoiceCalendar` are built here rather than via
-/// `GoogleAccountApiFactory`, because the real consent flow needs a system browser and the real
-/// calendar client needs a network connection - neither of which any test may require
-/// (tasks.md's own header rule). Everything storage-facing is what production runs: the
-/// dependencies are the factory's own bindings (`GoogleAccountApiFactory.bind*`, since PR review
-/// series 2 round 8, rather than copies of them), over the real LiteDB context, with the real
-/// domain workflows and error translation. Only the two network-touching dependencies are
-/// test-controlled fakes, matching the same seam `GoogleAuthorizationTests`/
-/// `GoogleAccountApiFactoryTests` already exercise.
+/// The API record is composed here rather than by `GoogleAccountApiFactory.createGoogleAccountApi`,
+/// because the real consent flow needs a system browser and the real calendar client needs a
+/// network connection - neither of which any test may require (tasks.md's own header rule). What
+/// goes into it is what production runs:
+///
+/// - `RegisterAccount`, `GetCalendarsFor` and `SetDefaultInvoiceCalendar` are the factory's own
+///   compositions (`GoogleAccountApiFactory.registerAccountWith`, `getCalendarsForWith` and
+///   `setDefaultInvoiceCalendarWith`), handed the two fakes in place of the real consent flow and
+///   calendar client. They used to be re-composed here, and a factory whose `RegisterAccount` never
+///   discarded a refused registration's token passed every flow.
+/// - The storage-only members are composed here over the factory's own bindings
+///   (`GoogleAccountApiFactory.bind*`, since PR review series 2 round 8), with the real domain
+///   workflows and error translation, over the real LiteDB context.
+///
+/// Only the two network-touching dependencies are test-controlled fakes, matching the same seam
+/// `GoogleAuthorizationTests`/`GoogleAccountApiFactoryTests` already exercise.
 type GoogleAccountsHarness
     (
         authoriseAccount: AuthoriseAccount,
@@ -62,13 +68,9 @@ let withGoogleAccountsHarness
     let loadClientSecret: LoadClientSecret = GoogleAccountApiFactory.bindLoadClientSecret handleError context
     let saveClientSecretDependency: SaveClientSecret = GoogleAccountApiFactory.bindSaveClientSecret handleError context
     let listGoogleAccounts: ListGoogleAccounts = GoogleAccountApiFactory.bindListGoogleAccounts handleError context
-    let saveGoogleAccount: SaveGoogleAccount = GoogleAccountApiFactory.bindSaveGoogleAccount handleError context
 
     let removeGoogleAccountDependency: RemoveGoogleAccount =
         GoogleAccountApiFactory.bindRemoveGoogleAccount handleError context
-
-    let discardAuthorisation: DiscardAuthorisation =
-        GoogleAccountApiFactory.bindDiscardAuthorisation handleError context
 
     let toException = GoogleAccountApiMappers.toMyDogsbodyException
 
@@ -87,17 +89,7 @@ let withGoogleAccountsHarness
                     ListGoogleAccountsWorkflow.listGoogleAccounts listGoogleAccounts ()
                     |> Result.map (List.map GoogleAccountApiMappers.toGoogleAccountUiType)
                     |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.getAccounts)
-            RegisterAccount =
-                fun () ->
-                    RegisterGoogleAccountWorkflow.registerGoogleAccount
-                        loadClientSecret
-                        listGoogleAccounts
-                        authoriseAccount
-                        discardAuthorisation
-                        saveGoogleAccount
-                        ()
-                    |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
-                    |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount)
+            RegisterAccount = GoogleAccountApiFactory.registerAccountWith handleError context authoriseAccount
             ReauthoriseAccount =
                 fun _ -> failwith "not exercised by this harness"
             RemoveAccount =
@@ -110,26 +102,9 @@ let withGoogleAccountsHarness
                         GoogleAuthorization.removeStoredToken handleError context.GetCredentialCollection id
                         |> ignore)
                     |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.removeAccount)
-            GetCalendarsFor =
-                fun id ->
-                    result {
-                        let! accountId = GoogleAccountId.create id |> Result.mapError GoogleAccountIdInvalid
-                        let! calendars = listCalendars accountId
-                        return calendars |> List.map GoogleAccountApiMappers.toCalendarUiType
-                    }
-                    |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor)
+            GetCalendarsFor = GoogleAccountApiFactory.getCalendarsForWith listCalendars
             SetDefaultInvoiceCalendar =
-                fun accountId calendarId ->
-                    SetDefaultInvoiceCalendarWorkflow.setDefaultInvoiceCalendar
-                        listGoogleAccounts
-                        listCalendars
-                        saveGoogleAccount
-                        accountId
-                        calendarId
-                    |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
-                    |> Result.mapError (
-                        toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar
-                    )
+                GoogleAccountApiFactory.setDefaultInvoiceCalendarWith handleError context listCalendars
         }
 
     let harness = new GoogleAccountsHarness(authoriseAccount, listCalendars, logged, api)

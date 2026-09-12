@@ -20,10 +20,11 @@ open MyDogsbody.UI.Types
 // speaks CalendarError, so each is translated on the way out.
 //
 // Public so that GoogleAccountDependencyContractTests and the E2E harness run these bindings rather
-// than copies of them. No factory test reaches SaveGoogleAccount or DiscardAuthorisation: only
-// registering, re-authorising and choosing a calendar use them, and each of those goes through
-// Google first. With copies in both places, a SaveGoogleAccount that never saved, and a
-// DiscardAuthorisation that never discarded, each passed the whole suite (PR review series 2
+// than copies of them. Only registering, re-authorising and choosing a calendar use SaveGoogleAccount
+// and DiscardAuthorisation, and each of those goes through Google first, so no test of
+// `createGoogleAccountApi` reaches them - the members further down (`registerAccountWith` and the
+// rest) are how a test does. With copies in both places, a SaveGoogleAccount that never saved, and
+// a DiscardAuthorisation that never discarded, each passed the whole suite (PR review series 2
 // round 8). ----------
 
 /// The stored client secret, if one has been supplied.
@@ -118,6 +119,101 @@ let bindListCalendars
                 |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
         }
 
+// ---------- The members that go through Google, as the composition root composes them: each
+// workflow over the storage bindings above, its answer mapped to the UI record and its error
+// translated, with the Google-facing dependency a parameter. `createGoogleAccountApi` hands them
+// the real consent flow and calendar client.
+//
+// Public so that GoogleAccountApiFactoryTests and the E2E harness hand them fakes in Google's place
+// and run this composition, rather than a copy of it. Nothing else reaches these members past
+// their refusals: the real consent flow needs a system browser, and the real calendar client the
+// network. With a copy in the harness, a RegisterAccount handed a discard that did nothing - so
+// that every refused registration left its refresh token stored - passed the whole suite (PR review
+// series 2 rounds 8 and 9). ----------
+
+/// `RegisterAccount`, over whichever consent flow it is handed.
+let registerAccountWith
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (authoriseAccount: AuthoriseAccount)
+    : unit -> Result<GoogleAccountUiType, MyDogsbodyException> =
+    let loadClientSecret = bindLoadClientSecret handleError googleContext
+    let listGoogleAccounts = bindListGoogleAccounts handleError googleContext
+    let discardAuthorisation = bindDiscardAuthorisation handleError googleContext
+    let saveGoogleAccount = bindSaveGoogleAccount handleError googleContext
+
+    fun () ->
+        RegisterGoogleAccountWorkflow.registerGoogleAccount
+            loadClientSecret
+            listGoogleAccounts
+            authoriseAccount
+            discardAuthorisation
+            saveGoogleAccount
+            ()
+        |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
+        |> Result.mapError (
+            GoogleAccountApiMappers.toMyDogsbodyException
+                ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount
+        )
+
+/// `ReauthoriseAccount`, over whichever consent flow it is handed.
+let reauthoriseAccountWith
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (reauthoriseAccount: ReauthoriseAccount)
+    : string -> Result<GoogleAccountUiType, MyDogsbodyException> =
+    let listGoogleAccounts = bindListGoogleAccounts handleError googleContext
+    let saveGoogleAccount = bindSaveGoogleAccount handleError googleContext
+
+    fun accountId ->
+        ReauthoriseGoogleAccountWorkflow.reauthoriseGoogleAccount
+            listGoogleAccounts
+            reauthoriseAccount
+            saveGoogleAccount
+            accountId
+        |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
+        |> Result.mapError (
+            GoogleAccountApiMappers.toMyDogsbodyException
+                ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount
+        )
+
+/// `GetCalendarsFor`, over whichever calendar list it is handed. It needs no storage of its own:
+/// the production `ListCalendars` binding reads the stored secret and token itself.
+let getCalendarsForWith (listCalendars: ListCalendars) : string -> Result<CalendarUiType list, MyDogsbodyException> =
+    fun id ->
+        result {
+            let! accountId = GoogleAccountId.create id |> Result.mapError GoogleAccountIdInvalid
+            let! calendars = listCalendars accountId
+            return calendars |> List.map GoogleAccountApiMappers.toCalendarUiType
+        }
+        |> Result.mapError (
+            GoogleAccountApiMappers.toMyDogsbodyException
+                ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor
+        )
+
+/// `SetDefaultInvoiceCalendar`, over whichever calendar list it is handed - the list the chosen
+/// calendar must still be in before it is stored.
+let setDefaultInvoiceCalendarWith
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (listCalendars: ListCalendars)
+    : string -> string -> Result<GoogleAccountUiType, MyDogsbodyException> =
+    let listGoogleAccounts = bindListGoogleAccounts handleError googleContext
+    let saveGoogleAccount = bindSaveGoogleAccount handleError googleContext
+
+    fun accountId calendarId ->
+        SetDefaultInvoiceCalendarWorkflow.setDefaultInvoiceCalendar
+            listGoogleAccounts
+            listCalendars
+            saveGoogleAccount
+            accountId
+            calendarId
+        |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
+        |> Result.mapError (
+            GoogleAccountApiMappers.toMyDogsbodyException
+                ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar
+        )
+
 let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : GoogleAccountApi =
 
     // ---------- Storage dependencies: the bindings above, the ones the contract suite runs. ----------
@@ -125,9 +221,7 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
     let loadClientSecret = bindLoadClientSecret handleError googleContext
     let saveClientSecretDependency = bindSaveClientSecret handleError googleContext
     let listGoogleAccounts = bindListGoogleAccounts handleError googleContext
-    let saveGoogleAccount = bindSaveGoogleAccount handleError googleContext
     let removeGoogleAccountDependency = bindRemoveGoogleAccount handleError googleContext
-    let discardAuthorisation = bindDiscardAuthorisation handleError googleContext
 
     let loadClientSecretValue = clientSecretValueFrom loadClientSecret
 
@@ -188,27 +282,9 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
                 |> Result.map (List.map GoogleAccountApiMappers.toGoogleAccountUiType)
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.getAccounts)
 
-        RegisterAccount =
-            fun () ->
-                RegisterGoogleAccountWorkflow.registerGoogleAccount
-                    loadClientSecret
-                    listGoogleAccounts
-                    authoriseAccount
-                    discardAuthorisation
-                    saveGoogleAccount
-                    ()
-                |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
-                |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount)
+        RegisterAccount = registerAccountWith handleError googleContext authoriseAccount
 
-        ReauthoriseAccount =
-            fun id ->
-                ReauthoriseGoogleAccountWorkflow.reauthoriseGoogleAccount
-                    listGoogleAccounts
-                    reauthoriseAccountDependency
-                    saveGoogleAccount
-                    id
-                |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
-                |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount)
+        ReauthoriseAccount = reauthoriseAccountWith handleError googleContext reauthoriseAccountDependency
 
         RemoveAccount =
             fun id ->
@@ -223,25 +299,7 @@ let createGoogleAccountApi (handleError: HandleErrorBuilder) (googleContext: Goo
                     |> ignore)
                 |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.removeAccount)
 
-        GetCalendarsFor =
-            fun id ->
-                result {
-                    let! accountId = GoogleAccountId.create id |> Result.mapError GoogleAccountIdInvalid
-                    let! calendars = listCalendarsDependency accountId
-                    return calendars |> List.map GoogleAccountApiMappers.toCalendarUiType
-                }
-                |> Result.mapError (toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor)
+        GetCalendarsFor = getCalendarsForWith listCalendarsDependency
 
-        SetDefaultInvoiceCalendar =
-            fun accountId calendarId ->
-                SetDefaultInvoiceCalendarWorkflow.setDefaultInvoiceCalendar
-                    listGoogleAccounts
-                    listCalendarsDependency
-                    saveGoogleAccount
-                    accountId
-                    calendarId
-                |> Result.map GoogleAccountApiMappers.toGoogleAccountUiType
-                |> Result.mapError (
-                    toException ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar
-                )
+        SetDefaultInvoiceCalendar = setDefaultInvoiceCalendarWith handleError googleContext listCalendarsDependency
     }
