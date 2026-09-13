@@ -57,6 +57,8 @@ dotnet build MyDogsbody.sln
 dotnet build MyDogsbody.UI.Portal\MyDogsbody.UI.Portal.fsproj   # fastest loop when editing UI
 ```
 
+`MyDogsbody.Startup.fsproj` pins `Microsoft.Extensions.DependencyInjection.Abstractions` explicitly — keep that pin at or above whatever `FluentMigrator` (via `MyDogsbody.Database.Migrations`) resolves to. Falling behind turns into an `NU1605` package-downgrade error on the WPF host (`MyDogsbody.csproj`) specifically — `dotnet build MyDogsbody.sln` only reports it as a warning, so it can look harmless until someone runs the app.
+
 ### Run
 
 ```powershell
@@ -92,19 +94,23 @@ Tests are xunit v2 with backtick-quoted F# names, e.g. ``` `getPdfObject returns
 
 There is no CI, no lint/format step, no `Directory.Build.props`/`global.json`.
 
-### Build state
-
-`dotnet build MyDogsbody.sln` succeeds with zero errors and zero warnings introduced by application code (three pre-existing warnings remain, none of them in application code and all three present on `main`: `PdfProcessing\Program.fs` FS0025 in a scratch project, and `MyDogsbody.Tests`' `Integrations\Documents\PdfDocumentReaderTests.fs` FS0760 and `Database\ScanWindowStoreTests.fs` FS0020 — the two test-file ones measured by building an export of `origin/main` during `google-account-integration`'s PR review round 9). `dotnet test` runs **1562 tests — 821 Unit, 336 Integration, 361 Contract, 44 E2E** (measured against `google-account-integration`'s head including PR review series 3 round 4, via `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` and the same command with `--filter "Level=..."` per level). **One of those 1562 is a pre-existing failure unrelated to any change since**: `Database\SqliteConnectionPoolingTests.fs`'s structural scan flags several `Data Source=...` connection strings in `invoice-extraction`/`invoice-ledger-foundation`-era test files (`Contracts\InvoiceDependencyContractTests.fs`, `Contracts\InvoicePersistedShapeTests.fs`, `Database\InvoiceStoreTests.fs`, `Database\ScanWindowStoreTests.fs`, `E2E\InvoicesTestHarness.fs`, `Startup\InvoiceApiFactoryTests.fs`, `Startup\ScanWindowApiFactoryTests.fs`) that never got `;Pooling=False` added — verified present unchanged on `main` via `git diff origin/main -- <each file>` returning empty. Fixing it is someone else's change; if the build breaks in a **different** way now, assume you broke it. If the build breaks in exactly this way, it was already broken.
-
-> **A second known flake joined the LiteDB one during `invoice-extraction`:** any test that constructs `ThunderbirdPersistedShapeTests` or another LiteDB context can still hit the `BsonMapper` race under the full suite's parallelism (it passes in isolation) — this is the documented one below. The SQLite store-test harnesses added by that change deliberately **do not** call `SqliteConnection.ClearAllPools()`, because that process-global call was clearing other tests' pooled connections mid-use; they leak their GUID-named temp file instead if the pool still holds a handle.
-
-If you see an intermittent failure, do not re-run until it passes. **There is one known flake**, in any test that constructs a LiteDB context: LiteDB's global `BsonMapper` still has a first-use race that the documented warm-up narrows but does not close — see *Per-integration databases*, which carries the captured stack trace. Anything else intermittent is yours.
-
-`MyDogsbody.Startup.fsproj` pins `Microsoft.Extensions.DependencyInjection.Abstractions` explicitly — keep that pin at or above whatever `FluentMigrator` (via `MyDogsbody.Database.Migrations`) resolves to. Falling behind turns into an `NU1605` package-downgrade error on the WPF host (`MyDogsbody.csproj`) specifically — `dotnet build MyDogsbody.sln` only reports it as a warning, so it can look harmless until someone runs the app.
-
 ## Testing in this codebase
 
 The policy — unit tests first, all four levels green before a change is complete — is in [CLAUDE.md](CLAUDE.md). This section is how to satisfy it here.
+
+**Measure `main` before you change anything.** This file records no test totals and no list of known failures: kept here, they changed with nearly every commit that added a test. Measure instead — build and run the suite on `origin/main` in a throwaway worktree, which leaves your own working tree alone:
+
+```powershell
+git fetch origin
+git worktree add $env:TEMP\MyDogsbody-main origin/main
+dotnet build $env:TEMP\MyDogsbody-main\MyDogsbody.sln
+dotnet test $env:TEMP\MyDogsbody-main\MyDogsbody.Tests\MyDogsbody.Tests.fsproj
+git worktree remove $env:TEMP\MyDogsbody-main
+```
+
+A warning or failure `main` already has was already broken: name it in the change description rather than calling the suite green — fixing it is a change of its own. Anything else your branch shows, assume you broke. The totals a change measures go in its own `outcome.md`.
+
+If you see an intermittent failure, do not re-run until it passes. **There is one known flake**, in any test that constructs a LiteDB context: LiteDB's global `BsonMapper` still has a first-use race that the documented warm-up narrows but does not close — see *Per-integration databases*, which carries the captured stack trace. Anything else intermittent is yours.
 
 Tag every test with its level so the filters above work:
 

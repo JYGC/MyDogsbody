@@ -364,7 +364,9 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
 - [x] **11.1** `CLAUDE-project.md`: `Integrations.Google` is no longer a stub; the new collections in
       `Google.db`; `GoogleCalendarCRUD` removed from the scratch tier; the *Build state* totals;
       the reference-direction bullet updated (the integration now references `Domain`); the
-      four-contexts warm-up paragraph updated to include Google's.
+      four-contexts warm-up paragraph updated to include Google's. *(CLAUDE-project.md's Build
+      state section, whose totals this updated, was removed after PR review series 3; see
+      `outcome.md`.)*
 - [x] **11.2** `outcome.md` written, carrying: the message-string table Phase 5's error translation
       matches on; **that OAuth refresh tokens are stored unencrypted, as a deliberate, accepted risk**
       (Q5.6) with the DPAPI retrofit and its re-authorise-everything cost; the three documented

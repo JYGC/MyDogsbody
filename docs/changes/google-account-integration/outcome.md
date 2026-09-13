@@ -2548,3 +2548,51 @@ against `ee52d84` before anything changed.
 | Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
 
 Per level, each measured with `--filter "Level=..."`: Unit **821** (+1, including the one pre-existing failure, which is tagged `Unit`), Integration **336**, Contract **361**, E2E **44**. 1562 in total.
+
+## After PR review series 3: CLAUDE-project.md's *Build state* section removed
+
+**Why.** The user asked why CLAUDE-project.md carried a *Build state* section, and pointed out that it
+changed with every review round. The history agrees. All 17 of this branch's commits that touched
+CLAUDE-project.md changed that section: the change's first commit, 15 of the 22 review rounds, and
+the follow-up to series 2. Most of the edits were the test totals and the "measured against round
+N" label. Rounds 8 and 9 also rewrote the warnings sentence, which shared the paragraph. Each round's
+totals were already recorded in its PR comment and in this file's gate table. The copy in *Build
+state* was the one that went stale between changes: `thunderbird-account-selection` found it at 399,
+and `sqlite-pool-flake` deliberately left it behind `main`.
+
+**What changed.**
+
+- CLAUDE-project.md → *Commands → Build state* is gone. The two rules in it moved word for word: the
+  `NU1605` package-pin note to *Commands → Build*, and "do not re-run an intermittent failure until
+  it passes", with the LiteDB flake it names, to the top of *Testing in this codebase*.
+- In place of a recorded baseline, *Testing in this codebase* now says to measure `main` before
+  changing anything, and gives the commands for doing it in a throwaway worktree. A warning or
+  failure `main` already has is named in the change description. Anything else is the branch's.
+- Dropped without a new home: the totals, which this file's gate tables carry; the three
+  pre-existing warnings and the pre-existing `SqliteConnectionPoolingTests` failure, which measuring
+  `main` now finds; and the note headed "A second known flake", which `sqlite-pool-flake` had already
+  made obsolete. Its `ClearAllPools()` hazard is covered in *Testing in this codebase → Integration*.
+- `invoice-calendar-sync/tasks.md` 12.1 no longer asks change #7 to put totals in CLAUDE-project.md;
+  its 12.2 already puts them in that change's `outcome.md`. Task 11.1 here notes that the section it
+  updated is gone.
+- Earlier sections of this file that say CLAUDE-project.md's *Build state* carries the current
+  totals were right when written. The gate tables here are now the only place.
+
+**The new procedure, run once.** `git worktree add` of `origin/main` at `b07b55b`, then its build and
+suite, from Git Bash against the same path. Build: 0 errors and 3 warnings, the three the section
+used to list (`PdfProcessing\Program.fs` FS0025, `PdfDocumentReaderTests.fs` FS0760,
+`ScanWindowStoreTests.fs` FS0020). Tests: 1273, 1272 passed, 0 skipped. The one failure is
+`SqliteConnectionPoolingTests`' `every SQLite connection string a test builds disables pooling`. The
+last line, `git worktree remove $env:TEMP\MyDogsbody-main`, ran in PowerShell exactly as written and
+succeeded without `--force`.
+
+### Gate
+
+| Check | Result |
+| --- | --- |
+| Baseline | `origin/main` at `b07b55b`, measured above: 0 errors, 3 warnings; 1273 tests, 1272 passed, 0 skipped, the one failure `SqliteConnectionPoolingTests` |
+| `dotnet build MyDogsbody.sln` | 0 errors. 3 warnings, the same three `main` has (FS0025, FS0760, FS0020). None are new |
+| `dotnet test MyDogsbody.Tests\MyDogsbody.Tests.fsproj` | 1562 → **1562**, 1561 passed, 0 skipped |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Docs only, so there is no red test and the totals do not move.
