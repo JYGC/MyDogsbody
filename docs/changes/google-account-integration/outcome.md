@@ -2380,3 +2380,88 @@ reproduced against `b5f80f9` before anything changed.
 | Failures | Two. The pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. And `MailAccountsFlowTests`' `a walk hitting an unreadable directory lists it and the other accounts still appear`, the known icacls flake: after 2 m 25 s its clean-up could not delete the directory it had denied itself access to (`UnauthorizedAccessException`). It touches no Google code, it passed in the per-level E2E run below, and it was not re-run to green |
 
 Per level, each measured with `--filter "Level=..."`: Unit **820** (including the one pre-existing failure, which is tagged `Unit`), Integration **336** (+1), Contract **361**, E2E **43** (all passed). 1560 in total.
+
+---
+
+## PR review, series 3 round 3 — one gap found in the diff, closed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 22 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `443f27d` before anything changed.
+
+### Series 3 rounds 1–2 and the follow-up to series 2, re-checked cold
+
+- **`87ef2b0`'s four functions are moved, not changed.** Diffed against `d62afe3`, each runs the
+  workflow its inline member ran, over the same storage bindings, with the same UI mapping and the
+  same `ActionName`. `createGoogleAccountApi` hands them the real consent flow, the real re-consent
+  and `bindListCalendars` over `GoogleCalendarClient.listCalendars`.
+- **`b5f80f9`'s `GetAccounts` test and `443f27d`'s consent-binding test hold.** The first asserts the
+  whole list, in email order. The second enters `createGoogleAccountApi`'s own `AuthoriseAccount`
+  binding through a malformed stored secret, which the real consent flow refuses before any browser
+  or listener exists.
+- Series 2's standing items were re-read and stand: the lock around the calendars map,
+  `minAccessRole=writer` on every page's request, the save path and the page load each reading the
+  secret before loading the accounts in one work item, `SetClientSecretWorkflow`,
+  `summaryOverride`, the "Could not load the calendars for <email>: " prefix, the public `bind*`
+  functions and the two dependency contract suites.
+
+### No test drove the calendar picker
+
+- **The gap.** Choosing each account's default invoice calendar is what this change is for (Ask #4),
+  and the picker is where a user does it. Each row's `MudSelect` is filled from that row's entry in
+  `CalendarsByAccountIdAval`, and its `ValueChanged` calls the module's
+  `SetDefaultInvoiceCalendar account.Id calendarId`. Every E2E flow that chooses a calendar calls the
+  module's `SetDefaultInvoiceCalendar` itself, and no unit test renders the picker. So neither half
+  of that wiring was asserted: which account's calendars fill a row's picker (requirements.md:
+  "populate it from **that account's own** calendars"), and which account id and calendar id a
+  choice sends. Both ids are `string`, so the compiler cannot catch them the wrong way round.
+- **Measured before**, with two temporary mutations of `GoogleAccountsComponents.fs`, each restored
+  from a saved copy and compared by sha256 afterwards:
+
+  | Mutation | Whole suite |
+  | --- | --- |
+  | A choice sends the calendar id as the account id, and the account id as the calendar id | 1559 of 1560 passed. The one failure was the pre-existing `SqliteConnectionPoolingTests` |
+  | Every row's picker offers every account's calendars | 1558 of 1560 passed. The failures were the pre-existing `SqliteConnectionPoolingTests` and the known `ThunderbirdFolderScannerTests` icacls flake (`scan records an unreadable directory and continues the walk`), which touches no Google code |
+
+  With the first, every choice would be refused as "No Google account was found with id '<calendar
+  id>'". With the second, a row would offer calendars that belong to another account, and choosing
+  one would be refused as "The calendar '<id>' no longer exists."
+- **Fix.** One E2E test in `E2E/GoogleAccountsFlowTests.fs`, `choosing from an account's own
+  calendar picker stores that calendar against that account`. It registers two accounts with
+  different calendars and opens the second row's `MudSelect` the way a mouse does. It asserts the
+  picker offers exactly that account's calendars, with the primary one labelled. It then chooses one
+  and asserts both rows' status chips, both stored accounts (every field), and that nothing was
+  logged. Work is handed off to the test's own thread, as in the remove-confirmation flows.
+- **Red, against each mutation:**
+  - ids the wrong way round: `Assert.Contains() Failure: Sub-string not found`,
+    `String: "bob@example.com\n    \n\nNot ready - no cale"···`, `Not found: "Ready"`;
+  - every account's calendars: `Assert.Equal() Failure: Collections differ`,
+    `Expected: ["Bob (primary)", "Bob's invoices"]`,
+    `Actual: ["Alice's invoices", "Bob (primary)", "Bob's invoices"]`.
+
+  Green against the restored component. No production code changed, so there is no behavioural red
+  run; the mutations are what show the test can fail.
+- **Stability.** The 14 Google E2E flows, the new one included, passed in 10 consecutive runs.
+
+### Considered and deliberately not changed
+
+- **"Add account" and "Edit" are not clicked by any flow either.** Each calls one module function
+  with no argument, so there is nothing to send the wrong way round, and a handler that does nothing
+  shows at the first click. The picker was worth driving because it can go wrong in ways that still
+  look right: two ids of one type, and a list chosen per row.
+- **The `GoogleAccountApi` contract suite has no `RemoveAccount` case.** Every other member has one.
+  The factory's `RemoveAccount` is asserted on both paths in `GoogleAccountApiFactoryTests`, and the
+  suite's fake is used by nothing else, so a shared case would guard no fake a flow depends on.
+- Series 1's deferrals, series 2's and series 3 rounds 1–2's stand, for the reasons they give. That
+  includes series 1 round 3's "a `loadCalendarsFor` success clears another account's error".
+
+### Series 3 round 3 gate
+
+| Check | Result |
+| --- | --- |
+| Baseline over `443f27d`, measured before anything changed | Build: 0 errors, and only `main`'s three warnings (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). Tests: 1560, 1559 passed, 0 skipped. The one failure was the pre-existing `SqliteConnectionPoolingTests` |
+| `dotnet build MyDogsbody.sln` | 0 errors. No warning was re-emitted, since every project was up to date. The test project's own builds this round re-emitted only `main`'s two (FS0760, FS0020). None are new |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1560 → **1561** (+1), 1560 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **820** (including the one pre-existing failure, which is tagged `Unit`), Integration **336**, Contract **361**, E2E **44** (+1). 1561 in total.

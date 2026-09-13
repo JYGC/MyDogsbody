@@ -326,6 +326,11 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       page's text could not tell whether the alert rendered. The view also renders inside a
       `MudDialogProvider` for the two remove-confirmation flows, and a queued-work flow shows
       "Adding account..." while consent runs.
+      *Since PR review series 3 round 3:* one flow drives the calendar picker itself. It opens the
+      second account's `MudSelect`, asserts it offers only that account's calendars, chooses one,
+      and asserts the choice is stored against that account alone. Every other flow calls the
+      module's `SetDefaultInvoiceCalendar` directly, so with the picker sending its two ids the wrong
+      way round, or every row offering every account's calendars, the whole suite passed.
 - [x] **9.2** Confirmed: no test opens a browser, requires network, or reaches `Startup.Startup`.
 
 ## Phase 10 — Gate (required)

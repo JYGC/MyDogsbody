@@ -179,6 +179,81 @@ let ``choosing a default calendar makes a not-ready account ready`` () =
         Assert.Empty harness.Logged)
 
 [<Fact; Trait("Level", "E2E")>]
+let ``choosing from an account's own calendar picker stores that calendar against that account`` () =
+    // requirements.md: "WHEN a user opens an account's calendar picker THE SYSTEM SHALL populate it
+    // from that account's own calendars", and "WHEN a user chooses a default invoice calendar for an
+    // account THE SYSTEM SHALL persist that choice against the account". Every other flow calls the
+    // module's SetDefaultInvoiceCalendar itself, so no test drove the picker: with every row's picker
+    // offering every account's calendars, or with a choice sending the calendar id as the account id
+    // and the account id as the calendar id - two strings the compiler cannot tell apart - the whole
+    // suite passed (PR review series 3 round 3). Driven here through the row's own MudSelect, with
+    // work handed off to this thread (see `handOffWork`).
+    let alice = GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail
+    let bob = GoogleAccountId.create "507f1f77bcf86cd799439012" |> valueOrFail
+    let consents = System.Collections.Generic.Queue<GoogleEmail * GoogleAccountId>()
+    consents.Enqueue(GoogleEmail.create "alice@example.com" |> valueOrFail, alice)
+    consents.Enqueue(GoogleEmail.create "bob@example.com" |> valueOrFail, bob)
+
+    let authoriseAccount: AuthoriseAccount = fun () -> Ok(consents.Dequeue())
+
+    let listCalendars: ListCalendars =
+        fun accountId ->
+            if accountId = bob then
+                Ok [ aCalendar "bob-primary" "Bob" true; aCalendar "bob-invoices" "Bob's invoices" false ]
+            else
+                Ok [ aCalendar "alice-invoices" "Alice's invoices" false ]
+
+    withGoogleAccountsHarness authoriseAccount listCalendars (fun harness ->
+        harness.Api.SetClientSecret "the-secret" |> ignore
+        harness.Api.RegisterAccount() |> ignore
+        harness.Api.RegisterAccount() |> ignore
+
+        let startWork, runHandedOffWork, _ = handOffWork ()
+        let _, rendered = renderBrowserWith startWork removeWithoutConfirming harness
+        runHandedOffWork ()
+
+        // Accounts are listed by email, so Bob's picker is the second row's.
+        rendered.WaitForAssertion(fun () -> Assert.Equal(2, rendered.FindAll("td .mud-input-control.mud-select").Count))
+        (rendered.FindAll("td .mud-input-control.mud-select") |> Seq.item 1).MouseDown()
+
+        let offered () =
+            rendered.FindAll(".mud-popover-open .mud-list-item") |> List.ofSeq
+
+        rendered.WaitForAssertion(fun () ->
+            Assert.Equal<string list>(
+                [ "Bob (primary)"; "Bob's invoices" ],
+                offered () |> List.map (fun item -> item.TextContent.Trim())
+            ))
+
+        (offered () |> List.find (fun item -> item.TextContent.Trim() = "Bob's invoices")).Click()
+        runHandedOffWork ()
+
+        rendered.WaitForAssertion(fun () ->
+            let rows = rendered.FindAll("tbody tr") |> List.ofSeq
+            Assert.Equal(2, rows.Length)
+            Assert.Contains("alice@example.com", rows.[0].TextContent)
+            Assert.Contains("Not ready - no calendar chosen", rows.[0].TextContent)
+            Assert.Contains("bob@example.com", rows.[1].TextContent)
+            Assert.Contains("Ready", rows.[1].TextContent)
+            Assert.DoesNotContain("Not ready", rows.[1].TextContent))
+
+        let expected: MyDogsbody.UI.Types.GoogleAccountUiType list =
+            [ { Id = GoogleAccountId.value alice
+                EmailAddress = "alice@example.com"
+                DefaultInvoiceCalendarId = None
+                NeedsReauthorisation = false }
+              { Id = GoogleAccountId.value bob
+                EmailAddress = "bob@example.com"
+                DefaultInvoiceCalendarId = Some "bob-invoices"
+                NeedsReauthorisation = false } ]
+
+        match harness.Api.GetAccounts() with
+        | Ok stored -> Assert.Equal<MyDogsbody.UI.Types.GoogleAccountUiType list>(expected, stored)
+        | Error ex -> failwith ex.Message
+
+        Assert.Empty harness.Logged)
+
+[<Fact; Trait("Level", "E2E")>]
 let ``an account with no calendars stays not ready, with a reason, and no error is logged`` () =
     let authoriseAccount: AuthoriseAccount =
         fun () -> Ok(GoogleEmail.create "person@gmail.com" |> valueOrFail, GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail)
