@@ -107,6 +107,10 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       redirect, the calendar scope **and `userinfo.email`** (Q3.5), lifted from the
       `GoogleCalendarCRUD` prototype.
       *Outcome:* the account's own address is read back, so accounts are distinguishable.
+      *Since PR review series 3 round 4:* the requested scopes themselves are asserted
+      (`GoogleAuthorizationTests`, `the consent flow asks for Calendar access and the account's own
+      email address, and nothing more`). Every other test builds its granted scopes from
+      `GoogleAuthorization.scopes`, so with `userinfo.email` dropped from it the whole suite passed.
       *Depends on:* 3.1.
       *Note:* the account's email is read via a plain authenticated GET against
       `https://www.googleapis.com/oauth2/v2/userinfo` (bearer token), not via `GoogleJsonWebSignature`

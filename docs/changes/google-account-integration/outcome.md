@@ -2465,3 +2465,86 @@ against `443f27d` before anything changed.
 | Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
 
 Per level, each measured with `--filter "Level=..."`: Unit **820** (including the one pre-existing failure, which is tagged `Unit`), Integration **336**, Contract **361**, E2E **44** (+1). 1561 in total.
+
+---
+
+## PR review, series 3 round 4 — one gap found in the diff, closed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 23 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `ee52d84` before anything changed.
+
+### Series 3 rounds 1–3 and the follow-up to series 2, re-checked cold
+
+- **`87ef2b0`'s four functions are moved, not changed.** Diffed against `d62afe3`: every line it
+  removed from `GoogleAccountApiFactory.fs` comes back in the four functions, apart from comment
+  wording and names. `listCalendarsDependency`, `reauthoriseAccountDependency` and `id` became the
+  functions' own parameters, and `toException` is spelled out as the
+  `GoogleAccountApiMappers.toMyDogsbodyException` it was bound to.
+- **`b5f80f9`'s `GetAccounts` test, `443f27d`'s consent-binding test and `ee52d84`'s picker flow
+  hold.**
+- **The picker after a refused choice.** Checked because a MudSelect keeps a value of its own. A
+  scratch bUnit probe, outside the repo, chose a calendar through the rendered picker while the
+  calendar fetch failed, once for a not-ready account and once for a ready one. After the refusal,
+  and again after the next success cleared the alert, the picker held the stored value (`""`, and
+  `cal-1`), not the refused choice. Nothing to fix.
+- Series 2's standing items were re-read and stand: the lock around the calendars map,
+  `minAccessRole=writer` on every page's request, the save path and the page load each reading the
+  secret before loading the accounts in one work item, `SetClientSecretWorkflow`,
+  `summaryOverride`, the "Could not load the calendars for <email>: " prefix, the public `bind*`
+  functions and the two dependency contract suites.
+
+### The requested scopes were asserted by no test
+
+- **The gap.** requirements.md: "WHEN authorisation is requested THE SYSTEM SHALL request the
+  calendar scope needed to read and write events, and the `userinfo.email` scope so the account can
+  show its own address (Q3.5)." That request is `GoogleAuthorization.scopes`: `runRealConsentFlow`
+  hands it to `GoogleWebAuthorizationBroker.AuthorizeAsync`, and `loadCredential` builds its flow
+  from it. The tests use it only as input (`GoogleAuthorizationTests` builds its "every scope
+  granted" token from it), and none asserts what it holds.
+- **Measured before**, with a temporary mutation of `GoogleAuthorization.fs`, restored from a saved
+  copy and compared by sha256 afterwards: with `userinfo.email` dropped from `scopes`, the whole
+  suite passed - 1560 of 1561, the one failure the pre-existing `SqliteConnectionPoolingTests`. In
+  use, every registration would complete consent in the browser and then be refused, because
+  `fetchRealAccountEmail` reads the address with a token that was never granted it.
+- **Fix.** One Unit test in `Integrations/Google/GoogleAuthorizationTests.fs`, `the consent flow
+  asks for Calendar access and the account's own email address, and nothing more`. It asserts that
+  `scopes` is exactly Google's two scope strings, written out literally, so it pins the request
+  rather than the constants it is built from. An added scope fails it too.
+- **Red, against the mutation:** `Assert.Equal() Failure: Collections differ`,
+  `Expected: ["https://www.googleapis.com/auth/calendar", "https://www.googleapis.com/auth/userinfo.email"]`,
+  `Actual: ["https://www.googleapis.com/auth/calendar"]`. Green against the restored file. No
+  production code changed, so there is no behavioural red run; the mutation is what shows the test
+  can fail.
+- **What it cannot see.** The consent flow that receives `scopes` needs a system browser
+  (deviation 3). A flow handed some other list would still pass; the value is the part that can be
+  asserted headlessly.
+
+### Considered and deliberately not changed
+
+- **The factory's `AuthoriseAccount` binding can strand a token in one case no real input
+  reaches.** It makes the adapter's raw address a `GoogleEmail` after `GoogleAuthorization.authorise`
+  has returned `Ok`. So a non-blank address with no `@` would be refused after consent wrote the
+  token, where neither `authoriseNewAccountWith`'s clean-up nor the workflow's discard reaches it.
+  The address is the one Google's userinfo endpoint returns for the account, and the binding has no
+  seam to feed it another without a browser.
+- **The client-secret panel says "No Google client secret has been supplied yet." until the page's
+  first read returns.** Series 2 round 3 set the table's spinner before any work runs, but
+  `ClientSecretAval` is a `string option`, with no "not read yet" state to show. The panel is
+  replaced as soon as the read returns. Giving it that state would widen the module's contract for
+  a flicker.
+- **tasks.md's per-task test counts are as of each task.** 6.2 says 15 and 7.2 says 7 × 2. Later
+  rounds added tests under "Since ..." notes rather than restating the counts; the gate tables here
+  and CLAUDE-project.md's *Build state* carry the current totals.
+- Series 1's deferrals, series 2's and series 3 rounds 1–3's stand, for the reasons they give.
+
+### Series 3 round 4 gate
+
+| Check | Result |
+| --- | --- |
+| Baseline over `ee52d84`, measured before anything changed | Build: 0 errors. The only warning re-emitted was `main`'s `PdfProcessing\Program.fs` FS0025. Tests: 1561, 1560 passed, 0 skipped. The one failure was the pre-existing `SqliteConnectionPoolingTests` |
+| `dotnet build MyDogsbody.sln` | 0 errors. The two warnings re-emitted are `main`'s: `Tests\Database\ScanWindowStoreTests.fs` FS0020 and `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760. None are new |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1561 → **1562** (+1), 1561 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **821** (+1, including the one pre-existing failure, which is tagged `Unit`), Integration **336**, Contract **361**, E2E **44**. 1562 in total.

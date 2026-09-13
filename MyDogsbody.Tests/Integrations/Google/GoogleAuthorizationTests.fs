@@ -590,6 +590,20 @@ let private consentGranting (scope: string) : string -> string -> IDataStore -> 
 let private calendarAccessNotGranted =
     "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again."
 
+[<Fact; Trait("Level", "Unit")>]
+let ``the consent flow asks for Calendar access and the account's own email address, and nothing more`` () =
+    // requirements.md: "WHEN authorisation is requested THE SYSTEM SHALL request the calendar scope
+    // needed to read and write events, and the userinfo.email scope so the account can show its own
+    // address" (Q3.5). The tests above and below build their granted scopes from this same list, so
+    // with userinfo.email dropped from it the whole suite passed (PR review series 3 round 4) - and
+    // every registration would complete consent in the browser, then be refused reading an address
+    // its token was never granted. Google's literal scope strings, so this does not lean on the
+    // constants the list is built from.
+    Assert.Equal<string list>(
+        [ "https://www.googleapis.com/auth/calendar"; "https://www.googleapis.com/auth/userinfo.email" ],
+        GoogleAuthorization.scopes
+    )
+
 [<Theory; Trait("Level", "Unit")>]
 [<InlineData("https://www.googleapis.com/auth/userinfo.email openid")>]
 [<InlineData("https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email")>]
