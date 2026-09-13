@@ -2204,3 +2204,82 @@ adds four Google-facing dependency types to this same factory.
 | Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
 
 Per level, each measured with `--filter "Level=..."`: Unit **820** (+3, including the one pre-existing failure, which is tagged `Unit`), Integration **334** (+7), Contract **361**, E2E **43**. 1558 in total.
+
+---
+
+## PR review, series 3 round 1 — one gap found in the diff, closed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 20 issue comments are the earlier
+rounds' summaries. The finding below is this round's own, from reading the diff. It was reproduced
+against `87ef2b0` before anything changed.
+
+### The follow-up to series 2 rounds 8–9, re-checked cold
+
+- **The four functions are moved, not changed.** Diffed against `d62afe3`'s inline members,
+  `registerAccountWith`, `reauthoriseAccountWith`, `getCalendarsForWith` and
+  `setDefaultInvoiceCalendarWith` run the same workflow over the same storage bindings, with the
+  same UI mapping and the same `ActionName`. `createGoogleAccountApi` hands them the real consent
+  flow, the real re-consent and `bindListCalendars` over `GoogleCalendarClient.listCalendars`, so
+  production is unchanged.
+- **The ten new tests hold.** Each success asserts every field of the returned record and of the
+  stored row. Each refusal asserts the message, the `ActionName`, the inner exception and that
+  nothing was logged. The duplicate test asserts that the new token is gone and the existing one
+  kept.
+- **The harness calls three of the four.** No flow re-authorises, so its `ReauthoriseAccount` is
+  still a stub.
+- Series 2's standing items were re-read and stand: the lock around the calendars map,
+  `minAccessRole=writer` on every page's request, the save path and the page load each reading the
+  secret before loading the accounts in one work item, `SetClientSecretWorkflow`,
+  `summaryOverride`, the "Could not load the calendars for <email>: " prefix, the public `bind*`
+  functions and the two dependency contract suites.
+
+### The factory's `GetAccounts` was asserted by no test past an empty list
+
+- **The gap.** The follow-up moved the factory's Google-facing members into functions the tests
+  call. The storage-only members are still composed twice: in `createGoogleAccountApi`, and in the
+  E2E harness (tasks.md 9.1). For `GetClientSecret`, `SetClientSecret` and `RemoveAccount` a factory
+  test asserts the success path. `GetAccounts` was asserted only as an empty list (twice) and, after
+  a removal, as one row's email. Its ordering (`ListGoogleAccountsWorkflow` sorts by email) and its
+  other fields were asserted only against the harness's copy.
+- **Measured before**, with a temporary mutation of `createGoogleAccountApi`, restored from a saved
+  copy and compared by sha256 afterwards: with `GetAccounts` handed `listGoogleAccounts ()`
+  directly, skipping the workflow and its ordering, the whole suite passed - 1557 of 1558, the
+  pre-existing `SqliteConnectionPoolingTests` aside. The table would then list accounts in the
+  store's order, by id, rather than by email.
+- **Fix.** One Integration test in `Startup/GoogleAccountApiFactoryTests.fs`, `GetAccounts lists
+  every stored account ordered by email, with every field mapped`. It stores two rows in the
+  reverse of email order, one with a default calendar and the re-authorisation flag and one with
+  neither, and asserts the whole `GoogleAccountUiType list`.
+- **Red, against the mutation:** `Assert.Equal() Failure: Collections differ`. The actual list was
+  `zoe@gmail.com` then `adam@gmail.com`, the store's order, with every field otherwise equal. Green
+  against the restored factory. No production code changed, so there is no behavioural red run;
+  the mutation is what shows the test can fail.
+
+### Also corrected
+
+- CLAUDE-project.md's contract guidance said the E2E harness calls `registerAccountWith` "and the
+  rest". It calls three of the four; no flow re-authorises, so it never calls
+  `reauthoriseAccountWith`.
+
+### Considered and deliberately not changed
+
+- **The E2E harness still composes its own `GetClientSecret`, `SetClientSecret`, `GetAccounts` and
+  `RemoveAccount`.** That is tasks.md 9.1's choice, kept when option 2 was chosen. Each factory
+  counterpart now has its success path asserted in `GoogleAccountApiFactoryTests`, which is what
+  the copies were hiding.
+- **The `RemoveGoogleAccount` fake and the real store disagree on an id that is not an ObjectId.**
+  The fake reports `Ok false`. The store fails in `ObjectId`'s constructor and reports
+  `GoogleStoreFailed`, logged. Every id the page sends comes from `GetAccounts`, so production never
+  sends one, and `GoogleAccountApiFactoryTests` already says why it removes by a well-formed id.
+- Series 1's deferrals and series 2's stand, for the reasons they give.
+
+### Series 3 round 1 gate
+
+| Check | Result |
+| --- | --- |
+| Baseline over `87ef2b0`, measured before anything changed | Build: 0 errors, and only `main`'s three warnings (`PdfProcessing\Program.fs` FS0025, `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760, `Tests\Database\ScanWindowStoreTests.fs` FS0020). The mutation run above doubles as the test baseline: 1558 tests, 1557 passed, 0 skipped, the one failure the pre-existing `SqliteConnectionPoolingTests` |
+| `dotnet build MyDogsbody.sln` | 0 errors. The same three pre-existing warnings, none new |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1558 → **1559** (+1), 1558 passed, 0 skipped, no hang |
+| Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
+
+Per level, each measured with `--filter "Level=..."`: Unit **820** (including the one pre-existing failure, which is tagged `Unit`), Integration **335** (+1), Contract **361**, E2E **43**. 1559 in total.

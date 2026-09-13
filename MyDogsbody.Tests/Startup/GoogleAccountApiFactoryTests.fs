@@ -132,6 +132,30 @@ let ``GetAccounts returns an empty list for a fresh database`` () =
     withApi (fun api -> Assert.Empty(api.GetAccounts() |> okOrFail "GetAccounts"))
 
 [<Fact; Trait("Level", "Integration")>]
+let ``GetAccounts lists every stored account ordered by email, with every field mapped`` () =
+    // Nothing else asserts this member past an empty list or one row's email, and the E2E harness
+    // composes its own GetAccounts - so with the factory's GetAccounts handed the store's list directly,
+    // skipping ListGoogleAccountsWorkflow's ordering, the whole suite passed (PR review series 3
+    // round 1). Stored in the reverse of the order the table shows, so the store's own order
+    // cannot pass for the workflow's.
+    withApiOver id (fun context api ->
+        storeAccountRow context "507f1f77bcf86cd799439011" "zoe@gmail.com" "cal-1" true
+        storeAccountRow context "507f1f77bcf86cd799439012" "adam@gmail.com" null false
+
+        let expected: GoogleAccountUiType list =
+            [ { Id = "507f1f77bcf86cd799439012"
+                EmailAddress = "adam@gmail.com"
+                DefaultInvoiceCalendarId = None
+                NeedsReauthorisation = false }
+              { Id = "507f1f77bcf86cd799439011"
+                EmailAddress = "zoe@gmail.com"
+                DefaultInvoiceCalendarId = Some "cal-1"
+                NeedsReauthorisation = true } ]
+
+        Assert.Equal<GoogleAccountUiType list>(expected, api.GetAccounts() |> okOrFail "GetAccounts")
+    )
+
+[<Fact; Trait("Level", "Integration")>]
 let ``RegisterAccount refuses with an unlogged exception when no client secret has been supplied`` () =
     withApi (fun api ->
         let ex = api.RegisterAccount() |> errorOrFail "RegisterAccount"

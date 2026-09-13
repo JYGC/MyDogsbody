@@ -199,6 +199,9 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       calendar client; `GoogleAccountApiFactoryTests` and the E2E harness hand them fakes, so each is
       tested past its refusals. Before, "every member" held only up to the refusals that come before
       Google, and a `RegisterAccount` handed a discard that did nothing passed the whole suite.
+      *Since PR review series 3 round 1:* `GetAccounts` is asserted past an empty list as well - two
+      rows, ordered by email, every field - since with the factory's `GetAccounts` skipping
+      `ListGoogleAccountsWorkflow` the whole suite passed.
 - [x] **5.3** `ActionNames.MyDogsbody.Startup.GoogleAccountApi.*`.
 - [x] **5.4** `Startup.fs`: `Google.db` context (`connection=shared`, matching Thunderbird.db/the log
       database's convention), `googleAccountApi`, one more registration.
