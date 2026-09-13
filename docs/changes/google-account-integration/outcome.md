@@ -114,6 +114,15 @@ and the userinfo fetch — are substituted at the function-parameter seam) plus
 `GoogleAccountApiFactoryTests.fs`'s precondition tests. This is stated here and in `tasks.md`
 rather than left as a quietly-thinner contract suite.
 
+**Since PR review series 3 round 2, the factory's own binding is entered as well.**
+`createGoogleAccountApi`'s `AuthoriseAccount` binding (the stored secret,
+`GoogleAuthorization.authorise`, `toAuthorisationError`, then `GoogleEmail`/`GoogleAccountId`) was
+entered by no test, since the precondition tests stop before it. "Cannot be driven headlessly at
+all" holds for its success path, not for all of it: the real consent flow parses the secret before
+any browser or listener exists (round 4), so a malformed stored secret reaches the binding with
+neither. `GoogleAccountApiFactoryTests` now drives that refusal. The success path still needs a
+browser and stays manual coverage.
+
 **`ReauthoriseAccount` has the same gap, and until PR review round 10 it was not recorded.** It is
 the dependency type deviation 2 added, and its real binding is `GoogleAccountApiFactory`'s
 `reauthoriseAccountDependency`: the stored client secret, `GoogleAuthorization.reauthorise` (which
@@ -2283,3 +2292,91 @@ against `87ef2b0` before anything changed.
 | Failures | One: the pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too |
 
 Per level, each measured with `--filter "Level=..."`: Unit **820** (including the one pre-existing failure, which is tagged `Unit`), Integration **335** (+1), Contract **361**, E2E **43**. 1559 in total.
+
+---
+
+## PR review, series 3 round 2 — one gap found in the diff, closed
+
+**Reviewer comments: 0.** The PR has 0 review comments, and its 21 issue comments are the earlier
+rounds' summaries. Both findings below are this round's own, from reading the diff. The first was
+reproduced against `b5f80f9` before anything changed.
+
+### Series 3 round 1 and the follow-up to series 2, re-checked cold
+
+- **`87ef2b0`'s four functions are moved, not changed.** Diffed against `d62afe3`, each runs the
+  workflow its inline member ran, over the same storage bindings, with the same UI mapping and the
+  same `ActionName`. `createGoogleAccountApi` hands them the real consent flow, the real re-consent
+  and `bindListCalendars` over `GoogleCalendarClient.listCalendars`.
+- **`b5f80f9`'s `GetAccounts` test holds.** It stores two rows in the reverse of email order and
+  asserts the whole `GoogleAccountUiType list`.
+- Series 2's standing items were re-read and stand: the lock around the calendars map,
+  `minAccessRole=writer` on every page's request, the save path and the page load each reading the
+  secret before loading the accounts in one work item, `SetClientSecretWorkflow`,
+  `summaryOverride`, the "Could not load the calendars for <email>: " prefix, the public `bind*`
+  functions and the two dependency contract suites.
+
+### 1. The factory's own consent binding was entered by no test
+
+- **The gap.** `createGoogleAccountApi` still holds `authoriseAccount`, the binding production hands
+  `registerAccountWith`: the stored secret, `GoogleAuthorization.authorise`, `toAuthorisationError`,
+  then `GoogleEmail`/`GoogleAccountId`. The follow-up to series 2 said the factory "now only chooses
+  which real adapter each function is handed", but this binding has a translation of its own. Every
+  test of the factory's `RegisterAccount` stops at "no client secret", before the binding runs, and
+  the E2E harness hands `registerAccountWith` a fake. Deviation 3 said the real side "cannot be driven
+  headlessly at all". That holds for its success path only: the real consent flow parses the secret
+  before any browser or listener exists (round 4), so a malformed stored secret enters the binding
+  with neither.
+- **What a mis-wiring would cost.** This translation decides what a failed consent says.
+  `toAuthorisationError` gives the catch-all the inner exception's reason, which is how a rotated
+  `client_secret` (`invalid_client`, round 4) reaches the user in Google's words. Swapped for
+  `toStoreError`, the user reads "Authorisation failed." instead, and every named failure loses its
+  unlogged marker.
+- **Measured before**, with a temporary mutation of `createGoogleAccountApi`, restored from a saved
+  copy and compared by sha256 afterwards: with `authoriseAccount` translating through `toStoreError`,
+  no Google test failed. 1557 of the 1558 tests that reported passed, the one failure the
+  pre-existing `SqliteConnectionPoolingTests`. The 1559th, `ThunderbirdFolderScannerTests`' `scan
+  records an unreadable directory and continues the walk`, hung on the known icacls flake and was
+  killed by `--blame-hang` without reporting; it touches no Google code.
+- **Fix.** One Integration test in `Startup/GoogleAccountApiFactoryTests.fs`, `RegisterAccount over a
+  malformed stored client secret says so through the real consent binding, unlogged, storing
+  nothing`. Over a temp `Google.db` holding a malformed secret, with a `handleError` that records what
+  it logs, it asserts the message, the `ActionName`, the inner `ApplicationException` and its
+  message, that no account row and no token row were stored, and that nothing was logged.
+- **Red, against the mutation:** `Assert.IsType() Failure: Value is null`, `Expected:
+  typeof(System.ApplicationException)`, `Actual: null`. The message and the `ActionName` still
+  matched, which is why a user today would see nothing wrong. Green against the restored factory. No production code
+  changed, so there is no behavioural red run; the mutation is what shows the test can fail.
+- **Not widened to `ReauthoriseAccount`.** Its binding, `reauthoriseAccountDependency`, has the same
+  shape and the same headless refusal, but deviation 3 defers its coverage to the change that sets
+  `NeedsReauthorisation`, because no user can reach it until then. That deferral stands.
+
+### 2. CLAUDE-project.md still listed three databases and three E2E harnesses
+
+- This change wired `Google.db` into `Startup.fs` and said so under *Commands → Run*. Two other
+  places still said `Startup.Startup` opens `Logging.db`, `MyDogsbody.db` and `Thunderbird.db`: the
+  *Integration* warning never to let a test reach it, and the composition-root table. The *E2E* list
+  of harnesses left out `E2E/GoogleAccountsTestHarness.fs`. All three now name what was missing, and
+  *Build state* carries this round's totals. Doc only, so there is no red test.
+
+### Considered and deliberately not changed
+
+- **Accounts are sorted, and duplicates found, by exact email.** `List.sortBy` is ordinal and
+  `GoogleEmail` equality is case-sensitive. The address always comes from Google's userinfo, which
+  gives the same account the same spelling every time, so the duplicate check holds; case only
+  changes where a capitalised address sorts.
+- **Several factory refusal tests assert the `ActionName` and the inner type, not the message.** Each
+  case's message is asserted in `GoogleAccountApiMappersTests`, and each member's composition has its
+  own tests since the follow-up to series 2. No plausible mis-wiring of those members gets past the
+  assertions that exist.
+- Series 1's deferrals, series 2's and series 3 round 1's stand, for the reasons they give.
+
+### Series 3 round 2 gate
+
+| Check | Result |
+| --- | --- |
+| Baseline over `b5f80f9`, measured before anything changed | Round 1 measured 1559 tests there, 1558 passed. The mutation run above differs from `b5f80f9` by one line: 1557 of the 1558 tests that reported passed, the one failure the pre-existing `SqliteConnectionPoolingTests`, and the 1559th hung on the known `ThunderbirdFolderScannerTests` icacls flake |
+| `dotnet build MyDogsbody.sln` | 0 errors. The only warning re-emitted is pre-existing and present on `main`: `PdfProcessing\Program.fs` FS0025. The test project's compile, in the red and green runs, re-emitted only `main`'s two: `Tests\Database\ScanWindowStoreTests.fs` FS0020 and `Tests\Integrations\Documents\PdfDocumentReaderTests.fs` FS0760. None new |
+| `dotnet test` (`--blame-hang --blame-hang-timeout 5m`) | 1559 → **1560** (+1), 1558 passed, 0 skipped, no hang |
+| Failures | Two. The pre-existing `SqliteConnectionPoolingTests`, which fails on `main` too. And `MailAccountsFlowTests`' `a walk hitting an unreadable directory lists it and the other accounts still appear`, the known icacls flake: after 2 m 25 s its clean-up could not delete the directory it had denied itself access to (`UnauthorizedAccessException`). It touches no Google code, it passed in the per-level E2E run below, and it was not re-run to green |
+
+Per level, each measured with `--filter "Level=..."`: Unit **820** (including the one pre-existing failure, which is tagged `Unit`), Integration **336** (+1), Contract **361**, E2E **43** (all passed). 1560 in total.

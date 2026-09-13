@@ -285,6 +285,13 @@ dependency function type; every test binds a lambda or a stubbed HTTP handler.
       precondition tests (`ClientSecretMissing` refuses before either call). Recorded in
       `docs/changes/google-account-integration/tasks.md` (here) and restated in `outcome.md` -
       never silently dropped from the suite.
+      *Since PR review series 3 round 2:* `createGoogleAccountApi`'s own `AuthoriseAccount` binding
+      (the stored secret, `GoogleAuthorization.authorise`, `toAuthorisationError`, then the domain
+      types) is entered by one Integration test in `GoogleAccountApiFactoryTests.fs`, through the one
+      refusal that reaches it without a browser: a malformed stored secret, which the real consent
+      flow refuses before any browser or listener exists. The precondition tests stop before the
+      binding, so until then no test entered it, and with its translation swapped for the store's the
+      whole suite passed. Its success path still needs a browser.
 
 ## Phase 8 — Housekeeping (required)
 

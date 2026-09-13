@@ -388,6 +388,31 @@ let ``registerAccountWith refuses before any consent flow when no client secret 
     )
 
 [<Fact; Trait("Level", "Integration")>]
+let ``RegisterAccount over a malformed stored client secret says so through the real consent binding, unlogged, storing nothing`` () =
+    // The one registration refusal that runs createGoogleAccountApi's own AuthoriseAccount binding -
+    // the stored secret, GoogleAuthorization.authorise, toAuthorisationError, then the domain types.
+    // Every other test of this member stops at "no client secret", before the binding runs, so with
+    // its translation swapped for the store's the whole suite passed (PR review series 3 round 2).
+    // The real consent flow parses the secret before any browser or loopback listener exists
+    // (GoogleAuthorizationTests' malformed theory), so this refuses headlessly. Never store a
+    // well-formed secret here: it would open a browser.
+    withRecordingContext (fun context handleError logged ->
+        let api = GoogleAccountApiFactory.createGoogleAccountApi handleError context
+        api.SetClientSecret "not json at all" |> okOrFail "SetClientSecret"
+
+        let ex = api.RegisterAccount() |> errorOrFail "RegisterAccount"
+
+        Assert.Equal("The stored Google client secret is malformed.", ex.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, ex.ActionName)
+        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        Assert.Equal("The stored Google client secret is malformed.", inner.Message)
+
+        Assert.Equal(0, context.GetAccountCollection().Count())
+        Assert.Equal(0, context.GetCredentialCollection().Count())
+        Assert.Empty(logged)
+    )
+
+[<Fact; Trait("Level", "Integration")>]
 let ``reauthoriseAccountWith stores the email Google now reports, keeping the default calendar`` () =
     withRecordingContext (fun context handleError logged ->
         storeAccountRow context "507f1f77bcf86cd799439011" "old@gmail.com" "cal-1" true
