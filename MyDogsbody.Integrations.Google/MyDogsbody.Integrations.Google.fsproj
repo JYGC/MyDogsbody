@@ -6,19 +6,24 @@
   </PropertyGroup>
 
   <!--
-    An adapter for a capability the domain declares a need for. Today it holds only the Google
-    credential store; change #6 adds the account store and the calendar client beside it.
-
-    No Repositories/ or UseCases/ layer, and no MyDogsbody.Domain reference: a credential is not
-    a domain concept, so the constrained types live here.
+    An adapter for a capability the domain declares a need for. GoogleCredentialTypes /
+    GoogleCredentialStore stay credential-only (Q3.7: a credential is not a domain concept, so
+    those types live here rather than in MyDogsbody.Domain). Everything change #6 adds -
+    GoogleEntityMappers, GoogleAccountStore, GoogleAuthorization, GoogleCalendarClient -
+    satisfies a MyDogsbody.Domain.Calendar dependency function type, which is what earns this
+    project its first MyDogsbody.Domain reference.
   -->
   <ItemGroup>
     <Compile Include="GoogleCredentialTypes.fs" />
     <Compile Include="Database\Types\GoogleDatabaseContext.fs" />
     <Compile Include="GoogleCredentialEntityMappers.fs" />
+    <Compile Include="GoogleEntityMappers.fs" />
     <Compile Include="Database\GoogleDatabaseContextModule.fs" />
     <Compile Include="GoogleCredentialStore.fs" />
-    <Compile Include="GoogleCalendar.fs" />
+    <Compile Include="GoogleAccountStore.fs" />
+    <Compile Include="GoogleCredentialDataStore.fs" />
+    <Compile Include="GoogleAuthorization.fs" />
+    <Compile Include="GoogleCalendarClient.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,6 +35,7 @@
   <ItemGroup>
     <ProjectReference Include="..\MyDogsbody.Builders\MyDogsbody.Builders.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Exceptions.Types\MyDogsbody.Exceptions.Types.fsproj" />
+    <ProjectReference Include="..\MyDogsbody.Domain\MyDogsbody.Domain.fsproj" />
     <ProjectReference Include="..\MyDogsbody.Integrations.Google.Database.Models\MyDogsbody.Integrations.Google.Database.Models.csproj" />
   </ItemGroup>
 

@@ -23,7 +23,7 @@ are genuinely new, and both are recorded rather than discovered:
  UI.Portal  /settings/google-accounts
    GoogleAccountsPage.fs ─ GoogleAccountsComponents.fs ─ GoogleAccountsBrowserModuleCreators.fs
         ▼
- UI.Types   GoogleAccountApi { GetClientSecretStatus; SetClientSecret;
+ UI.Types   GoogleAccountApi { GetClientSecret; SetClientSecret;
                                GetAccounts; RegisterAccount; ReauthoriseAccount;
                                RemoveAccount; GetCalendarsFor; SetDefaultInvoiceCalendar }
         ▼
@@ -112,7 +112,20 @@ type ListGoogleAccounts = unit -> Result<RegisteredGoogleAccount list, CalendarE
 type SaveGoogleAccount  = RegisteredGoogleAccount -> Result<RegisteredGoogleAccount, CalendarError>
 type RemoveGoogleAccount = GoogleAccountId -> Result<bool, CalendarError>
 type ListCalendars      = GoogleAccountId -> Result<AvailableCalendar list, CalendarError>
+type DiscardAuthorisation = GoogleAccountId -> Result<unit, CalendarError>
 ```
+
+`DiscardAuthorisation` was added in PR review round 1, and it is what the deviation below costs.
+Completing consent **persists a token before the workflow gets to decide whether the registration
+is allowed**, so refusing a duplicate by simply not saving strands that token: no account row
+points at it, and the only thing that deletes a token is removing the account it belongs to. Every
+refused duplicate stranded another unencrypted refresh token. Measured before the fix: two refused
+duplicate registrations left `credentials=3` against `accounts=1`.
+
+Round 3 widened it to **every** post-consent exit, not just the duplicate. Reading the account
+list and saving the new account can each fail after consent has written the token, and each
+stranded it for the identical reason. Measured before that widening, against a real `Google.db`:
+either failure left `accounts=0, credentials=1`; after it, `credentials=0`.
 
 `CalendarRateLimited` is separate from `NotAuthorised` on purpose: *"try again shortly"* and
 *"you need to grant access"* need different responses, and collapsing them produces an alert that
@@ -122,10 +135,11 @@ tells the user to do the wrong thing.
 
 | File | Signature | Notes |
 | --- | --- | --- |
-| `RegisterGoogleAccountWorkflow.fs` | `LoadClientSecret -> ListGoogleAccounts -> AuthoriseAccount -> SaveGoogleAccount -> unit -> Result<RegisteredGoogleAccount, CalendarError>` | Refuses before authorising if there is no client secret or the account is already registered — **the browser must not open for a registration that cannot succeed** |
+| `RegisterGoogleAccountWorkflow.fs` | `LoadClientSecret -> ListGoogleAccounts -> AuthoriseAccount -> DiscardAuthorisation -> SaveGoogleAccount -> unit -> Result<RegisteredGoogleAccount, CalendarError>` | Refuses before authorising if there is no client secret — **the browser must not open for a registration that cannot succeed**. The already-registered check *cannot* run that early (the email a duplicate is keyed on does not exist until consent returns), so it runs immediately after and discards the authorisation consent just wrote |
 | `ListGoogleAccountsWorkflow.fs` | `ListGoogleAccounts -> unit -> Result<RegisteredGoogleAccount list, CalendarError>` | Ordered by email |
 | `SetDefaultInvoiceCalendarWorkflow.fs` | `ListGoogleAccounts -> ListCalendars -> SaveGoogleAccount -> string -> string -> Result<RegisteredGoogleAccount, CalendarError>` | Confirms the calendar still exists at Google before storing it |
 | `RemoveGoogleAccountWorkflow.fs` | `RemoveGoogleAccount -> string -> Result<unit, CalendarError>` | Local only. No revoke |
+| `SetClientSecretWorkflow.fs` *(PR review series 2 round 4)* | `SaveClientSecret -> string -> Result<unit, CalendarError>` | Refuses a blank secret with `ClientSecretInvalid`, without reaching the store: a stored secret reads as a supplied one, so a blank one must never be stored. Anything else is stored verbatim |
 
 ### LiteDB, added to change #5's context
 
@@ -150,13 +164,18 @@ GoogleAccountsPage    GoogleAccountApi    RegisterGoogleAccountWorkflow    Googl
      │                    │                       │   None → ClientSecretMissing, STOP
      │                    │                       │        ► the browser never opens for a
      │                    │                       │          registration that cannot succeed
-     │                    │                       ├ listGoogleAccounts
-     │                    │                       │   already registered → AccountAlreadyRegistered
      │                    │                       ├ authoriseAccount ─────────► system browser
      │                    │                       │                             loopback redirect
      │                    │                       │                             calendar + userinfo.email
      │                    │                       │◄─ (email, accountId) ───────┤
      │                    │                       │   cancelled → AuthorisationCancelled, save NOTHING
+     │                    │                       ├ listGoogleAccounts
+     │                    │                       │   already registered → discardAuthorisation
+     │                    │                       │                        then AccountAlreadyRegistered
+     │                    │                       │        ► the duplicate check CANNOT run earlier:
+     │                    │                       │          the email it keys on is what consent
+     │                    │                       │          returns. Consent has already written a
+     │                    │                       │          token, so refusing owes a discard.
      │                    │                       ├ saveGoogleAccount
      │                    │                       │   DefaultInvoiceCalendar = None   ← NOT READY
      │◄─ RegisteredGoogleAccount ─────────────────┤
@@ -229,7 +248,7 @@ CLAUDE.md requires each dependency function type's shared suite to run against t
 | Layer | How it is covered |
 | --- | --- |
 | Every **fake** | The shared suite, as normal |
-| The **real adapter** | The same shared suite, with `CalendarService` constructed over a **stubbed `HttpMessageHandler`** returning recorded Google responses. This exercises the adapter's own request-building, paging and response-parsing — the part that can actually be wrong |
+| The **real adapter** | The same shared suite, with `CalendarService` constructed over a **stubbed `HttpMessageHandler`** returning recorded Google responses. This exercises the adapter's own request-building, paging and response-parsing — the part that can actually be wrong. It runs bound exactly as the composition root binds it (`GoogleAccountApiFactory.bindListCalendars`), so the translation the page's alerts are written from is under the same suite *(since PR review series 2 round 7)* |
 | **Google itself** | **Manual, recorded in the change description**: what was run, against which account, what was observed |
 
 That last row is a real gap and is written down as one. **What it must never become is a silently
@@ -288,7 +307,15 @@ cannot supply.
    feel stuck** — that is where a batch of API calls first exists.
 5. **`RegisterGoogleAccountWorkflow` checks everything it can before authorising.** Opening a browser
    and completing consent, only to refuse the registration afterwards, wastes the user's time and
-   leaves a granted scope with nothing to show for it.
+   leaves a granted scope with nothing to show for it. What it *cannot* check that early is whether
+   the account is a duplicate — that is keyed on the email consent returns — so everything that runs
+   after consent is grouped, and **any** exit from that group without an account row hands the token
+   consent wrote to `DiscardAuthorisation` rather than leaving it in the store. The duplicate is the
+   most likely of those exits, not the only one: an unreadable account list and a refused save
+   strand the same token the same way. The one post-consent step the workflow cannot group is
+   inside `AuthoriseAccount` itself — reading the email after consent has written the token. Its
+   `Error` carries no id to discard, so the adapter hands that token back itself
+   (`GoogleAuthorization.authoriseNewAccountWith`, PR review round 4).
 6. **`SetDefaultInvoiceCalendarWorkflow` verifies the calendar exists before storing it.** Otherwise
    change #7 discovers a dead calendar id halfway through a sync batch, which is the worst possible
    moment.

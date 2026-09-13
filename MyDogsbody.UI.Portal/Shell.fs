@@ -34,6 +34,7 @@ type Shell() =
             SuppliersPage.getRoute()
             MailAccountsPage.getRoute()
             ScanWindowsPage.getRoute()
+            GoogleAccountsPage.getRoute()
             InvoicesPage.getRoute()
             ExceptionLogsPage.getRoute()
         ]

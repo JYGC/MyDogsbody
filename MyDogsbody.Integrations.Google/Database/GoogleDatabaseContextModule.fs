@@ -21,11 +21,15 @@ open MyDogsbody.Integrations.Google.Database.Models
 /// one thread, before the context is handed out - just on this mapper instead of the global one.
 let getDatabaseContext databasePath connectionType : GoogleDatabaseContext =
     let credentialCollectionName = "Credentials"
+    let accountCollectionName = "Accounts"
+    let clientSecretCollectionName = "ClientSecret"
 
     let mapper = BsonMapper()
     mapper.TrimWhitespace <- false
     mapper.EmptyStringToNull <- false
     mapper.ToDocument(GoogleCredential()) |> ignore
+    mapper.ToDocument(GoogleAccountEntity()) |> ignore
+    mapper.ToDocument(GoogleClientSecretEntity()) |> ignore
 
     let liteDatabaseConnectionString = $"Filename={databasePath};connection={connectionType}"
     let dbConnection = new LiteDatabase(liteDatabaseConnectionString, mapper)
@@ -33,6 +37,12 @@ let getDatabaseContext databasePath connectionType : GoogleDatabaseContext =
     {
         GetCredentialCollection = fun () ->
             dbConnection.GetCollection<GoogleCredential>(credentialCollectionName)
+
+        GetAccountCollection = fun () ->
+            dbConnection.GetCollection<GoogleAccountEntity>(accountCollectionName)
+
+        GetClientSecretCollection = fun () ->
+            dbConnection.GetCollection<GoogleClientSecretEntity>(clientSecretCollectionName)
 
         Dispose = fun () -> dbConnection.Dispose()
     }
