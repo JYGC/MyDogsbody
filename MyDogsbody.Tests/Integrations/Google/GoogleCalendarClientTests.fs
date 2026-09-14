@@ -2,6 +2,7 @@ module MyDogsbody.Tests.Integrations.Google.GoogleCalendarClientTests
 
 open System.Net
 open System.Net.Http
+open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
 open Xunit
@@ -349,3 +350,318 @@ let ``listCalendars names each calendar the way the account's own calendar list 
         ],
         actual
     )
+
+// -------------------------------------------------------------------------------------------
+// Change #7 (invoice-calendar-sync) - listEvents, createEvent, updateEvent, deleteEvent.
+// Same stubbed-HttpMessageHandler approach as listCalendars above; no test here needs network
+// access or credentials, and none makes a real Google call.
+// -------------------------------------------------------------------------------------------
+
+let private requireOk (label: string) (result: Result<'a, string>) : 'a =
+    match result with
+    | Ok value -> value
+    | Error reason -> failwith $"{label}: {reason}"
+
+let private testCalendarId = CalendarId.create "cal-1" |> requireOk "test calendar id"
+
+let private testDateRange =
+    CalendarDateRange.create (System.DateTime(2026, 9, 1)) (System.DateTime(2026, 9, 30))
+    |> requireOk "test date range"
+
+/// The same ASCII Unit Separator `InvoiceSyncKey.fs` documents its own `fieldSeparator` as -
+/// not a reach into that private value, just the same well-known encoding used to build a
+/// syntactically valid key for `InvoiceSyncKey.parse` to accept.
+let private fieldSeparatorChar = char 0x1F
+
+let private testSyncKey =
+    InvoiceSyncKey.parse $"supplier-1{fieldSeparatorChar}INV-100"
+    |> requireOk "test invoice sync key"
+
+let private testEventId = CalendarEventId.create "event-1" |> requireOk "test calendar event id"
+
+/// JSON forbids an unescaped control character inside a string, so a hand-written response body
+/// embedding `testSyncKey`'s raw separator character has to escape it the way a real JSON writer
+/// would, or the stub response would not be valid JSON for the client to parse.
+let private jsonEscapedSyncKeyValue (syncKey: InvoiceSyncKey) =
+    (InvoiceSyncKey.value syncKey).Replace(string fieldSeparatorChar, "\\u001f")
+
+/// `BaseClientService.Initializer.GZipEnabled` defaults to `true`, so every write request this
+/// adapter sends arrives here already GZip-compressed - reading it as a plain UTF-8 string would
+/// see the GZip magic bytes rather than JSON. A captured-body assertion has to undo that first.
+let private readGZipCompressedRequestBodyAsText (request: HttpRequestMessage) : string =
+    let compressedBytes = request.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+    use compressedStream = new System.IO.MemoryStream(compressedBytes)
+    use decompressingStream = new System.IO.Compression.GZipStream(compressedStream, System.IO.Compression.CompressionMode.Decompress)
+    use decompressedTextReader = new System.IO.StreamReader(decompressingStream, System.Text.Encoding.UTF8)
+    decompressedTextReader.ReadToEnd()
+
+let private eventsPage (items: string) (nextPageToken: string option) =
+    let tokenField =
+        match nextPageToken with
+        | Some token -> $""""nextPageToken": "{token}","""
+        | None -> ""
+
+    $"""{{ "kind": "calendar#events", {tokenField} "items": [ {items} ] }}"""
+
+let private eventEntryWithoutSyncKey id summary description startDate endDate =
+    $"""{{ "kind": "calendar#event", "id": "{id}", "summary": "{summary}", "description": "{description}", "start": {{ "date": "{startDate}" }}, "end": {{ "date": "{endDate}" }} }}"""
+
+let private eventEntryWithSyncKey id summary description startDate endDate (escapedSyncKeyValue: string) =
+    $"""{{ "kind": "calendar#event", "id": "{id}", "summary": "{summary}", "description": "{description}", "start": {{ "date": "{startDate}" }}, "end": {{ "date": "{endDate}" }}, "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PropertyName}": "{escapedSyncKeyValue}" }} }} }}"""
+
+let private listEventsAs
+    (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
+    (respond: HttpRequestMessage -> HttpResponseMessage)
+    =
+    let handler = new RespondingHandler(respond)
+    let factory = StubHttpClientFactory handler :> Google.Apis.Http.IHttpClientFactory
+    let handleError = HandleErrorBuilder(fun _ -> ())
+
+    GoogleCalendarClient.listEventsVia (Some factory) handleError credential testCalendarId testDateRange
+
+let private listEvents (respond: HttpRequestMessage -> HttpResponseMessage) =
+    listEventsAs (NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer) respond
+
+let private createEventAs
+    (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
+    (respond: HttpRequestMessage -> HttpResponseMessage)
+    (allDayEvent: AllDayEvent)
+    =
+    let handler = new RespondingHandler(respond)
+    let factory = StubHttpClientFactory handler :> Google.Apis.Http.IHttpClientFactory
+    let handleError = HandleErrorBuilder(fun _ -> ())
+
+    GoogleCalendarClient.createEventVia (Some factory) handleError credential testCalendarId testSyncKey allDayEvent
+
+let private createEvent (respond: HttpRequestMessage -> HttpResponseMessage) (allDayEvent: AllDayEvent) =
+    createEventAs (NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer) respond allDayEvent
+
+let private updateEventAs
+    (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
+    (respond: HttpRequestMessage -> HttpResponseMessage)
+    (eventId: CalendarEventId)
+    (allDayEvent: AllDayEvent)
+    =
+    let handler = new RespondingHandler(respond)
+    let factory = StubHttpClientFactory handler :> Google.Apis.Http.IHttpClientFactory
+    let handleError = HandleErrorBuilder(fun _ -> ())
+
+    GoogleCalendarClient.updateEventVia (Some factory) handleError credential testCalendarId eventId allDayEvent
+
+let private updateEvent (respond: HttpRequestMessage -> HttpResponseMessage) (eventId: CalendarEventId) (allDayEvent: AllDayEvent) =
+    updateEventAs (NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer) respond eventId allDayEvent
+
+let private deleteEventAs
+    (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
+    (respond: HttpRequestMessage -> HttpResponseMessage)
+    (eventId: CalendarEventId)
+    =
+    let handler = new RespondingHandler(respond)
+    let factory = StubHttpClientFactory handler :> Google.Apis.Http.IHttpClientFactory
+    let handleError = HandleErrorBuilder(fun _ -> ())
+
+    GoogleCalendarClient.deleteEventVia (Some factory) handleError credential testCalendarId eventId
+
+let private deleteEvent (respond: HttpRequestMessage -> HttpResponseMessage) (eventId: CalendarEventId) =
+    deleteEventAs (NoopInitializer() :> Google.Apis.Http.IConfigurableHttpClientInitializer) respond eventId
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listEvents returns Some for an event carrying the sync property and None for one added by hand`` () =
+    // requirements.md / task 5.1: an event with the extended property present comes back with
+    // SyncKey = Some; an event without it - added by hand, on the account's own calendar - comes
+    // back with SyncKey = None rather than being excluded, so the diff (never this function) is
+    // what decides it is an orphan.
+    let respond (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.OK
+            (eventsPage
+                (eventEntryWithSyncKey
+                    "event-1"
+                    "Acme Corp - INV-100"
+                    "Due 2026-09-20"
+                    "2026-09-20"
+                    "2026-09-21"
+                    (jsonEscapedSyncKeyValue testSyncKey)
+                 + ","
+                 + eventEntryWithoutSyncKey "event-2" "Team lunch" "" "2026-09-21" "2026-09-22")
+                None)
+
+    let actual = listEvents respond |> okOrFail "listEvents"
+
+    let syncedEvent = actual |> List.find (fun calendarEvent -> CalendarEventId.value calendarEvent.Id = "event-1")
+    let handAddedEvent = actual |> List.find (fun calendarEvent -> CalendarEventId.value calendarEvent.Id = "event-2")
+
+    Assert.Equal(Some testSyncKey, syncedEvent.SyncKey)
+    Assert.Equal(System.DateTime(2026, 9, 20), syncedEvent.Event.Date)
+    Assert.Equal("Acme Corp - INV-100", syncedEvent.Event.Title)
+    Assert.Equal("Due 2026-09-20", syncedEvent.Event.Description)
+
+    Assert.Equal(None, handAddedEvent.SyncKey)
+    Assert.Equal(System.DateTime(2026, 9, 21), handAddedEvent.Event.Date)
+    Assert.Equal("Team lunch", handAddedEvent.Event.Title)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listEvents follows nextPageToken and returns items from every page`` () =
+    let respond (request: HttpRequestMessage) =
+        let query = request.RequestUri.Query
+
+        if query.Contains "pageToken=page-2" then
+            jsonResponse
+                HttpStatusCode.OK
+                (eventsPage (eventEntryWithoutSyncKey "event-2" "Second page event" "" "2026-09-22" "2026-09-23") None)
+        else
+            jsonResponse
+                HttpStatusCode.OK
+                (eventsPage (eventEntryWithoutSyncKey "event-1" "First page event" "" "2026-09-20" "2026-09-21") (Some "page-2"))
+
+    let actual = listEvents respond |> okOrFail "listEvents"
+
+    let ids = actual |> List.map (fun calendarEvent -> CalendarEventId.value calendarEvent.Id) |> List.sort
+    Assert.Equal<string list>([ "event-1"; "event-2" ], ids)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listEvents maps a 403 to the not-authorised message`` () =
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.Forbidden (errorBody 403 "Permission denied")
+
+    match listEvents respond with
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listEvents, caughtException.ActionName)
+        Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listEvents maps a 429 to the rate-limit message, not the not-authorised one`` () =
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.TooManyRequests (errorBody 429 "Rate Limit Exceeded")
+
+    match listEvents respond with
+    | Error caughtException -> Assert.Equal("Google is rate-limiting this account; try again shortly.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``listEvents maps a 410 to the calendar-no-longer-exists message`` () =
+    // Google's answer once the whole calendar - not merely one event on it - has been deleted.
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.Gone (errorBody 410 "Resource has been deleted")
+
+    match listEvents respond with
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listEvents, caughtException.ActionName)
+        Assert.Equal("The calendar no longer exists.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``createEvent sends an all-day start date, not a timed dateTime, and stamps the derived sync key`` () =
+    let mutable capturedRequestBody = ""
+
+    let allDayEvent =
+        { Date = System.DateTime(2026, 9, 20)
+          Title = "Acme Corp - INV-100"
+          Description = "Due 2026-09-20" }
+
+    let respond (request: HttpRequestMessage) =
+        capturedRequestBody <- readGZipCompressedRequestBodyAsText request
+
+        jsonResponse
+            HttpStatusCode.OK
+            """{ "kind": "calendar#event", "id": "created-event-1", "start": { "date": "2026-09-20" }, "end": { "date": "2026-09-21" } }"""
+
+    let actual = createEvent respond allDayEvent |> okOrFail "createEvent"
+
+    Assert.Equal("created-event-1", CalendarEventId.value actual)
+
+    let requestBodyDocument = JsonDocument.Parse(capturedRequestBody)
+    let requestRoot = requestBodyDocument.RootElement
+
+    let startElement = requestRoot.GetProperty("start")
+    Assert.Equal("2026-09-20", startElement.GetProperty("date").GetString())
+    Assert.DoesNotContain("dateTime", startElement.EnumerateObject() |> Seq.map (fun property -> property.Name))
+
+    let endElement = requestRoot.GetProperty("end")
+    Assert.Equal("2026-09-21", endElement.GetProperty("date").GetString())
+
+    let remindersElement = requestRoot.GetProperty("reminders")
+    Assert.False(remindersElement.GetProperty("useDefault").GetBoolean())
+
+    let privateExtendedPropertiesElement = requestRoot.GetProperty("extendedProperties").GetProperty("private")
+    Assert.Equal(InvoiceSyncKey.value testSyncKey, privateExtendedPropertiesElement.GetProperty(InvoiceSyncKey.PropertyName).GetString())
+
+[<Fact; Trait("Level", "Integration")>]
+let ``createEvent maps a 400 rejection to the event-rejected message`` () =
+    let allDayEvent = { Date = System.DateTime(2026, 9, 20); Title = ""; Description = "" }
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.BadRequest (errorBody 400 "Invalid summary value.")
+
+    match createEvent respond allDayEvent with
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.createEvent, caughtException.ActionName)
+        Assert.StartsWith("Google rejected the calendar event.", caughtException.Message)
+        Assert.Contains("Invalid summary value.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``updateEvent succeeds and returns unit`` () =
+    let allDayEvent =
+        { Date = System.DateTime(2026, 9, 21)
+          Title = "Acme Corp - INV-100 (updated)"
+          Description = "" }
+
+    let respond (_: HttpRequestMessage) =
+        jsonResponse
+            HttpStatusCode.OK
+            """{ "kind": "calendar#event", "id": "event-1", "start": { "date": "2026-09-21" }, "end": { "date": "2026-09-22" } }"""
+
+    let actual = updateEvent respond testEventId allDayEvent |> okOrFail "updateEvent"
+    Assert.Equal((), actual)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``updateEvent maps a 404 to the event-no-longer-exists message`` () =
+    // task 4.2 relies on this being a success (AlreadyGone) rather than a failure once the
+    // composition root translates it - here it only has to be a stable, distinguishable message.
+    let allDayEvent =
+        { Date = System.DateTime(2026, 9, 21)
+          Title = "Acme Corp - INV-100"
+          Description = "" }
+
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.NotFound (errorBody 404 "Not Found")
+
+    match updateEvent respond testEventId allDayEvent with
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.updateEvent, caughtException.ActionName)
+        Assert.Equal("The calendar event no longer exists.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``updateEvent maps a 403 to the not-authorised message`` () =
+    let allDayEvent =
+        { Date = System.DateTime(2026, 9, 21)
+          Title = "Acme Corp - INV-100"
+          Description = "" }
+
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.Forbidden (errorBody 403 "Permission denied")
+
+    match updateEvent respond testEventId allDayEvent with
+    | Error caughtException -> Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``deleteEvent succeeds and returns unit`` () =
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.OK "\"\""
+
+    let actual = deleteEvent respond testEventId |> okOrFail "deleteEvent"
+    Assert.Equal((), actual)
+
+[<Fact; Trait("Level", "Integration")>]
+let ``deleteEvent maps a 404 to the event-no-longer-exists message`` () =
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.NotFound (errorBody 404 "Not Found")
+
+    match deleteEvent respond testEventId with
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.deleteEvent, caughtException.ActionName)
+        Assert.Equal("The calendar event no longer exists.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+[<Fact; Trait("Level", "Integration")>]
+let ``deleteEvent maps a 403 to the not-authorised message`` () =
+    let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.Forbidden (errorBody 403 "Permission denied")
+
+    match deleteEvent respond testEventId with
+    | Error caughtException -> Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
+    | Ok _ -> Assert.Fail("Expected Error, but got Ok")

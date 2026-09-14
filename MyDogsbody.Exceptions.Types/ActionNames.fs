@@ -152,6 +152,10 @@ module MyDogsbody =
             module GoogleCalendarClient =
                 let private googleCalendarClient = $"{google}.GoogleCalendarClient"
                 let listCalendars = $"{googleCalendarClient}.listCalendars"
+                let listEvents = $"{googleCalendarClient}.listEvents"
+                let createEvent = $"{googleCalendarClient}.createEvent"
+                let updateEvent = $"{googleCalendarClient}.updateEvent"
+                let deleteEvent = $"{googleCalendarClient}.deleteEvent"
 
         module Documents =
             let private documents = $"{integrations}.Documents"

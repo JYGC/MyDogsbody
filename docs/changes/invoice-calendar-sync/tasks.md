@@ -118,19 +118,19 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 5 — Google adapter (required)
 
-- [ ] **5.1** *(test-first)* `GoogleCalendarClient.listEvents` — querying by
+- [x] **5.1** *(test-first)* `GoogleCalendarClient.listEvents` — querying by
       `privateExtendedProperty`, bounded by the date range.
       Tests, against a **stubbed `HttpMessageHandler`**: events with the property present; events
       **without** it (an event added by hand — it must come back with `SyncKey = None`); a **paged**
       list; `403` → `NotAuthorised`; `429` → `CalendarRateLimited`; `410` → `CalendarNoLongerExists`.
-- [ ] **5.2** *(test-first)* `createEvent` — an **all-day** event on the due date, with the title and
+- [x] **5.2** *(test-first)* `createEvent` — an **all-day** event on the due date, with the title and
       description specified, **no reminder** (Q2.2), and the extended property stamped.
       Tests: the request body carries an all-day `start.date` (not `start.dateTime`); the property is
       present with the derived key; a rejection maps to `EventRejected`.
-- [ ] **5.3** *(test-first)* `updateEvent` and `deleteEvent`.
+- [x] **5.3** *(test-first)* `updateEvent` and `deleteEvent`.
       Tests: **`404` maps to `EventNoLongerExists`**, which 4.2 relies on being a success rather than
       a failure; `403` maps to `NotAuthorised`.
-- [ ] **5.4** `ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listEvents /
+- [x] **5.4** `ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listEvents /
       createEvent / updateEvent / deleteEvent`.
 
 ## Phase 6 — Persistence (required)
