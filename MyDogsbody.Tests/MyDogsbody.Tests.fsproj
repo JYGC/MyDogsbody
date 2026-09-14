@@ -44,6 +44,7 @@
     <Compile Include="Domain\Calendar\CalendarTypesTests.fs" />
     <Compile Include="Domain\Calendar\CalendarDateRangeWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\DiffInvoicesAgainstCalendarWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\SyncInvoicesToCalendarWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\RegisterGoogleAccountWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\ListGoogleAccountsWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\SetDefaultInvoiceCalendarWorkflowTests.fs" />

@@ -285,8 +285,18 @@ type DeleteCalendarEvent =
 type MarkSynced =
     InvoiceId -> GoogleAccountId -> CalendarId -> CalendarEventId -> Result<unit, InvoiceError>
 
-/// Removes an invoice's sync record after its event is deleted.
-type ClearSyncRecord = InvoiceId -> Result<unit, InvoiceError>
+/// Removes a sync record after its event is deleted.
+///
+/// Keyed by CalendarEventId, not InvoiceId, deliberately: by the time SyncInvoicesToCalendarWorkflow
+/// executes a DeleteEvent, the invoice it belonged to is already gone from the Invoices table -
+/// that is the whole reason it is a DeleteEvent - so the InvoiceCalendarEvents row referencing it
+/// has already been removed by the migration's ON DELETE CASCADE (task 6.1) before this ever
+/// runs, and no InvoiceId is available to call with regardless: DeleteEvent structurally carries
+/// only a CalendarEventId and an InvoiceSyncKey (design decision 3). Keying by the event id this
+/// call DOES have, rather than one it cannot have, is what makes "a delete calls ClearSyncRecord"
+/// (tasks.md task 4.1) actually callable - and it is idempotent either way, since there will
+/// usually be nothing left to remove.
+type ClearSyncRecord = CalendarEventId -> Result<unit, InvoiceError>
 
 /// Every InvoiceSyncKey the ledger currently holds, ignoring any scan window - hazard (a)'s
 /// guard depends on this being unwindowed. Never call LoadInvoices and derive keys from a

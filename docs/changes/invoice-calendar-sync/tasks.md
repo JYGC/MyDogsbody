@@ -94,18 +94,18 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 4 — Executing the plan (required)
 
-- [ ] **4.1** *(test-first)* `SyncInvoicesToCalendarWorkflow`.
+- [x] **4.1** *(test-first)* `SyncInvoicesToCalendarWorkflow`.
       Tests: `LeaveAlone` makes **no API call at all** — a recording fake asserts zero;
       a create stamps the extended property and calls `markSynced`;
       an update **rewrites title and date unconditionally** (Q2.14);
       a delete calls `clearSyncRecord`.
-- [ ] **4.2** *(test-first)* Partial failure and already-gone.
+- [x] **4.2** *(test-first)* Partial failure and already-gone.
       Tests: a failure mid-batch **continues** and reports per action (Q2.8); the earlier successes
       stay recorded; **`EventNoLongerExists` on an update or delete is `AlreadyGone`, a success, not
       a failure** — the calendar already agrees with the target state; `CalendarNoLongerExists`
       **stops** the batch; `NotAuthorised` mid-batch stops the batch and leaves the sync records
       consistent with what actually happened.
-- [ ] **4.3** *(test-first)* **Idempotency — the bar Q2.6 raised.**
+- [x] **4.3** *(test-first)* **Idempotency — the bar Q2.6 raised.**
       Execute a plan, re-derive one over the resulting state, and assert **both** that every action
       is `LeaveAlone` **and** that a recording fake saw **zero calls** on the second pass.
       *Not "creates no duplicates" — that was the insert-only bar. With updates in play, a second run
