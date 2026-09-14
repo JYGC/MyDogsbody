@@ -1,4 +1,4 @@
-/// The Google credential adapter: getAll / insertOne / updateOne over the integration's own
+﻿/// The Google credential adapter: getAll / insertOne / updateOne over the integration's own
 /// LiteDB `Credentials` collection.
 ///
 /// Outer ring, so the shape is the established one - handleError first, the collection getter
@@ -35,8 +35,8 @@ let getAll
                     .ToEnumerable()
                 |> Seq.map mapOrRaise
                 |> Seq.toList
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve all credentials.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve all credentials.", caughtException)
     }
 
 let insertOne
@@ -54,8 +54,8 @@ let insertOne
             // Insert stamps the entity's Id, so the identifier the caller gets back is the one
             // the store actually assigned rather than one guessed here.
             return mapOrRaise entity
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to insert new credential.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to insert new credential.", caughtException)
     }
 
 /// Ok None means no row carried that identifier. Reporting it rather than silently succeeding is
@@ -80,6 +80,6 @@ let updateOne
                 let updated = GoogleCredentialEntityMappers.applyEdit edit existing
                 collection.Update updated |> ignore
                 return Some (mapOrRaise updated)
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to update existing credential.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to update existing credential.", caughtException)
     }

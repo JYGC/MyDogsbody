@@ -38,7 +38,7 @@ let private withApi (test: InvoiceApi -> unit) =
 let private ok label =
     function
     | Ok v -> v
-    | Error(ex: MyDogsbodyException) -> failwith $"{label}: {ex.Message}"
+    | Error(caughtException: MyDogsbodyException) -> failwith $"{label}: {caughtException.Message}"
 
 [<Fact; Trait("Level", "Integration")>]
 let ``Scan with no mail account selected is refused with a readable alert, nothing logged`` () =
@@ -55,9 +55,9 @@ let ``Scan with no mail account selected is refused with a readable alert, nothi
         let api = InvoiceApiFactory.createInvoiceApi recordingHandleError clock mainContext tbContext
 
         match api.Scan 14 with
-        | Error ex ->
-            Assert.Contains("mail account", ex.Message)
-            Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+        | Error caughtException ->
+            Assert.Contains("mail account", caughtException.Message)
+            Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
             Assert.Empty logged
         | Ok _ -> Assert.Fail("expected NoAccountSelected")
     finally
@@ -81,9 +81,9 @@ let ``RescanEverything with no mail account selected is the same readable alert 
         let api = InvoiceApiFactory.createInvoiceApi recordingHandleError clock mainContext tbContext
 
         match api.RescanEverything 14 with
-        | Error ex ->
-            Assert.Contains("mail account", ex.Message)
-            Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+        | Error caughtException ->
+            Assert.Contains("mail account", caughtException.Message)
+            Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
             Assert.Empty logged
         | Ok _ -> Assert.Fail("expected NoAccountSelected")
     finally
@@ -160,12 +160,12 @@ let ``the getters return empty lists against a fresh ledger`` () =
 let ``DeleteInvoice on an id that is not there is a readable alert`` () =
     withApi (fun api ->
         match api.DeleteInvoice "999" with
-        | Error ex -> Assert.Contains("no longer in the ledger", ex.Message)
+        | Error caughtException -> Assert.Contains("no longer in the ledger", caughtException.Message)
         | Ok _ -> Assert.Fail("expected InvoiceNotFound"))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``GetInvoices rejects an out-of-bounds window`` () =
     withApi (fun api ->
         match api.GetInvoices 99999 with
-        | Error ex -> Assert.Contains("3650", ex.Message)
+        | Error caughtException -> Assert.Contains("3650", caughtException.Message)
         | Ok _ -> Assert.Fail("expected the window to be rejected"))

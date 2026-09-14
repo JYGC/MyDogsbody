@@ -41,9 +41,9 @@ let private inMemoryWatermarkStore () =
     load, save, store
 
 let private freshTempDirectory () =
-    let dir = Path.Combine(Path.GetTempPath(), $"mdb-tbreader-{Guid.NewGuid()}")
-    Directory.CreateDirectory dir |> ignore
-    dir
+    let directoryPath = Path.Combine(Path.GetTempPath(), $"mdb-tbreader-{Guid.NewGuid()}")
+    Directory.CreateDirectory directoryPath |> ignore
+    directoryPath
 
 // ---------- 4.0 the streaming primitives, exercised without a real folder file ----------
 
@@ -336,25 +336,25 @@ let ``readFolder discards a segment MimeKit cannot parse and still returns the r
     | Ok messages ->
         Assert.Equal<string list>(
             [ "<unquoted-1@example.com>"; "<unquoted-2@example.com>" ],
-            messages |> List.map (fun m -> m.SourceMessageId)
+            messages |> List.map (fun message -> message.SourceMessageId)
         )
 
         Assert.Equal<string list>(
             [ "Invoice attached"; "Second message" ],
-            messages |> List.map (fun m -> m.Subject)
+            messages |> List.map (fun message -> message.Subject)
         )
 
         Assert.Equal<string list>(
             [ "alice@example.com"; "bob@example.com" ],
-            messages |> List.map (fun m -> m.Sender)
+            messages |> List.map (fun message -> message.Sender)
         )
 
         Assert.Equal<DateTime list>(
             [ DateTime(2024, 1, 1, 0, 0, 0); DateTime(2024, 1, 2, 0, 0, 0) ],
-            messages |> List.map (fun m -> m.ReceivedAt)
+            messages |> List.map (fun message -> message.ReceivedAt)
         )
 
-        Assert.All(messages, fun m -> Assert.Empty m.Attachments)
+        Assert.All(messages, fun message -> Assert.Empty message.Attachments)
 
         // The whole file is consumed: the discarded fragment will never become parseable, so the
         // offset must advance past it rather than re-reading it on every later scan.
@@ -457,22 +457,22 @@ let ``readFolder returns a message whose attachment content is not yet on disk, 
     | Ok messages ->
         Assert.Equal<string list>(
             [ "<written-1@example.com>"; "<halfwritten-2@example.com>" ],
-            messages |> List.map (fun m -> m.SourceMessageId)
+            messages |> List.map (fun message -> message.SourceMessageId)
         )
 
         Assert.Equal<string list>(
             [ "A complete message"; "Attachment part not yet written" ],
-            messages |> List.map (fun m -> m.Subject)
+            messages |> List.map (fun message -> message.Subject)
         )
 
         Assert.Equal<string list>(
             [ "alice@example.com"; "billing@vendor.example.com" ],
-            messages |> List.map (fun m -> m.Sender)
+            messages |> List.map (fun message -> message.Sender)
         )
 
         Assert.Equal<DateTime list>(
             [ DateTime(2024, 1, 1, 0, 0, 0); DateTime(2024, 1, 2, 0, 0, 0) ],
-            messages |> List.map (fun m -> m.ReceivedAt)
+            messages |> List.map (fun message -> message.ReceivedAt)
         )
 
         // CRLF although the fixture on disk is LF: MimeKit normalises a decoded text body's line
@@ -619,7 +619,7 @@ let ``readFolder skips messages older than the cutoff without parsing their malf
 
         Assert.Equal<string list>(
             [ "<cutoff-boundary-new-1@example.com>"; "<cutoff-new-2@example.com>" ] |> List.sort,
-            messages |> List.map (fun m -> m.SourceMessageId) |> List.sort
+            messages |> List.map (fun message -> message.SourceMessageId) |> List.sort
         )
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
@@ -909,7 +909,7 @@ let private januaryAndAugust =
 
 let private idsOf (result: Result<MailMessage list, MailAccountError>) =
     match result with
-    | Ok messages -> messages |> List.map (fun m -> m.SourceMessageId) |> List.sort
+    | Ok messages -> messages |> List.map (fun message -> message.SourceMessageId) |> List.sort
     | Error error -> failwith $"Expected Ok, but got Error: {error}"
 
 [<Fact; Trait("Level", "Integration")>]
@@ -1042,7 +1042,7 @@ let ``readFolder returns every message of a CRLF folder, not silently none of th
         | Ok messages ->
             Assert.Equal<string list>(
                 [ "<crlf-a@example.com>"; "<crlf-b@example.com>" ],
-                messages |> List.map (fun m -> m.SourceMessageId) |> List.sort
+                messages |> List.map (fun message -> message.SourceMessageId) |> List.sort
             )
         | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
     finally
@@ -1148,7 +1148,7 @@ let ``the recorded offset stays exact across successive appends rather than drif
 
             match readFolder load save testAccountId (folder "Growing") tempDir Mbox noCutoff with
             | Ok messages ->
-                let ids = messages |> List.map (fun m -> m.SourceMessageId)
+                let ids = messages |> List.map (fun message -> message.SourceMessageId)
                 Assert.Equal<string list>([ $"<grow-{round}@example.com>" ], ids)
             | Error error -> Assert.Fail($"Expected Ok on round {round}, but got Error: {error}")
 
@@ -1190,7 +1190,7 @@ let ``readFolder re-reads the whole folder when the stored offset lies past the 
 
         match readFolder load save testAccountId (folder "StaleOffset") tempDir Mbox noCutoff with
         | Ok messages ->
-            Assert.Equal<string list>([ "<stale-1@example.com>" ], messages |> List.map (fun m -> m.SourceMessageId))
+            Assert.Equal<string list>([ "<stale-1@example.com>" ], messages |> List.map (fun message -> message.SourceMessageId))
         | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
         Assert.Equal(length, store.[(MailAccountId.value testAccountId, "StaleOffset")].OffsetReached)
@@ -1208,13 +1208,13 @@ let ``readFolder re-reads the whole folder when the stored offset lies past the 
 /// A real multi-message mbox several streaming chunks in size. Built, not committed - a fixture
 /// this big does not belong in git - and small messages so the row count is easy to assert.
 let private manyMessagesMbox (count: int) =
-    let sb = System.Text.StringBuilder()
+    let mboxTextBuilder = System.Text.StringBuilder()
 
-    for i in 1..count do
-        if i > 1 then sb.Append('\n') |> ignore
-        sb.Append(lfMessage $"bulk-{i}@example.com" $"Message {i}") |> ignore
+    for messageNumber in 1..count do
+        if messageNumber > 1 then mboxTextBuilder.Append('\n') |> ignore
+        mboxTextBuilder.Append(lfMessage $"bulk-{messageNumber}@example.com" $"Message {messageNumber}") |> ignore
 
-    sb.ToString()
+    mboxTextBuilder.ToString()
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readFolder reads every message of a folder that spans several streaming chunks`` () =
@@ -1309,12 +1309,12 @@ let private withRealWatermarkStore (test: LoadWatermark -> SaveWatermark -> unit
     let load: LoadWatermark =
         fun accountId relativePath ->
             ThunderbirdStore.loadWatermarkEntry handleError context.GetWatermarksCollection accountId relativePath
-            |> Result.mapError (fun ex -> MailStoreFailed ex.Message)
+            |> Result.mapError (fun caughtException -> MailStoreFailed caughtException.Message)
 
     let save: SaveWatermark =
         fun accountId relativePath watermark ->
             ThunderbirdStore.saveWatermarkEntry handleError context.GetWatermarksCollection accountId relativePath watermark
-            |> Result.mapError (fun ex -> MailStoreFailed ex.Message)
+            |> Result.mapError (fun caughtException -> MailStoreFailed caughtException.Message)
 
     try
         test load save
@@ -1349,7 +1349,7 @@ let ``a second read of an unchanged file returns nothing new when the watermark 
             | Error error -> Assert.Fail($"Expected Ok on the first read, but got Error: {error}")
 
             match readFolder load save testAccountId (folder "Unchanged") tempDir Mbox noCutoff with
-            | Ok messages -> Assert.Equal<string list>([], messages |> List.map (fun m -> m.SourceMessageId))
+            | Ok messages -> Assert.Equal<string list>([], messages |> List.map (fun message -> message.SourceMessageId))
             | Error error -> Assert.Fail($"Expected Ok on the second read, but got Error: {error}")
         finally
             Directory.Delete(tempDir, true))

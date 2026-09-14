@@ -20,7 +20,7 @@ open MyDogsbody.UI.Types.Module
 let private firstFailure (results: Result<unit, MyDogsbodyException> list) : string option =
     results
     |> List.tryPick (function
-        | Error(ex: MyDogsbodyException) -> Some ex.Message
+        | Error(caughtException: MyDogsbodyException) -> Some caughtException.Message
         | Ok() -> None)
 
 /// Builds the invoices page state.
@@ -44,7 +44,7 @@ let getInvoicesModule
     let setError (result: Result<_, MyDogsbodyException>) =
         match result with
         | Ok _ -> errorCval.Value <- None
-        | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
+        | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message
 
     /// Show the stored ledger for the given window - `GetInvoices` / `GetProblems`, no mailbox
     /// read. This is what a window change does: task 12.4 measured a full scan at ~60 s whatever
@@ -61,7 +61,7 @@ let getInvoicesModule
 
             transact (fun _ ->
                 match windows with
-                | Ok ws -> windowsCval.Value <- ws
+                | Ok scanWindows -> windowsCval.Value <- scanWindows
                 | Error _ -> ()
 
                 match ledger with
@@ -69,7 +69,7 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 match problems with
-                | Ok ps -> problemsCval.Value <- ps
+                | Ok scanProblems -> problemsCval.Value <- scanProblems
                 | Error _ -> ()
 
                 errorCval.Value <-
@@ -81,7 +81,7 @@ let getInvoicesModule
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
 
-    /// Read the mailbox for `days` (via `scanOp` - `Scan` or the watermark-clearing
+    /// Read the mailbox for `days` (via `scanOperation` - `Scan` or the watermark-clearing
     /// `RescanEverything`), then show the stored ledger for it. The scan may fail (no mail
     /// account, an unreachable store) - the stored ledger stays on screen with the alert.
     ///
@@ -92,18 +92,18 @@ let getInvoicesModule
     /// so a returning user opened on an empty table. Q1.19 says the same of problems: they are
     /// persisted precisely "so incremental scanning does not empty the diagnostic list before it
     /// is looked at". Read AFTER the scan, so whatever it just stored is included.
-    let scanUsing (scanOp: int -> Result<ScanResultUiType, MyDogsbodyException>) (days: int) =
+    let scanUsing (scanOperation: int -> Result<ScanResultUiType, MyDogsbodyException>) (days: int) =
         transact (fun _ -> isScanningCval.Value <- true)
 
         startWork (fun () ->
             let windows = scanWindowApi.GetScanWindows()
-            let scanResult = scanOp days
+            let scanResult = scanOperation days
             let ledger = invoiceApi.GetInvoices days
             let problems = invoiceApi.GetProblems()
 
             transact (fun _ ->
                 match windows with
-                | Ok ws -> windowsCval.Value <- ws
+                | Ok scanWindows -> windowsCval.Value <- scanWindows
                 | Error _ -> ()
 
                 match ledger with
@@ -111,7 +111,7 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 match problems with
-                | Ok ps -> problemsCval.Value <- ps
+                | Ok scanProblems -> problemsCval.Value <- scanProblems
                 | Error _ -> ()
 
                 // The scan comes first: when the mailbox read failed that is the news, and the
@@ -143,9 +143,9 @@ let getInvoicesModule
         startWork (fun () ->
             match scanWindowApi.GetSelectedScanWindow() with
             | Ok days -> scan days
-            | Error(ex: MyDogsbodyException) ->
+            | Error(caughtException: MyDogsbodyException) ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isScanningCval.Value <- false))
 
     /// Persist the choice, then reload the stored ledger for it - NOT a scan (see `loadLedger`).
@@ -155,9 +155,9 @@ let getInvoicesModule
         startWork (fun () ->
             match scanWindowApi.SelectScanWindow days with
             | Ok() -> loadLedger days
-            | Error(ex: MyDogsbodyException) ->
+            | Error(caughtException: MyDogsbodyException) ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isScanningCval.Value <- false))
 
     let deleteInvoice (id: string) =
@@ -190,7 +190,7 @@ let getInvoicesModule
                 | Ok problems ->
                     problemsCval.Value <- problems
                     errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message))
+                | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message))
 
     let loadTombstones () =
         startWork (fun () ->
@@ -201,7 +201,7 @@ let getInvoicesModule
                 | Ok tombstones ->
                     tombstonesCval.Value <- tombstones
                     errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message))
+                | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message))
 
     start ()
 
@@ -239,7 +239,7 @@ let getScanWindowsBrowserModule
 
             transact (fun _ ->
                 match windows with
-                | Ok ws -> windowsCval.Value <- ws
+                | Ok scanWindows -> windowsCval.Value <- scanWindows
                 | Error _ -> ()
 
                 match selected with
@@ -264,9 +264,9 @@ let getScanWindowsBrowserModule
                     isLoadingCval.Value <- false)
 
                 load ()
-            | Error(ex: MyDogsbodyException) ->
+            | Error(caughtException: MyDogsbodyException) ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false))
 
     load ()

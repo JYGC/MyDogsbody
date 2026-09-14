@@ -69,7 +69,7 @@ let ``listSuppliers orders the result by name regardless of the order the depend
     | Ok suppliers ->
         Assert.Equal<string list>(
             [ "Acme"; "Mid Corp"; "Zulu Traders" ],
-            suppliers |> List.map (fun s -> SupplierName.value s.Name)
+            suppliers |> List.map (fun supplier -> SupplierName.value supplier.Name)
         )
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 

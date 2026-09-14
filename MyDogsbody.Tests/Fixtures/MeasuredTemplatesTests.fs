@@ -47,7 +47,7 @@ let ``invoice-management platform: every field extracts, and the due date is der
         // derived from IssueDate + PaymentTermDays, not read.
         let documentText =
             InvoiceManagementPlatform.message.Parts
-            |> List.collect (fun (_, lines) -> lines |> List.map (fun l -> l.Text))
+            |> List.collect (fun (_, lines) -> lines |> List.map (fun textLine -> textLine.Text))
             |> String.concat " "
 
         Assert.DoesNotContain("13 Aug", documentText)

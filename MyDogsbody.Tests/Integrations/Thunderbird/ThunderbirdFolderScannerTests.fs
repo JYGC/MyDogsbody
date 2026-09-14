@@ -8,9 +8,9 @@ open MyDogsbody.Integrations.Thunderbird
 open MyDogsbody.Tests.Fixtures.ThunderbirdFixturePaths
 
 let private freshTempDirectory () =
-    let dir = Path.Combine(Path.GetTempPath(), $"mdb-tbscan-{Guid.NewGuid()}")
-    Directory.CreateDirectory dir |> ignore
-    dir
+    let directoryPath = Path.Combine(Path.GetTempPath(), $"mdb-tbscan-{Guid.NewGuid()}")
+    Directory.CreateDirectory directoryPath |> ignore
+    directoryPath
 
 [<Fact; Trait("Level", "Integration")>]
 let ``scan finds the profile directly when the chosen folder is itself one profile`` () =
@@ -84,7 +84,7 @@ let ``scan records an unreadable directory and continues the walk`` () =
         try
             let outcome = ThunderbirdFolderScanner.scan root
 
-            Assert.Contains(outcome.Unreadable, fun u -> Path.GetFullPath u.Path = Path.GetFullPath deniedDir)
+            Assert.Contains(outcome.Unreadable, fun unreadableEntry -> Path.GetFullPath unreadableEntry.Path = Path.GetFullPath deniedDir)
             let found = Assert.Single outcome.ProfileDirectories
             Assert.Equal(Path.GetFullPath okProfile, Path.GetFullPath found)
         finally

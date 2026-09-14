@@ -86,7 +86,7 @@ let ``deleting the last remaining window is refused with CannotDeleteLastScanWin
 let ``listScanWindows returns the windows ascending by days`` () =
     match ListScanWindowsWorkflow.listScanWindows (fun () -> Ok(stored [ 90; 7; 30; 14 ])) () with
     | Ok windows ->
-        Assert.Equal<int list>([ 7; 14; 30; 90 ], windows |> List.map (fun w -> ScanWindowDays.value w.Days))
+        Assert.Equal<int list>([ 7; 14; 30; 90 ], windows |> List.map (fun window -> ScanWindowDays.value window.Days))
     | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
 
 // ============================ SelectScanWindowWorkflow (5.3) ============================

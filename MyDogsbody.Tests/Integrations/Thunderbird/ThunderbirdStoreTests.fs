@@ -22,7 +22,7 @@ let private valueOrFail (result: Result<'T, string>) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error(ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error(caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 /// Fresh disposable database per test, no state shared between tests.
 let private withContext (test: ThunderbirdDatabaseContext -> unit) =
@@ -111,7 +111,7 @@ let ``saveMailAccounts then loadMailAccounts round trips accounts and their fold
 
         Assert.Equal(2, readBack.Length)
 
-        let first = readBack |> List.find (fun a -> MailAccountId.value a.Id = @"C:\profile|account1")
+        let first = readBack |> List.find (fun account -> MailAccountId.value account.Id = @"C:\profile|account1")
 
         Assert.Equal("Account C:\\profile|account1", first.DisplayName)
         let folder = Assert.Single first.Folders
@@ -139,7 +139,7 @@ let ``saveMailAccounts replaces the previous set rather than accumulating`` () =
 
         // The first account's folder must not linger in the Folders collection either.
         let allFolders = context.GetFoldersCollection().FindAll() |> Seq.toList
-        Assert.All(allFolders, fun f -> Assert.Equal(@"C:\profile|account2", f.AccountId)))
+        Assert.All(allFolders, fun folder -> Assert.Equal(@"C:\profile|account2", folder.AccountId)))
 
 // ---------- Cached message count ----------
 //
@@ -166,7 +166,7 @@ let ``updateCachedMessageCount stores the count and the time it was taken, leavi
             ThunderbirdStore.loadMailAccounts handleError context.GetAccountsCollection context.GetFoldersCollection ()
             |> okOrFail "loadMailAccounts"
 
-        let updated = readBack |> List.find (fun a -> MailAccountId.value a.Id = @"C:\profile|account1")
+        let updated = readBack |> List.find (fun account -> MailAccountId.value account.Id = @"C:\profile|account1")
 
         match updated.CachedMessageCount with
         | Some(count, storedAt) ->
@@ -191,7 +191,7 @@ let ``updateCachedMessageCount stores the count and the time it was taken, leavi
 
         // ...and the other account is untouched, so this really is an in-place update of one row
         // rather than saveMailAccounts' replace-everything.
-        let other = readBack |> List.find (fun a -> MailAccountId.value a.Id = @"C:\profile|account2")
+        let other = readBack |> List.find (fun account -> MailAccountId.value account.Id = @"C:\profile|account2")
         Assert.Equal(None, other.CachedMessageCount)
         Assert.Equal(2, readBack.Length))
 
@@ -256,10 +256,10 @@ let ``updateCachedMessageCount reports a MyDogsbodyException carrying its action
     let actual = ThunderbirdStore.updateCachedMessageCount recordingHandleError failingGetter id 42 DateTime.UtcNow
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.updateCachedMessageCount, ex.ActionName)
-        Assert.Equal("Failed to update the cached message count.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.updateCachedMessageCount, caughtException.ActionName)
+        Assert.Equal("Failed to update the cached message count.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -409,10 +409,10 @@ let ``loadProfileRoot reports a MyDogsbodyException carrying its action when the
     let actual = ThunderbirdStore.loadProfileRoot recordingHandleError failingGetter ()
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadProfileRoot, ex.ActionName)
-        Assert.Equal("Failed to load the profile root.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadProfileRoot, caughtException.ActionName)
+        Assert.Equal("Failed to load the profile root.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -426,10 +426,10 @@ let ``saveProfileRoot reports a MyDogsbodyException carrying its action when the
     let actual = ThunderbirdStore.saveProfileRoot recordingHandleError failingGetter path
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveProfileRoot, ex.ActionName)
-        Assert.Equal("Failed to save the profile root.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveProfileRoot, caughtException.ActionName)
+        Assert.Equal("Failed to save the profile root.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -443,10 +443,10 @@ let ``loadMailAccounts reports a MyDogsbodyException carrying its action when a 
     let actual = ThunderbirdStore.loadMailAccounts recordingHandleError failingGetter foldersGetter ()
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadMailAccounts, ex.ActionName)
-        Assert.Equal("Failed to load mail accounts.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadMailAccounts, caughtException.ActionName)
+        Assert.Equal("Failed to load mail accounts.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -460,10 +460,10 @@ let ``saveMailAccounts reports a MyDogsbodyException carrying its action when a 
     let actual = ThunderbirdStore.saveMailAccounts recordingHandleError failingGetter foldersGetter []
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveMailAccounts, ex.ActionName)
-        Assert.Equal("Failed to save mail accounts.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveMailAccounts, caughtException.ActionName)
+        Assert.Equal("Failed to save mail accounts.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -476,10 +476,10 @@ let ``loadSelectedMailAccount reports a MyDogsbodyException carrying its action 
     let actual = ThunderbirdStore.loadSelectedMailAccount recordingHandleError failingGetter ()
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadSelectedMailAccount, ex.ActionName)
-        Assert.Equal("Failed to load the selected mail account.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadSelectedMailAccount, caughtException.ActionName)
+        Assert.Equal("Failed to load the selected mail account.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -492,10 +492,10 @@ let ``saveSelectedMailAccount reports a MyDogsbodyException carrying its action 
     let actual = ThunderbirdStore.saveSelectedMailAccount recordingHandleError failingGetter None
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveSelectedMailAccount, ex.ActionName)
-        Assert.Equal("Failed to save the selected mail account.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveSelectedMailAccount, caughtException.ActionName)
+        Assert.Equal("Failed to save the selected mail account.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -509,10 +509,10 @@ let ``loadWatermarkEntry reports a MyDogsbodyException carrying its action when 
     let actual = ThunderbirdStore.loadWatermarkEntry recordingHandleError failingGetter id "INBOX"
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadWatermark, ex.ActionName)
-        Assert.Equal("Failed to load the folder watermark.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.loadWatermark, caughtException.ActionName)
+        Assert.Equal("Failed to load the folder watermark.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -528,10 +528,10 @@ let ``saveWatermarkEntry reports a MyDogsbodyException carrying its action when 
     let actual = ThunderbirdStore.saveWatermarkEntry recordingHandleError failingGetter id "INBOX" watermark
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveWatermark, ex.ActionName)
-        Assert.Equal("Failed to save the folder watermark.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.saveWatermark, caughtException.ActionName)
+        Assert.Equal("Failed to save the folder watermark.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -545,9 +545,9 @@ let ``clearWatermarksFor reports a MyDogsbodyException carrying its action when 
     let actual = ThunderbirdStore.clearWatermarksFor recordingHandleError failingGetter id
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.clearWatermarks, ex.ActionName)
-        Assert.Equal("Failed to clear folder watermarks.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Thunderbird.ThunderbirdStore.clearWatermarks, caughtException.ActionName)
+        Assert.Equal("Failed to clear folder watermarks.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")

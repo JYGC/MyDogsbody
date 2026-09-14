@@ -31,7 +31,7 @@ let private storedInvoice (dueDate: DateTime option) : StoredInvoice =
           Reference = InvoiceReference.create "INV-1042" |> orFail
           Amount = Money.create 249.95m "AUD" |> orFail
           IssueDate = Some(InvoiceIssueDate.create (DateTime(2026, 2, 1)) |> orFail)
-          DueDate = dueDate |> Option.map (fun d -> InvoiceDueDate.create d |> orFail)
+          DueDate = dueDate |> Option.map (fun dueDateText -> InvoiceDueDate.create dueDateText |> orFail)
           MessageReceivedAt = DateTime(2026, 1, 20) } }
 
 [<Fact; Trait("Level", "Contract")>]
@@ -117,9 +117,9 @@ let ``every InvoiceError case maps to a MyDogsbodyException carrying the action 
     let action = ActionNames.MyDogsbody.Startup.InvoiceApi.scan
 
     for error in allErrors do
-        let ex = InvoiceApiMappers.toMyDogsbodyException action error
-        Assert.Equal(action, ex.ActionName)
-        Assert.False(String.IsNullOrWhiteSpace ex.Message)
+        let caughtException = InvoiceApiMappers.toMyDogsbodyException action error
+        Assert.Equal(action, caughtException.ActionName)
+        Assert.False(String.IsNullOrWhiteSpace caughtException.Message)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``an expected InvoiceError wraps an ApplicationException (unlogged); a store failure does not`` () =
@@ -134,8 +134,8 @@ let ``an expected InvoiceError wraps an ApplicationException (unlogged); a store
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toInvoiceError wraps an exception's message as InvoiceStoreFailed`` () =
-    let ex = MyDogsbodyException(ActionNames.MyDogsbody.Startup.InvoiceApi.scan, "adapter blew up")
-    Assert.Equal(InvoiceStoreFailed "adapter blew up", InvoiceApiMappers.toInvoiceError ex)
+    let caughtException = MyDogsbodyException(ActionNames.MyDogsbody.Startup.InvoiceApi.scan, "adapter blew up")
+    Assert.Equal(InvoiceStoreFailed "adapter blew up", InvoiceApiMappers.toInvoiceError caughtException)
 
 // ============================ ScanWindowApiMappers ============================
 

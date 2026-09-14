@@ -103,4 +103,4 @@ let toMyDogsbodyException (action: string) (error: InvoiceError) : MyDogsbodyExc
 
 /// Inbound: an adapter's exception becomes the one InvoiceError case that stands for
 /// infrastructure failure. The adapter's handleError has already logged it.
-let toInvoiceError (ex: MyDogsbodyException) : InvoiceError = InvoiceStoreFailed ex.Message
+let toInvoiceError (caughtException: MyDogsbodyException) : InvoiceError = InvoiceStoreFailed caughtException.Message

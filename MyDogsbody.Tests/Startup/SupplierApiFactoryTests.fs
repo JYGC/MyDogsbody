@@ -33,12 +33,12 @@ let private aSupplier: SupplierUiTypeWithoutId =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) ->
-        failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbodyException) ->
+        failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 let private errorOrFail label result =
     match result with
-    | Error (ex: MyDogsbodyException) -> ex
+    | Error (caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 let private single (api: SupplierApi) =
@@ -182,9 +182,9 @@ let ``a store failure reaches the UI as an Error and is written to the log exact
     let actual = api.GetAllSuppliers()
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Startup.SupplierApi.getAllSuppliers, ex.ActionName)
-        Assert.Equal("Failed to retrieve all suppliers.", ex.Message)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Startup.SupplierApi.getAllSuppliers, caughtException.ActionName)
+        Assert.Equal("Failed to retrieve all suppliers.", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
     Assert.Single logged |> ignore

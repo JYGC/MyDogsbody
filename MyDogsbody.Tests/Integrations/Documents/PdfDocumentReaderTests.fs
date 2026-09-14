@@ -54,10 +54,10 @@ let ``readContent returns Error without logging when the file does not exist`` (
 
     // Assert
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, ex.ActionName)
-        Assert.Equal($"PDF file does not exist: {missingPath}", ex.Message)
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, caughtException.ActionName)
+        Assert.Equal($"PDF file does not exist: {missingPath}", caughtException.Message)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
         Assert.Empty logged
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -73,13 +73,13 @@ let ``readContent returns Error and logs when the file is not a readable PDF`` (
 
         // Assert
         match actual with
-        | Error ex ->
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, ex.ActionName)
-            Assert.Equal("Failed to extract content from PDF.", ex.Message)
-            Assert.NotNull ex.InnerException
+        | Error caughtException ->
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, caughtException.ActionName)
+            Assert.Equal("Failed to extract content from PDF.", caughtException.Message)
+            Assert.NotNull caughtException.InnerException
             // Unexpected failure: this one is logged.
             Assert.Single logged |> ignore
-            Assert.Same(ex, logged.[0])
+            Assert.Same(caughtException, logged.[0])
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
     )
 
@@ -109,7 +109,7 @@ let ``readContent returns every word of a readable PDF with its coordinates`` ()
             Assert.Equal<float list>(bottoms |> List.sortDescending, bottoms)
 
             Assert.Empty logged
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+        | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -125,7 +125,7 @@ let ``readContent returns no words for a PDF with an empty page`` () =
         // Assert
         match actual with
         | Ok content -> Assert.Empty content.Words
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+        | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
     )
 
 // --- change #4, task 1.3: readText, the same adapter now satisfying ReadDocumentText ---
@@ -157,7 +157,7 @@ let ``readText returns the PDF's text as lines, each tagged with a block`` () =
         Assert.All(lines, fun line -> Assert.True(line.BlockIndex >= 0))
         let blocks = lines |> List.map (fun line -> line.BlockIndex)
         Assert.Equal<int list>(blocks |> List.sort, blocks)
-    | Error err -> Assert.Fail($"Expected Ok, but got Error: {err}")
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText reports DocumentHasNoTextLayer for a scanned-image PDF`` () =

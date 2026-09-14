@@ -37,7 +37,7 @@ type private RespondingHandler(respond: HttpRequestMessage -> HttpResponseMessag
 
 type private StubHttpClientFactory(handler: HttpMessageHandler) =
     inherit Google.Apis.Http.HttpClientFactory()
-    override _.CreateHandler(_args: Google.Apis.Http.CreateHttpClientArgs) : HttpMessageHandler = handler
+    override _.CreateHandler(_arguments: Google.Apis.Http.CreateHttpClientArgs) : HttpMessageHandler = handler
 
 let private valueOrFail (result: Result<'T, string>) =
     match result with
@@ -88,7 +88,7 @@ let private withBindingOver
         |> Option.iter (fun secret ->
             match GoogleAccountStore.saveClientSecret handleError context.GetClientSecretCollection secret with
             | Ok() -> ()
-            | Error ex -> failwith $"Test setup could not store the client secret: {ex.Message}")
+            | Error capturedException -> failwith $"Test setup could not store the client secret: {capturedException.Message}")
 
         if authorised then
             let dataStore =

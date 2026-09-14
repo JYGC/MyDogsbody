@@ -1,4 +1,4 @@
-/// The Google account adapter: the client secret (a single row) and account CRUD, over the
+﻿/// The Google account adapter: the client secret (a single row) and account CRUD, over the
 /// integration's own LiteDB `Accounts` and `ClientSecret` collections.
 ///
 /// Outer ring, so the shape is the established one - handleError first, the collection getter
@@ -38,8 +38,8 @@ let loadClientSecret
         try
             let existing = getClientSecretCollection().FindById clientSecretRowId
             return if isNull (box existing) then None else Some existing.Secret
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to load the Google client secret.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to load the Google client secret.", caughtException)
     }
 
 let saveClientSecret
@@ -54,8 +54,8 @@ let saveClientSecret
             let entity = GoogleClientSecretEntity(Id = clientSecretRowId, Secret = secret)
             getClientSecretCollection().Upsert entity |> ignore
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save the Google client secret.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save the Google client secret.", caughtException)
     }
 
 let getAll
@@ -71,8 +71,8 @@ let getAll
                 getAccountCollection().Query().ToEnumerable()
                 |> Seq.map mapOrRaise
                 |> Seq.toList
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve all Google accounts.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve all Google accounts.", caughtException)
     }
 
 /// Upserts by the account's own id, so registering an already-saved account (re-authorising it,
@@ -89,8 +89,8 @@ let saveOne
             let entity = GoogleEntityMappers.toEntity account
             getAccountCollection().Upsert entity |> ignore
             return mapOrRaise entity
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save the Google account.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save the Google account.", caughtException)
     }
 
 /// Ok false means no row carried that identifier - reported rather than silently succeeding, so
@@ -106,6 +106,6 @@ let removeOne
         try
             let objectId = ObjectId(GoogleAccountId.value accountId)
             return getAccountCollection().Delete objectId
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to remove the Google account.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to remove the Google account.", caughtException)
     }

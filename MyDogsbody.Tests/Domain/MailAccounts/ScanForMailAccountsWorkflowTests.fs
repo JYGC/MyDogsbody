@@ -210,8 +210,8 @@ let ``scanForMailAccounts carries a stored cached message count onto an account 
     let saved = Assert.Single(List.ofSeq savedAccounts)
     Assert.Equal(2, saved.Length)
 
-    let savedFirst = saved |> List.find (fun a -> a.Id = accountId "1")
-    let savedSecond = saved |> List.find (fun a -> a.Id = accountId "2")
+    let savedFirst = saved |> List.find (fun account -> account.Id = accountId "1")
+    let savedSecond = saved |> List.find (fun account -> account.Id = accountId "2")
 
     // The count is carried...
     Assert.Equal(Some(42, takenAt), savedFirst.CachedMessageCount)

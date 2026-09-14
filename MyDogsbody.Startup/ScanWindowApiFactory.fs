@@ -11,25 +11,25 @@ open MyDogsbody.Database
 open MyDogsbody.UI.Types
 
 let createScanWindowApi (handleError: HandleErrorBuilder) (databaseContext: DatabaseContext) : ScanWindowApi =
-    let conn = databaseContext.GetDatabaseConnection
+    let databaseConnection = databaseContext.GetDatabaseConnection
     let toInvoiceError = InvoiceApiMappers.toInvoiceError
 
     let loadScanWindows: LoadScanWindows =
         fun () ->
-            ScanWindowStore.getScanWindows handleError conn databaseContext.GetScanWindows ()
+            ScanWindowStore.getScanWindows handleError databaseConnection databaseContext.GetScanWindows ()
             |> Result.mapError toInvoiceError
 
     let saveScanWindow: SaveScanWindow =
-        fun days -> ScanWindowStore.saveScanWindow handleError conn days |> Result.mapError toInvoiceError
+        fun days -> ScanWindowStore.saveScanWindow handleError databaseConnection days |> Result.mapError toInvoiceError
 
-    let deleteScanWindowDep: DeleteScanWindow =
-        fun id -> ScanWindowStore.deleteScanWindow handleError conn id |> Result.mapError toInvoiceError
+    let deleteScanWindowDependency: DeleteScanWindow =
+        fun id -> ScanWindowStore.deleteScanWindow handleError databaseConnection id |> Result.mapError toInvoiceError
 
     let loadSelectedScanWindow: LoadSelectedScanWindow =
-        fun () -> ScanWindowStore.getSelectedScanWindow handleError conn () |> Result.mapError toInvoiceError
+        fun () -> ScanWindowStore.getSelectedScanWindow handleError databaseConnection () |> Result.mapError toInvoiceError
 
     let saveSelectedScanWindow: SaveSelectedScanWindow =
-        fun days -> ScanWindowStore.saveSelectedScanWindow handleError conn days |> Result.mapError toInvoiceError
+        fun days -> ScanWindowStore.saveSelectedScanWindow handleError databaseConnection days |> Result.mapError toInvoiceError
 
     let toException = InvoiceApiMappers.toMyDogsbodyException
 
@@ -47,7 +47,7 @@ let createScanWindowApi (handleError: HandleErrorBuilder) (databaseContext: Data
 
       DeleteScanWindow =
         fun rawId ->
-            DeleteScanWindowWorkflow.deleteScanWindow loadScanWindows deleteScanWindowDep rawId
+            DeleteScanWindowWorkflow.deleteScanWindow loadScanWindows deleteScanWindowDependency rawId
             |> Result.mapError (toException ActionNames.MyDogsbody.Startup.ScanWindowApi.deleteScanWindow)
 
       GetSelectedScanWindow =

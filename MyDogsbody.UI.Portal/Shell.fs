@@ -11,7 +11,7 @@ type Shell() =
     inherit FunComponent()
 
     override _.Render () = html.inject (fun (hook: IComponentHook) -> ErrorBoundary'() {
-        ErrorContent(fun ex -> MudPaper'' {
+        ErrorContent(fun caughtException -> MudPaper'' {
             style {
                 padding 10
                 margin 20
@@ -24,7 +24,7 @@ type Shell() =
             }
             MudAlert'' {
                 Severity Severity.Error
-                ex.Message
+                caughtException.Message
             }
         })
         html.route [

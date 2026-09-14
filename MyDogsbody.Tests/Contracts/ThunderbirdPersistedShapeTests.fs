@@ -26,7 +26,7 @@ let private valueOrFail (result: Result<'T, string>) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error(ex: MyDogsbody.Exceptions.Types.MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error(caughtException: MyDogsbody.Exceptions.Types.MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 /// A second handle on the same file, so the raw documents can be inspected as stored.
 let private withStoreAndRawAccess (test: ThunderbirdDatabaseContext -> LiteDatabase -> unit) =

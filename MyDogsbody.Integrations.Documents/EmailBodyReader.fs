@@ -102,5 +102,5 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
                 |> flush
 
             Ok(renumber walk.Lines)
-        with ex ->
-            Error(DocumentUnreadable ex.Message)
+        with caughtException ->
+            Error(DocumentUnreadable caughtException.Message)

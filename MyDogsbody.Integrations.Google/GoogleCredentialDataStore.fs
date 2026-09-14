@@ -35,8 +35,8 @@ type GoogleCredentialDataStore
 
     let findExisting (username: GoogleExternalUsername) : StoredGoogleCredential option =
         match GoogleCredentialStore.getAll handleError getCredentialCollection () with
-        | Ok all -> all |> List.tryFind (fun c -> c.Username = username)
-        | Error ex -> raise ex
+        | Ok all -> all |> List.tryFind (fun storedCredential -> storedCredential.Username = username)
+        | Error caughtException -> raise caughtException
 
     interface IDataStore with
         member _.StoreAsync<'T>(key: string, value: 'T) : Task =
@@ -55,7 +55,7 @@ type GoogleCredentialDataStore
 
             match saveResult with
             | Ok () -> Task.CompletedTask
-            | Error ex -> raise ex
+            | Error caughtException -> raise caughtException
 
         member _.GetAsync<'T>(key: string) : Task<'T> =
             let username = storeKey<'T> key

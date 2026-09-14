@@ -136,7 +136,7 @@ let ``a validation failure is shown as an alert and is not written to the log`` 
 
         match harness.Api.GetAllSuppliers() with
         | Ok stored -> Assert.Empty stored
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+        | Error error -> Assert.Fail($"Expected Ok, but got Error: {error.Message}")
 
         // An expected failure is never logged: the exception log is for things worth reading a
         // stack trace about.

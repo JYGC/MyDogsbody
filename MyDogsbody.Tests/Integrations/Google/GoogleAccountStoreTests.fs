@@ -46,8 +46,8 @@ let private withStore
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) ->
-        failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbodyException) ->
+        failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 // ---------- accounts ----------
 
@@ -157,10 +157,10 @@ let ``getAll reports a MyDogsbodyException carrying its action when the collecti
         fun () -> raise (InvalidOperationException "database is gone")
 
     match GoogleAccountStore.getAll recordingHandleError failingGetter () with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.getAll, ex.ActionName)
-        Assert.Equal("Failed to retrieve all Google accounts.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.getAll, caughtException.ActionName)
+        Assert.Equal("Failed to retrieve all Google accounts.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -176,10 +176,10 @@ let ``saveOne reports a MyDogsbodyException carrying its action when the collect
         account "507f1f77bcf86cd799439011" "person@gmail.com" None
         |> GoogleAccountStore.saveOne recordingHandleError failingGetter
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.saveOne, ex.ActionName)
-        Assert.Equal("Failed to save the Google account.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.saveOne, caughtException.ActionName)
+        Assert.Equal("Failed to save the Google account.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -192,10 +192,10 @@ let ``removeOne reports a MyDogsbodyException carrying its action when the colle
         fun () -> raise (InvalidOperationException "database is gone")
 
     match GoogleAccountStore.removeOne recordingHandleError failingGetter (accountId "507f1f77bcf86cd799439011") with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.removeOne, ex.ActionName)
-        Assert.Equal("Failed to remove the Google account.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.removeOne, caughtException.ActionName)
+        Assert.Equal("Failed to remove the Google account.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -208,10 +208,10 @@ let ``loadClientSecret reports a MyDogsbodyException carrying its action when th
         fun () -> raise (InvalidOperationException "database is gone")
 
     match GoogleAccountStore.loadClientSecret recordingHandleError failingGetter () with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.loadClientSecret, ex.ActionName)
-        Assert.Equal("Failed to load the Google client secret.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.loadClientSecret, caughtException.ActionName)
+        Assert.Equal("Failed to load the Google client secret.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -224,9 +224,9 @@ let ``saveClientSecret reports a MyDogsbodyException carrying its action when th
         fun () -> raise (InvalidOperationException "database is gone")
 
     match GoogleAccountStore.saveClientSecret recordingHandleError failingGetter "secret" with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.saveClientSecret, ex.ActionName)
-        Assert.Equal("Failed to save the Google client secret.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.saveClientSecret, caughtException.ActionName)
+        Assert.Equal("Failed to save the Google client secret.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")

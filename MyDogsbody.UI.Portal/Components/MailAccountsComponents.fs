@@ -8,21 +8,21 @@ open MyDogsbody.UI.Types.Module
 
 let private formatCachedCount (count: (int * DateTime) option) =
     match count with
-    | Some(n, takenAt) -> $"{n} (as of {takenAt:g})"
+    | Some(messageCount, takenAt) -> $"{messageCount} (as of {takenAt:g})"
     | None -> "Not counted yet"
 
 /// Binary units, one decimal above bytes. Public so the figure the table shows is asserted
 /// directly rather than re-derived by a test that could drift from it.
 let formatSizeBytes (bytes: int64) : string =
-    let kb = 1024.0
-    let mb = kb * 1024.0
-    let gb = mb * 1024.0
+    let bytesPerKilobyte = 1024.0
+    let bytesPerMegabyte = bytesPerKilobyte * 1024.0
+    let bytesPerGigabyte = bytesPerMegabyte * 1024.0
     let value = float bytes
 
-    if value < kb then $"{bytes} bytes"
-    elif value < mb then $"%.1f{value / kb} KB"
-    elif value < gb then $"%.1f{value / mb} MB"
-    else $"%.1f{value / gb} GB"
+    if value < bytesPerKilobyte then $"{bytes} bytes"
+    elif value < bytesPerMegabyte then $"%.1f{value / bytesPerKilobyte} KB"
+    elif value < bytesPerGigabyte then $"%.1f{value / bytesPerMegabyte} MB"
+    else $"%.1f{value / bytesPerGigabyte} GB"
 
 /// The account's whole on-disk size - every folder, scannable or not.
 let accountSizeBytes (account: MailAccountUiType) : int64 =
@@ -110,10 +110,10 @@ let mailAccountsBrowser (mailAccountsBrowserModule: MailAccountsBrowserModule) (
                     fragment {
                         MudText''{ "Some directories could not be read:" }
 
-                        for u in unreadable do
+                        for unreadableDirectory in unreadable do
                             MudText''{
                                 Typo Typo.caption
-                                $"{u.Path} - {u.Reason}"
+                                $"{unreadableDirectory.Path} - {unreadableDirectory.Reason}"
                             }
                     }
                 }

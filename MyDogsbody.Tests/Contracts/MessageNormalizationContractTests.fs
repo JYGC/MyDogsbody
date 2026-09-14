@@ -217,7 +217,7 @@ let ``a block boundary survives normalization, because LinesAfterLabel refuses t
         Assert.Equal<int list>([ 0; 1; 7 ], body.Lines |> List.map (fun grouped -> grouped.Line.BlockIndex))
         Assert.Equal<int list>(
             [ 0; 1; 7 ],
-            body.Lines |> List.collect (fun grouped -> grouped.Segments |> List.map (fun s -> s.BlockIndex)))
+            body.Lines |> List.collect (fun grouped -> grouped.Segments |> List.map (fun segment -> segment.BlockIndex)))
     | other -> Assert.Fail($"Expected one body part, but got {other}")
 
 // ---------- the guarantee: the two views of a part's lines agree ----------
@@ -242,7 +242,7 @@ let ``a part's segments are exactly its laid-out lines, and its joined lines are
             fun grouped ->
                 Assert.NotEmpty grouped.Segments
                 Assert.All(grouped.Segments, fun segment -> Assert.False(String.IsNullOrEmpty segment.Text))
-                Assert.Equal(String.Join(" ", grouped.Segments |> List.map (fun s -> s.Text)), grouped.Line.Text))
+                Assert.Equal(String.Join(" ", grouped.Segments |> List.map (fun segment -> segment.Text)), grouped.Line.Text))
 
         Assert.Equal<string list>(
             [ "Please contact us for help."; "Reference"; "WU-1" ],
@@ -250,5 +250,5 @@ let ``a part's segments are exactly its laid-out lines, and its joined lines are
 
         Assert.Equal<string list>(
             [ "Please contact"; "us for help."; "Reference"; "WU-1" ],
-            body.Lines |> List.collect (fun grouped -> grouped.Segments |> List.map (fun s -> s.Text)))
+            body.Lines |> List.collect (fun grouped -> grouped.Segments |> List.map (fun segment -> segment.Text)))
     | other -> Assert.Fail($"Expected one body part, but got {other}")

@@ -51,7 +51,7 @@ let private withStore (test: (unit -> Database.Types.GoogleCredentialsCollection
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 let private insert getCollection c =
     GoogleCredentialStore.insertOne handleError getCollection c |> okOrFail "insertOne"
@@ -112,7 +112,7 @@ let ``an update to an existing row reflects on re-read`` () =
                 (editOf (GoogleCredentialId.value inserted.Id) "rotated" "rotated@gmail.com")
             |> okOrFail "updateOne"
 
-        Assert.Equal(Some "rotated", updated |> Option.map (fun c -> GoogleCredentialSecret.value c.Secret))
+        Assert.Equal(Some "rotated", updated |> Option.map (fun credential -> GoogleCredentialSecret.value credential.Secret))
 
         let readBack = Assert.Single(readAll getCollection)
         Assert.Equal("rotated", GoogleCredentialSecret.value readBack.Secret)
@@ -164,13 +164,13 @@ let ``a store failure carries its declared action, message and a preserved inner
         fun () -> raise (InvalidOperationException "database is gone")
 
     match GoogleCredentialStore.getAll recordingHandleError failingGetter () with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.getAll,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to retrieve all credentials.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to retrieve all credentials.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -189,10 +189,10 @@ let ``an unmappable stored row is a raised failure, logged, not a silent drop`` 
 
         // Act
         match GoogleCredentialStore.getAll recordingHandleError getCollection () with
-        | Error ex ->
+        | Error caughtException ->
             Assert.Equal(
                 ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.getAll,
-                ex.ActionName
+                caughtException.ActionName
             )
             Assert.Single logged |> ignore
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")

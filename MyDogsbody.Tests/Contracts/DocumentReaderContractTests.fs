@@ -48,7 +48,7 @@ let ``ReadDocumentText: a readable document yields non-empty block-tagged lines`
     | Ok lines ->
         Assert.NotEmpty lines
         Assert.All(lines, fun line -> Assert.True(line.BlockIndex >= 0))
-    | Error err -> Assert.Fail($"expected Ok, got {err}")
+    | Error error -> Assert.Fail($"expected Ok, got {error}")
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof textImplementations)>]
@@ -62,7 +62,7 @@ let ``ReadDocumentText: zero bytes is DocumentUnreadable, never an empty success
 let private realReadDocumentContent: ReadDocumentContent =
     fun path ->
         PdfDocumentReader.readContent handleError path
-        |> Result.mapError (fun ex -> DocumentUnreadable ex.Message)
+        |> Result.mapError (fun caughtException -> DocumentUnreadable caughtException.Message)
 
 let private fakeReadDocumentContent: ReadDocumentContent =
     fun path ->
@@ -81,15 +81,15 @@ let private readDocumentContent name : ReadDocumentContent =
 
 let private pathOf value =
     match DocumentPath.create value with
-    | Ok p -> p
-    | Error e -> failwith e
+    | Ok documentPath -> documentPath
+    | Error errorMessage -> failwith errorMessage
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof contentImplementations)>]
 let ``ReadDocumentContent: a missing file is DocumentUnreadable`` (implementation: string) =
-    let path = pathOf (Path.Combine(Path.GetTempPath(), $"{System.Guid.NewGuid()}.pdf"))
+    let documentPathToTest = pathOf (Path.Combine(Path.GetTempPath(), $"{System.Guid.NewGuid()}.pdf"))
 
-    match readDocumentContent implementation path with
+    match readDocumentContent implementation documentPathToTest with
     | Error(DocumentUnreadable _) -> ()
     | other -> Assert.Fail($"expected DocumentUnreadable, got {other}")
 
@@ -103,7 +103,7 @@ let ``ReadDocumentContent: a readable PDF yields words with real coordinates`` (
         match readDocumentContent implementation (pathOf file) with
         | Ok content ->
             Assert.NotEmpty content.Words
-            Assert.All(content.Words, fun w -> Assert.True(w.Left >= 0.0 && w.Bottom >= 0.0))
-        | Error err -> Assert.Fail($"expected Ok, got {err}")
+            Assert.All(content.Words, fun word -> Assert.True(word.Left >= 0.0 && word.Bottom >= 0.0))
+        | Error error -> Assert.Fail($"expected Ok, got {error}")
     finally
         try File.Delete file with _ -> ()

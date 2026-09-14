@@ -240,7 +240,7 @@ let ``validateTemplate refuses a template missing a required field with Required
         | "Currency" -> Currency
         | other -> failwith $"unexpected test field {other}"
 
-    let input = { minimalValidTemplate with Rules = allRules |> List.filter (fun r -> r.Field <> missingField) }
+    let input = { minimalValidTemplate with Rules = allRules |> List.filter (fun rule -> rule.Field <> missingField) }
 
     let actual = ValidateTemplateWorkflow.validateTemplate input
 

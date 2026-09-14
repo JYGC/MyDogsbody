@@ -37,7 +37,7 @@ let createInvoiceApi
     (thunderbirdContext: ThunderbirdDatabaseContext)
     : InvoiceApi =
 
-    let conn = databaseContext.GetDatabaseConnection
+    let databaseConnection = databaseContext.GetDatabaseConnection
 
     // ---------- main-database adapters (MyDogsbodyException -> InvoiceError) ----------
 
@@ -45,7 +45,7 @@ let createInvoiceApi
 
     let loadInvoices: LoadInvoices =
         fun cutoff ->
-            InvoiceStore.getInvoices handleError conn databaseContext.GetInvoices cutoff
+            InvoiceStore.getInvoices handleError databaseConnection databaseContext.GetInvoices cutoff
             |> Result.mapError toInvoiceError
 
     /// The one adapter failure this area translates to a NAMED domain case rather than to the
@@ -57,58 +57,58 @@ let createInvoiceApi
     /// SYSTEM SHALL report it as a problem rather than storing an invoice with no supplier").
     let upsertInvoice: UpsertInvoice =
         fun invoice ->
-            InvoiceStore.upsertInvoice handleError conn getCurrentTime invoice
-            |> Result.mapError (fun ex ->
-                if InvoiceStore.isMissingSupplier ex then
+            InvoiceStore.upsertInvoice handleError databaseConnection getCurrentTime invoice
+            |> Result.mapError (fun caughtException ->
+                if InvoiceStore.isMissingSupplier caughtException then
                     SupplierGone invoice.SupplierId
                 else
-                    toInvoiceError ex)
+                    toInvoiceError caughtException)
 
     let deleteFromLedger: DeleteInvoice =
         fun invoiceId ->
-            InvoiceStore.deleteInvoice handleError conn databaseContext.GetInvoices invoiceId
+            InvoiceStore.deleteInvoice handleError databaseConnection databaseContext.GetInvoices invoiceId
             |> Result.mapError toInvoiceError
 
     let loadTombstones: LoadTombstones =
         fun () ->
-            InvoiceStore.getTombstones handleError conn databaseContext.GetInvoiceTombstones ()
+            InvoiceStore.getTombstones handleError databaseConnection databaseContext.GetInvoiceTombstones ()
             |> Result.mapError toInvoiceError
 
     let saveTombstone: SaveTombstone =
         fun tombstone ->
-            InvoiceStore.saveTombstone handleError conn tombstone |> Result.mapError toInvoiceError
+            InvoiceStore.saveTombstone handleError databaseConnection tombstone |> Result.mapError toInvoiceError
 
     let removeTombstone: RemoveTombstone =
         fun supplierId reference ->
-            InvoiceStore.removeTombstone handleError conn supplierId reference |> Result.mapError toInvoiceError
+            InvoiceStore.removeTombstone handleError databaseConnection supplierId reference |> Result.mapError toInvoiceError
 
     let saveScanProblems: SaveScanProblems =
         fun problems ->
-            InvoiceStore.saveScanProblems handleError conn problems |> Result.mapError toInvoiceError
+            InvoiceStore.saveScanProblems handleError databaseConnection problems |> Result.mapError toInvoiceError
 
     let clearScanProblems: ClearScanProblems =
-        fun ids -> InvoiceStore.clearScanProblems handleError conn ids |> Result.mapError toInvoiceError
+        fun ids -> InvoiceStore.clearScanProblems handleError databaseConnection ids |> Result.mapError toInvoiceError
 
     let loadScanProblems () =
-        InvoiceStore.getScanProblems handleError conn databaseContext.GetScanProblems ()
+        InvoiceStore.getScanProblems handleError databaseConnection databaseContext.GetScanProblems ()
         |> Result.mapError toInvoiceError
 
     // ---------- sibling-area adapters ----------
 
     let loadSuppliers: LoadSuppliers =
         fun () ->
-            SupplierStore.getAll handleError conn databaseContext.GetSuppliers databaseContext.GetSupplierMatchers ()
-            |> Result.mapError (fun ex -> SupplierStoreFailed ex.Message)
+            SupplierStore.getAll handleError databaseConnection databaseContext.GetSuppliers databaseContext.GetSupplierMatchers ()
+            |> Result.mapError (fun caughtException -> SupplierStoreFailed caughtException.Message)
 
     let loadTemplatesForSupplier: LoadTemplatesForSupplier =
         fun supplierId ->
             TemplateStore.getForSupplier
                 handleError
-                conn
+                databaseConnection
                 databaseContext.GetInvoiceTemplates
                 databaseContext.GetTemplateFieldRules
                 supplierId
-            |> Result.mapError (fun ex -> TemplateError.TemplateStoreFailed ex.Message)
+            |> Result.mapError (fun caughtException -> TemplateError.TemplateStoreFailed caughtException.Message)
 
     // ---------- Thunderbird adapters (same wiring as MailAccountApiFactory) ----------
 
@@ -126,7 +126,7 @@ let createInvoiceApi
         |> Result.mapError MailAccountApiMappers.toMailAccountError
 
     let lookupAccount: MailFolderReader.LookupAccount =
-        fun accountId -> loadMailAccounts () |> Result.map (List.tryFind (fun a -> a.Id = accountId))
+        fun accountId -> loadMailAccounts () |> Result.map (List.tryFind (fun account -> account.Id = accountId))
 
     let loadWatermark: MailFolderReader.LoadWatermark =
         fun accountId relativePath ->
@@ -162,10 +162,10 @@ let createInvoiceApi
         loadSuppliers ()
         |> Result.map (fun suppliers ->
             suppliers
-            |> List.map (fun s -> SupplierId.value s.Id, SupplierName.value s.Name)
+            |> List.map (fun supplier -> SupplierId.value supplier.Id, SupplierName.value supplier.Name)
             |> Map.ofList)
-        |> Result.mapError (fun err ->
-            SupplierApiMappers.toMyDogsbodyException ActionNames.MyDogsbody.Startup.InvoiceApi.getInvoices err)
+        |> Result.mapError (fun error ->
+            SupplierApiMappers.toMyDogsbodyException ActionNames.MyDogsbody.Startup.InvoiceApi.getInvoices error)
 
     /// Scan / RescanEverything differ only by ScanMode: FullRescan clears the account's
     /// watermarks first (decision 16). ScanMode is a domain type and never crosses the InvoiceApi
@@ -243,11 +243,11 @@ let createInvoiceApi
             result {
                 let! supplierId =
                     SupplierId.create rawSupplierId
-                    |> Result.mapError (fun r -> toException ActionNames.MyDogsbody.Startup.InvoiceApi.undeleteInvoice (ScanWindowInvalid r))
+                    |> Result.mapError (fun reason -> toException ActionNames.MyDogsbody.Startup.InvoiceApi.undeleteInvoice (ScanWindowInvalid reason))
 
                 let! reference =
                     InvoiceReference.create rawReference
-                    |> Result.mapError (fun r -> toException ActionNames.MyDogsbody.Startup.InvoiceApi.undeleteInvoice (InvoiceReferenceInvalid r))
+                    |> Result.mapError (fun reason -> toException ActionNames.MyDogsbody.Startup.InvoiceApi.undeleteInvoice (InvoiceReferenceInvalid reason))
 
                 return!
                     UndeleteInvoiceWorkflow.undeleteInvoice removeTombstone supplierId reference

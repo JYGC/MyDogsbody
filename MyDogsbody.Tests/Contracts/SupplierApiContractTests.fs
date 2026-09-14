@@ -160,11 +160,11 @@ let private aSupplier: SupplierUiTypeWithoutId =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 let private errorOrFail label result =
     match result with
-    | Error (ex: MyDogsbodyException) -> ex
+    | Error (caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 // ---------- the shared suite ----------

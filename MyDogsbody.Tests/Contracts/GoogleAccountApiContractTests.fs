@@ -59,13 +59,13 @@ let private withFakeApi (test: GoogleAccountApi -> unit) =
                     | Some _ -> failwith "the fake never simulates a successful registration - it needs the real Google network"
             ReauthoriseAccount =
                 fun id ->
-                    if accounts |> Seq.exists (fun a -> a.Id = id) then
+                    if accounts |> Seq.exists (fun account -> account.Id = id) then
                         failwith "the fake never simulates a successful re-authorisation - it needs the real Google network"
                     else
                         fail ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount $"No Google account was found with id '{id}'."
             RemoveAccount =
                 fun id ->
-                    match accounts |> Seq.tryFindIndex (fun a -> a.Id = id) with
+                    match accounts |> Seq.tryFindIndex (fun account -> account.Id = id) with
                     | Some index ->
                         accounts.RemoveAt index
                         Ok()
@@ -75,13 +75,13 @@ let private withFakeApi (test: GoogleAccountApi -> unit) =
                     match clientSecret with
                     | None -> fail ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor "No Google client secret has been supplied yet."
                     | Some _ ->
-                        if accounts |> Seq.exists (fun a -> a.Id = id) then
+                        if accounts |> Seq.exists (fun account -> account.Id = id) then
                             Ok []
                         else
                             fail ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor "This Google account needs to be re-authorised."
             SetDefaultInvoiceCalendar =
                 fun accountId _ ->
-                    if accounts |> Seq.exists (fun a -> a.Id = accountId) then
+                    if accounts |> Seq.exists (fun account -> account.Id = accountId) then
                         failwith "the fake never simulates a successful calendar choice - it needs the real Google network"
                     else
                         fail
@@ -101,11 +101,11 @@ let private withImplementation (name: string) (test: GoogleAccountApi -> unit) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error(ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error(caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 let private errorOrFail label result =
     match result with
-    | Error(ex: MyDogsbodyException) -> ex
+    | Error(caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 [<Theory; Trait("Level", "Contract")>]
@@ -134,10 +134,10 @@ let ``SetClientSecret refuses a blank secret as an unlogged exception, keeping w
         let refusedOverWorking = api.SetClientSecret "   " |> errorOrFail "SetClientSecret"
         Assert.Equal(Some sampleClientSecret, api.GetClientSecret() |> okOrFail "GetClientSecret")
 
-        for ex in [ refusedOverNothing; refusedOverWorking ] do
-            Assert.Equal("Google client secret must not be empty.", ex.Message)
-            Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret, ex.ActionName)
-            let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        for caughtException in [ refusedOverNothing; refusedOverWorking ] do
+            Assert.Equal("Google client secret must not be empty.", caughtException.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret, caughtException.ActionName)
+            let inner = Assert.IsType<ApplicationException>(caughtException.InnerException)
             Assert.Equal("Google client secret must not be empty.", inner.Message)
     )
 
@@ -150,34 +150,34 @@ let ``GetAccounts returns an empty list before anything is registered`` (impleme
 [<MemberData(nameof implementations)>]
 let ``RegisterAccount refuses with an unlogged exception when no client secret has been supplied`` (implementation: string) =
     withImplementation implementation (fun api ->
-        let ex = api.RegisterAccount() |> errorOrFail "RegisterAccount"
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, ex.ActionName)
+        let caughtException = api.RegisterAccount() |> errorOrFail "RegisterAccount"
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, caughtException.ActionName)
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``ReauthoriseAccount refuses an unregistered account as an unlogged exception`` (implementation: string) =
     withImplementation implementation (fun api ->
-        let ex = api.ReauthoriseAccount "never-registered" |> errorOrFail "ReauthoriseAccount"
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount, ex.ActionName)
+        let caughtException = api.ReauthoriseAccount "never-registered" |> errorOrFail "ReauthoriseAccount"
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount, caughtException.ActionName)
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``GetCalendarsFor refuses with an unlogged exception when no client secret has been supplied`` (implementation: string) =
     withImplementation implementation (fun api ->
-        let ex = api.GetCalendarsFor "any-account" |> errorOrFail "GetCalendarsFor"
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, ex.ActionName)
+        let caughtException = api.GetCalendarsFor "any-account" |> errorOrFail "GetCalendarsFor"
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, caughtException.ActionName)
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``SetDefaultInvoiceCalendar refuses an unregistered account as an unlogged exception`` (implementation: string) =
     withImplementation implementation (fun api ->
-        let ex = api.SetDefaultInvoiceCalendar "never-registered" "cal-1" |> errorOrFail "SetDefaultInvoiceCalendar"
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, ex.ActionName)
+        let caughtException = api.SetDefaultInvoiceCalendar "never-registered" "cal-1" |> errorOrFail "SetDefaultInvoiceCalendar"
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, caughtException.ActionName)
     )

@@ -249,7 +249,7 @@ let private tryFindLabelInLaidOutLines
         |> Option.map (fun groupIndex ->
             let grouped = List.item groupIndex groups
             let labelStart = grouped.Line.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase)
-            let precedingLines = groups |> List.truncate groupIndex |> List.sumBy (fun g -> List.length g.Segments)
+            let precedingLines = groups |> List.truncate groupIndex |> List.sumBy (fun group -> List.length group.Segments)
 
             targetableLines groups, precedingLines + segmentIndexOf (labelStart + label.Length - 1) 0 grouped.Segments))
 
@@ -318,7 +318,7 @@ type private NumericRun = { Text: string; Start: int; End: int }
 /// 210.50. All three silently, with no AmountUnparseable and nothing to notice them by.
 let private numericRuns (decimalSeparator: char) (raw: string) : NumericRun list =
     let thousandsSeparator = thousandsSeparatorFor decimalSeparator
-    let isNumberShaped c = Char.IsDigit c || c = decimalSeparator || c = thousandsSeparator || c = '-'
+    let isNumberShaped character = Char.IsDigit character || character = decimalSeparator || character = thousandsSeparator || character = '-'
 
     let asRun start (chars: char list) =
         { Text = String(chars |> List.rev |> List.toArray)

@@ -41,13 +41,13 @@ let private toMatcherKindUiString (kind: MatcherKind) : string =
 let private toUnvalidatedMatchers
     (matchers: SupplierMatcherUiType list)
     : Result<(MatcherKind * string) list, SupplierError> =
-    let rec loop remaining acc =
+    let rec loop remaining accumulatedMatchers =
         match remaining with
-        | [] -> Ok (List.rev acc)
-        | (m: SupplierMatcherUiType) :: rest ->
-            match toMatcherKind m.Kind with
+        | [] -> Ok (List.rev accumulatedMatchers)
+        | (matcherUiType: SupplierMatcherUiType) :: rest ->
+            match toMatcherKind matcherUiType.Kind with
             | Error reason -> Error (MatcherInvalid reason)
-            | Ok kind -> loop rest ((kind, m.Value) :: acc)
+            | Ok kind -> loop rest ((kind, matcherUiType.Value) :: accumulatedMatchers)
 
     loop matchers []
 
@@ -120,5 +120,5 @@ let toMyDogsbodyException (action: string) (error: SupplierError) : MyDogsbodyEx
 
 /// Inbound: an adapter's exception becomes the one domain case that stands for infrastructure
 /// failure. The adapter's handleError has already logged it, so nothing logs again here.
-let toSupplierError (ex: MyDogsbodyException) : SupplierError =
-    SupplierStoreFailed ex.Message
+let toSupplierError (caughtException: MyDogsbodyException) : SupplierError =
+    SupplierStoreFailed caughtException.Message

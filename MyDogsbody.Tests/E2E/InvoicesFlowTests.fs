@@ -30,11 +30,11 @@ let private renderWithProviders (harness: InvoicesHarness) (view: NodeRenderFrag
 // is recorded in outcome.md (Phase 12).
 
 let private renderInvoices (harness: InvoicesHarness) =
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule (fun work -> work ()) harness.InvoiceApi harness.ScanWindowApi
 
-    let view = InvoicesComponents.invoicesTable m (fun _ -> ())
-    m, renderWithProviders harness view
+    let view = InvoicesComponents.invoicesTable invoicesModule (fun _ -> ())
+    invoicesModule, renderWithProviders harness view
 
 /// Seeds a supplier (id 1) + template (id 1) + one invoice with an explicit MessageReceivedAt, so
 /// a flow can place an invoice inside or outside a window (the harness clock is 2026-06-15).
@@ -117,24 +117,24 @@ let ``deleting an invoice writes a tombstone and the row disappears; the tombsto
     withInvoicesHarness (fun harness ->
         seedInvoice harness "INV-1" "NULL"
 
-        let m, rendered = renderInvoices harness
+        let invoicesModule, rendered = renderInvoices harness
         rendered.WaitForAssertion(fun () -> Assert.Contains("INV-1", rendered.Markup))
 
-        let invoiceId = (List.head (FSharp.Data.Adaptive.AVal.force m.InvoicesAval)).Id
-        m.DeleteInvoice invoiceId
+        let invoiceId = (List.head (FSharp.Data.Adaptive.AVal.force invoicesModule.InvoicesAval)).Id
+        invoicesModule.DeleteInvoice invoiceId
 
         rendered.WaitForAssertion(fun () -> Assert.DoesNotContain("INV-1", rendered.Markup))
 
         // the tombstone is on the natural key
-        m.LoadTombstones()
-        let tombstones = FSharp.Data.Adaptive.AVal.force m.TombstonesAval
+        invoicesModule.LoadTombstones()
+        let tombstones = FSharp.Data.Adaptive.AVal.force invoicesModule.TombstonesAval
         Assert.Equal(1, List.length tombstones)
         Assert.Equal("INV-1", (List.head tombstones).Reference)
 
         // un-delete removes the tombstone (the next scan would restore the invoice)
-        m.UndeleteInvoice (List.head tombstones).SupplierId "INV-1"
-        m.LoadTombstones()
-        Assert.Empty(FSharp.Data.Adaptive.AVal.force m.TombstonesAval))
+        invoicesModule.UndeleteInvoice (List.head tombstones).SupplierId "INV-1"
+        invoicesModule.LoadTombstones()
+        Assert.Empty(FSharp.Data.Adaptive.AVal.force invoicesModule.TombstonesAval))
 
 [<Fact; Trait("Level", "E2E")>]
 let ``the problems view lists a persisted scan problem with its sender and subject`` () =
@@ -143,11 +143,11 @@ let ``the problems view lists a persisted scan problem with its sender and subje
             "INSERT INTO ScanProblems (SourceMessageId, SupplierId, Sender, Subject, ReceivedAt, Cause, Detail, RecordedAt)
              VALUES ('m1', NULL, 'noreply@stranger.test', 'A statement, not an invoice', '2026-06-10T00:00:00.0000000', 'NoSupplierMatched', NULL, '2026-06-15T00:00:00.0000000');"
 
-        let m =
+        let invoicesModule =
             InvoicesModuleCreators.getInvoicesModule (fun work -> work ()) harness.InvoiceApi harness.ScanWindowApi
 
-        m.LoadProblems()
-        let rendered = renderWithProviders harness (InvoicesComponents.problemsView m)
+        invoicesModule.LoadProblems()
+        let rendered = renderWithProviders harness (InvoicesComponents.problemsView invoicesModule)
 
         rendered.WaitForAssertion(fun () ->
             Assert.Contains("noreply@stranger.test", rendered.Markup)
@@ -157,24 +157,24 @@ let ``the problems view lists a persisted scan problem with its sender and subje
 [<Fact; Trait("Level", "E2E")>]
 let ``the window picker is bound to the store's windows and selecting one persists and reloads`` () =
     withInvoicesHarness (fun harness ->
-        let m, rendered = renderInvoices harness
+        let invoicesModule, rendered = renderInvoices harness
 
         // the picker renders whatever the store holds - the seeded five - and opens on 14
         rendered.WaitForAssertion(fun () ->
-            Assert.Equal(5, (FSharp.Data.Adaptive.AVal.force m.ScanWindowsAval).Length)
-            Assert.Equal(14, FSharp.Data.Adaptive.AVal.force m.SelectedWindowDaysAval)
+            Assert.Equal(5, (FSharp.Data.Adaptive.AVal.force invoicesModule.ScanWindowsAval).Length)
+            Assert.Equal(14, FSharp.Data.Adaptive.AVal.force invoicesModule.SelectedWindowDaysAval)
             // the label above the table says what the window measures, not a bare number
             Assert.Contains("mail received in the last 14 days", rendered.Markup)
             // "Scan now" is on screen next to the picker
             Assert.Contains("Scan now", rendered.Markup))
 
-        m.SelectWindow 90
+        invoicesModule.SelectWindow 90
 
         rendered.WaitForAssertion(fun () ->
-            Assert.Equal(90, FSharp.Data.Adaptive.AVal.force m.SelectedWindowDaysAval)
+            Assert.Equal(90, FSharp.Data.Adaptive.AVal.force invoicesModule.SelectedWindowDaysAval)
             // the window change did NOT scan the mailbox: the initial load's "no mail account"
             // error is cleared by the reload rather than re-raised
-            Assert.Equal(None, FSharp.Data.Adaptive.AVal.force m.ErrorAval))
+            Assert.Equal(None, FSharp.Data.Adaptive.AVal.force invoicesModule.ErrorAval))
 
         match harness.ScanWindowApi.GetSelectedScanWindow() with
         | Ok days -> Assert.Equal(90, days)
@@ -187,7 +187,7 @@ let ``changing the window filters the stored ledger without a scan; Scan now rea
         seedInvoiceReceived harness "INV-RECENT" "NULL" "2026-06-11T00:00:00.0000000"
         seedInvoiceReceived harness "INV-OLD" "NULL" "2026-04-01T00:00:00.0000000"
 
-        let m, rendered = renderInvoices harness
+        let invoicesModule, rendered = renderInvoices harness
 
         // opens on 14 days: only the recent invoice is in view
         rendered.WaitForAssertion(fun () ->
@@ -195,23 +195,23 @@ let ``changing the window filters the stored ledger without a scan; Scan now rea
             Assert.DoesNotContain("INV-OLD", rendered.Markup))
 
         // widen to 90: the older invoice was hidden, not forgotten - it comes back with no scan
-        m.SelectWindow 90
+        invoicesModule.SelectWindow 90
 
         rendered.WaitForAssertion(fun () ->
             Assert.Contains("INV-OLD", rendered.Markup)
             Assert.Contains("INV-RECENT", rendered.Markup)
-            Assert.Equal(None, FSharp.Data.Adaptive.AVal.force m.ErrorAval))
+            Assert.Equal(None, FSharp.Data.Adaptive.AVal.force invoicesModule.ErrorAval))
 
         // "Scan now" DOES read the mailbox - and with no mail account selected that raises the alert
-        m.Rescan()
+        invoicesModule.Rescan()
 
         rendered.WaitForAssertion(fun () -> Assert.Contains("mail account", rendered.Markup)))
 
 [<Fact; Trait("Level", "E2E")>]
 let ``a scan with no mail account selected shows an alert and logs nothing`` () =
     withInvoicesHarness (fun harness ->
-        let m, rendered = renderInvoices harness
-        m.Rescan()
+        let invoicesModule, rendered = renderInvoices harness
+        invoicesModule.Rescan()
 
         rendered.WaitForAssertion(fun () -> Assert.Contains("mail account", rendered.Markup))
         Assert.Empty harness.Logged)
@@ -220,14 +220,14 @@ let ``a scan with no mail account selected shows an alert and logs nothing`` () 
 let ``the "Rescan everything" button renders, and pressing it with no mail account raises the same alert`` () =
     withInvoicesHarness (fun harness ->
         seedInvoice harness "INV-KEEP" "NULL"
-        let m, rendered = renderInvoices harness
+        let invoicesModule, rendered = renderInvoices harness
 
         rendered.WaitForAssertion(fun () ->
             Assert.Contains("INV-KEEP", rendered.Markup)
             // the button is on screen next to "Scan now"
             Assert.Contains("Rescan everything", rendered.Markup))
 
-        m.RescanEverything()
+        invoicesModule.RescanEverything()
 
         rendered.WaitForAssertion(fun () ->
             // no mail account: the watermark-clearing scan reports it, same as "Scan now"
@@ -241,10 +241,10 @@ let ``the "Rescan everything" button renders, and pressing it with no mail accou
 [<Fact; Trait("Level", "E2E")>]
 let ``an unreachable store shows an alert and logs exactly one entry`` () =
     withUnreachableInvoiceStoreHarness (fun harness ->
-        let m, rendered = renderInvoices harness
+        let invoicesModule, rendered = renderInvoices harness
         // the initial load already tried GetSelectedScanWindow against the broken store
         rendered.WaitForAssertion(fun () ->
-            match FSharp.Data.Adaptive.AVal.force m.ErrorAval with
+            match FSharp.Data.Adaptive.AVal.force invoicesModule.ErrorAval with
             | Some _ -> ()
             | None -> Assert.Fail("expected an error on the module"))
 

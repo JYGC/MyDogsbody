@@ -47,15 +47,15 @@ let ``the persisted columns for each change #4 table are exactly as documented``
 let ``the change #4 record types have a field for every persisted column`` () =
     // A field renamed on the F# record without a migration would leave the column orphaned; a
     // column added without touching the record would never be read.
-    let recordFields (t: Type) =
-        Microsoft.FSharp.Reflection.FSharpType.GetRecordFields t
-        |> Array.map (fun p -> p.Name)
+    let recordFields (recordType: Type) =
+        Microsoft.FSharp.Reflection.FSharpType.GetRecordFields recordType
+        |> Array.map (fun property -> property.Name)
         |> Array.toList
         |> List.sort
 
     withSchema (fun connectionString ->
-        let check (table: string) (t: Type) =
-            Assert.Equal<string list>(columns connectionString table |> List.sort, recordFields t)
+        let check (table: string) (recordType: Type) =
+            Assert.Equal<string list>(columns connectionString table |> List.sort, recordFields recordType)
 
         check "Invoices" typeof<MyDogsbody.Database.Models.InvoiceRecord>
         check "ScanProblems" typeof<MyDogsbody.Database.Models.ScanProblemRecord>

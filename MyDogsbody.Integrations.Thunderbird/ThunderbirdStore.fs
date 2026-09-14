@@ -1,4 +1,4 @@
-/// The integration's own facts: the profile root, discovered accounts and their folders, the
+﻿/// The integration's own facts: the profile root, discovered accounts and their folders, the
 /// selected account, and scan watermarks.
 ///
 /// Outer ring, so the shape is the established one - dependencies first, input last,
@@ -36,8 +36,8 @@ let loadProfileRoot
                 getProfileRootCollection().FindAll()
                 |> Seq.tryHead
                 |> Option.map (ThunderbirdEntityMappers.toProfileRootPath >> valueOrRaise)
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to load the profile root.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to load the profile root.", caughtException)
     }
 
 /// One row: replaces whatever was stored before.
@@ -54,8 +54,8 @@ let saveProfileRoot
             collection.DeleteAll() |> ignore
             collection.Insert(ThunderbirdEntityMappers.toNewProfileRootEntity path) |> ignore
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save the profile root.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save the profile root.", caughtException)
     }
 
 // ---------- Accounts ----------
@@ -78,12 +78,12 @@ let loadMailAccounts
                 |> List.map (fun accountEntity ->
                     let folders =
                         folderEntities
-                        |> List.filter (fun f -> f.AccountId = accountEntity.AccountId)
+                        |> List.filter (fun folderEntity -> folderEntity.AccountId = accountEntity.AccountId)
                         |> List.map ThunderbirdEntityMappers.toMailFolder
 
                     ThunderbirdEntityMappers.toDiscoveredMailAccount accountEntity folders |> valueOrRaise)
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to load mail accounts.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to load mail accounts.", caughtException)
     }
 
 /// Replaces the previous set of accounts and folders rather than accumulating - a fresh scan's
@@ -117,8 +117,8 @@ let saveMailAccounts
                     foldersCollection.Insert(ThunderbirdEntityMappers.toNewFolderEntity accountId folder) |> ignore))
 
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save mail accounts.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save mail accounts.", caughtException)
     }
 
 /// Updates one account's cached message count in place, leaving its folders untouched - unlike
@@ -138,15 +138,15 @@ let updateCachedMessageCount
             let collection = getAccountsCollection()
 
             collection.FindAll()
-            |> Seq.tryFind (fun a -> a.AccountId = accountIdValue)
+            |> Seq.tryFind (fun accountEntity -> accountEntity.AccountId = accountIdValue)
             |> Option.iter (fun entity ->
                 entity.CachedMessageCount <- Nullable count
                 entity.CachedMessageCountTakenAt <- Nullable takenAt
                 collection.Update entity |> ignore)
 
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to update the cached message count.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to update the cached message count.", caughtException)
     }
 
 // ---------- Selection ----------
@@ -165,8 +165,8 @@ let loadSelectedMailAccount
                 |> Seq.tryHead
                 |> ThunderbirdEntityMappers.toSelectedMailAccountId
                 |> valueOrRaise
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to load the selected mail account.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to load the selected mail account.", caughtException)
     }
 
 /// One row: `None` clears the selection - persisted as absent, not as an empty string, so
@@ -189,8 +189,8 @@ let saveSelectedMailAccount
             |> Option.iter (fun id -> collection.Insert(ThunderbirdEntityMappers.toNewSelectedAccountEntity id) |> ignore)
 
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save the selected mail account.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save the selected mail account.", caughtException)
     }
 
 // ---------- Watermarks ----------
@@ -209,10 +209,10 @@ let loadWatermarkEntry
 
             return
                 getWatermarksCollection().FindAll()
-                |> Seq.tryFind (fun w -> w.AccountId = accountIdValue && w.RelativePath = relativePath)
+                |> Seq.tryFind (fun watermarkEntity -> watermarkEntity.AccountId = accountIdValue && watermarkEntity.RelativePath = relativePath)
                 |> Option.map ThunderbirdEntityMappers.toFolderWatermark
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to load the folder watermark.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to load the folder watermark.", caughtException)
     }
 
 let saveWatermarkEntry
@@ -231,7 +231,7 @@ let saveWatermarkEntry
 
             let existing =
                 collection.FindAll()
-                |> Seq.tryFind (fun w -> w.AccountId = accountIdValue && w.RelativePath = relativePath)
+                |> Seq.tryFind (fun watermarkEntity -> watermarkEntity.AccountId = accountIdValue && watermarkEntity.RelativePath = relativePath)
 
             // A plain function, called either way, rather than `match` used as a mid-CE
             // statement - see the List.iter comment in saveMailAccounts for why.
@@ -247,8 +247,8 @@ let saveWatermarkEntry
 
             persist ()
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save the folder watermark.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save the folder watermark.", caughtException)
     }
 
 /// Deletes every watermark for one account, forcing every folder to be re-read in full on the
@@ -263,8 +263,8 @@ let clearWatermarksFor
     handleError {
         try
             let accountIdValue = MailAccountId.value accountId
-            getWatermarksCollection().DeleteMany(fun w -> w.AccountId = accountIdValue) |> ignore
+            getWatermarksCollection().DeleteMany(fun watermarkEntity -> watermarkEntity.AccountId = accountIdValue) |> ignore
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to clear folder watermarks.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to clear folder watermarks.", caughtException)
     }

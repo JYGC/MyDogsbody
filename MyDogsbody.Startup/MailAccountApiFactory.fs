@@ -102,13 +102,15 @@ let createMailAccountApi (handleError: HandleErrorBuilder) (thunderbirdContext: 
             else
 
             let scanOutcome = ThunderbirdFolderScanner.scan rootPath
-            let accountResults = scanOutcome.ProfileDirectories |> List.map (fun dir -> dir, ThunderbirdAccountReader.read dir)
+            let accountResults =
+                scanOutcome.ProfileDirectories
+                |> List.map (fun profileDirectory -> profileDirectory, ThunderbirdAccountReader.read profileDirectory)
 
             let accounts =
                 accountResults
                 |> List.collect (fun (_, result) ->
                     match result with
-                    | Ok accts -> accts
+                    | Ok discoveredAccounts -> discoveredAccounts
                     | Error _ -> [])
                 |> List.map (fun account ->
                     let folders = MailFolderEnumerator.enumerate account.StoreDirectory account.StoreFormat
@@ -119,10 +121,10 @@ let createMailAccountApi (handleError: HandleErrorBuilder) (thunderbirdContext: 
             // prefs.js yields ProfileUnreadable and other profiles still return".
             let malformedProfiles =
                 accountResults
-                |> List.choose (fun (dir, result) ->
+                |> List.choose (fun (profileDirectory, result) ->
                     match result with
                     | Error(ProfileUnreadable(path, reason)) -> Some({ Path = path; Reason = reason }: UnreadableDirectory)
-                    | Error _ -> Some({ Path = dir; Reason = "This profile could not be read." }: UnreadableDirectory)
+                    | Error _ -> Some({ Path = profileDirectory; Reason = "This profile could not be read." }: UnreadableDirectory)
                     | Ok _ -> None)
 
             if List.isEmpty scanOutcome.ProfileDirectories && List.isEmpty scanOutcome.Unreadable then
@@ -139,7 +141,7 @@ let createMailAccountApi (handleError: HandleErrorBuilder) (thunderbirdContext: 
                     }
 
     let lookupAccount: MailFolderReader.LookupAccount =
-        fun accountId -> loadMailAccounts () |> Result.map (List.tryFind (fun a -> a.Id = accountId))
+        fun accountId -> loadMailAccounts () |> Result.map (List.tryFind (fun account -> account.Id = accountId))
 
     // ---------- Workflows, partially applied over the dependencies above. ----------
 

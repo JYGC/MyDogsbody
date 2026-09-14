@@ -3,5 +3,5 @@
 open System
 open MyDogsbody.Exceptions.Types
 
-let isApplicationException (ex: Exception) =
-    ex :? MyDogsbodyException && ex.InnerException :? ApplicationException
+let isApplicationException (exceptionToCheck: Exception) =
+    exceptionToCheck :? MyDogsbodyException && exceptionToCheck.InnerException :? ApplicationException

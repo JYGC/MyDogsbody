@@ -12,7 +12,7 @@ let private matcherKinds = [ "Sender"; "Domain"; "Subject" ]
 
 let private formatMatchers (matchers: SupplierMatcherUiType list) =
     matchers
-    |> List.map (fun m -> $"{m.Kind}: {m.Value}")
+    |> List.map (fun matcher -> $"{matcher.Kind}: {matcher.Value}")
     |> String.concat ", "
 
 let suppliersBrowser

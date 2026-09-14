@@ -37,7 +37,7 @@ let private withStoreAndRawAccess
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 [<Fact; Trait("Level", "Contract")>]
 let ``a Google account is persisted under the documented field names`` () =

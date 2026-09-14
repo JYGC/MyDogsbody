@@ -53,11 +53,11 @@ let private aTemplate supplierId : TemplateUiTypeWithoutId =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 let private errorOrFail label result =
     match result with
-    | Error (ex: MyDogsbodyException) -> ex
+    | Error (caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 let private single (api: TemplateApi) supplierId =
@@ -78,7 +78,7 @@ let ``AddTemplate stores every field and assigns an identifier`` () =
         Assert.False(String.IsNullOrWhiteSpace stored.Id)
         Assert.Equal(supplierId, stored.SupplierId)
         Assert.Equal("Monthly statement", stored.Name)
-        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], stored.Rules |> List.map (fun r -> r.Field))
+        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], stored.Rules |> List.map (fun rule -> rule.Field))
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -98,7 +98,7 @@ let ``EditTemplate changes the addressed template and replaces its rule set`` ()
         let reloaded = single api supplierId
         Assert.Equal(stored.Id, reloaded.Id)
         Assert.Equal("Renamed", reloaded.Name)
-        Assert.Equal("USD", (reloaded.Rules |> List.find (fun r -> r.Field = "Currency")).RuleText)
+        Assert.Equal("USD", (reloaded.Rules |> List.find (fun rule -> rule.Field = "Currency")).RuleText)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -119,17 +119,17 @@ let ``ReorderTemplates persists the new order`` () =
         api.AddTemplate { aTemplate supplierId with Name = "Second" } |> okOrFail "AddTemplate"
 
         let stored = api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier"
-        let firstId = (stored |> List.find (fun t -> t.Name = "First")).Id
-        let secondId = (stored |> List.find (fun t -> t.Name = "Second")).Id
+        let firstId = (stored |> List.find (fun template -> template.Name = "First")).Id
+        let secondId = (stored |> List.find (fun template -> template.Name = "Second")).Id
 
         api.ReorderTemplates supplierId [ secondId; firstId ] |> okOrFail "ReorderTemplates"
 
         let reread =
             api.GetTemplatesForSupplier supplierId
             |> okOrFail "GetTemplatesForSupplier"
-            |> List.sortBy (fun t -> t.Position)
+            |> List.sortBy (fun template -> template.Position)
 
-        Assert.Equal<string list>([ secondId; firstId ], reread |> List.map (fun t -> t.Id))
+        Assert.Equal<string list>([ secondId; firstId ], reread |> List.map (fun template -> template.Id))
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -199,7 +199,7 @@ let ``ReorderTemplates refuses an order naming the same template twice, as an Er
         api.AddTemplate { aTemplate supplierId with Name = "Second" } |> okOrFail "AddTemplate"
 
         let stored = api.GetTemplatesForSupplier supplierId |> okOrFail "GetTemplatesForSupplier"
-        let firstId = (stored |> List.find (fun t -> t.Name = "First")).Id
+        let firstId = (stored |> List.find (fun template -> template.Name = "First")).Id
 
         let actual = api.ReorderTemplates supplierId [ firstId; firstId ] |> errorOrFail "ReorderTemplates"
 
@@ -305,9 +305,9 @@ let ``a store failure reaches the UI as an Error and is written to the log exact
     let actual = api.GetTemplatesForSupplier "1"
 
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.getTemplatesForSupplier, ex.ActionName)
-        Assert.Equal("Failed to retrieve templates for supplier.", ex.Message)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Startup.TemplateApi.getTemplatesForSupplier, caughtException.ActionName)
+        Assert.Equal("Failed to retrieve templates for supplier.", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
     Assert.Single logged |> ignore
@@ -335,10 +335,10 @@ let ``TestTemplate runs the same engine a scan calls, over pasted text, and retu
         let expected: (string * string) list =
             [ "Reference", "INV-9001"; "Amount", "245.00"; "Currency", "AUD" ]
 
-        Assert.Equal<string list>(expected |> List.map fst, actual.FieldResults |> List.map (fun r -> r.Field))
+        Assert.Equal<string list>(expected |> List.map fst, actual.FieldResults |> List.map (fun fieldResult -> fieldResult.Field))
 
         for field, value in expected do
-            let row = actual.FieldResults |> List.find (fun r -> r.Field = field)
+            let row = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = field)
             Assert.True(row.Succeeded, $"{field} failed: {row.FailureReason}")
             Assert.Equal(value, row.ParsedValue)
             Assert.Equal(value, row.RawValue)
@@ -370,7 +370,7 @@ let ``TestTemplate honours the blank line a LinesAfterLabel offset must not step
                     { Template = template; SampleText = sampleText; SampleSubject = ""; SampleAttachmentFilename = "" }
                 |> okOrFail "TestTemplate"
 
-            actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+            actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
 
         // Label and value in one block: the offset lands inside it, so the rule reads the value.
         let withinOneBlock = run "Reference\nWU-88213"
@@ -414,11 +414,11 @@ let ``TestTemplate runs an attachment-scoped template whichever format it select
                       SampleAttachmentFilename = "invoice.doc" }
                 |> okOrFail $"TestTemplate ({format})"
 
-            let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+            let referenceResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
             Assert.True(referenceResult.Succeeded, $"{format}: Reference failed: {referenceResult.FailureReason}")
             Assert.Equal("INV-9001", referenceResult.ParsedValue)
 
-            let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+            let amountResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Amount")
             Assert.True(amountResult.Succeeded, $"{format}: Amount failed: {amountResult.FailureReason}")
             Assert.Equal("245.00", amountResult.ParsedValue)
     )
@@ -440,10 +440,10 @@ let ``TestTemplate runs an attachment-scoped template against the pasted sample 
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        let referenceResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
         Assert.True(referenceResult.Succeeded, $"Reference failed: {referenceResult.FailureReason}")
         Assert.Equal("INV-9001", referenceResult.ParsedValue)
-        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        let amountResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Amount")
         Assert.True(amountResult.Succeeded, $"Amount failed: {amountResult.FailureReason}")
         Assert.Equal("245.00", amountResult.ParsedValue)
     )
@@ -468,7 +468,7 @@ let ``TestTemplate matches an AttachmentName rule against the sample filename`` 
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        let referenceResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
         Assert.True(referenceResult.Succeeded, $"Reference failed: {referenceResult.FailureReason}")
         Assert.Equal("INV-9001", referenceResult.ParsedValue)
     )
@@ -492,7 +492,7 @@ let ``TestTemplate reports a failed field rather than a default when the sample 
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        let referenceResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
         Assert.False referenceResult.Succeeded
         Assert.False(String.IsNullOrWhiteSpace referenceResult.FailureReason)
     )
@@ -512,7 +512,7 @@ let ``TestTemplate reports only the fields the template carries a rule for`` () 
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], actual.FieldResults |> List.map (fun r -> r.Field))
+        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], actual.FieldResults |> List.map (fun fieldResult -> fieldResult.Field))
     )
 
 /// The other half of the rule above: a field the template DOES carry a rule for, whose rule found
@@ -533,10 +533,10 @@ let ``TestTemplate still reports an optional date rule that found nothing`` () =
 
         Assert.Equal<string list>(
             [ "Reference"; "Amount"; "Currency"; "IssueDate" ],
-            actual.FieldResults |> List.map (fun r -> r.Field)
+            actual.FieldResults |> List.map (fun fieldResult -> fieldResult.Field)
         )
 
-        let issueDateResult = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+        let issueDateResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "IssueDate")
         Assert.False issueDateResult.Succeeded
         Assert.Equal("No value extracted.", issueDateResult.FailureReason)
     )
@@ -555,7 +555,7 @@ let ``TestTemplate reports a rule that found nothing as a sentence, not a union 
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        let amountResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Amount")
         Assert.False amountResult.Succeeded
         Assert.Equal("The rule for Amount found nothing in the sample text.", amountResult.FailureReason)
     )
@@ -582,7 +582,7 @@ let ``TestTemplate names the sample subject when a SubjectCapture rule found not
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        let referenceResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
         Assert.False referenceResult.Succeeded
         Assert.Equal("The rule for Reference found nothing in the sample subject.", referenceResult.FailureReason)
     )
@@ -605,7 +605,7 @@ let ``TestTemplate names the sample attachment filename when an AttachmentName r
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let referenceResult = actual.FieldResults |> List.find (fun r -> r.Field = "Reference")
+        let referenceResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Reference")
         Assert.False referenceResult.Succeeded
 
         Assert.Equal(
@@ -633,7 +633,7 @@ let ``TestTemplate reports an empty FixedValue as an empty fixed value, not as t
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let currencyResult = actual.FieldResults |> List.find (fun r -> r.Field = "Currency")
+        let currencyResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Currency")
         Assert.False currencyResult.Succeeded
         Assert.Equal("The fixed value for Currency is empty.", currencyResult.FailureReason)
     )
@@ -656,7 +656,7 @@ let ``TestTemplate blames only the field the run stopped at, never the fields it
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let reasonFor field = (actual.FieldResults |> List.find (fun r -> r.Field = field)).FailureReason
+        let reasonFor field = (actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = field)).FailureReason
 
         Assert.Equal("The rule for Amount found nothing in the sample text.", reasonFor "Amount")
         Assert.Equal("Not reported: the run stopped at Amount.", reasonFor "Reference")
@@ -680,7 +680,7 @@ let ``TestTemplate reports empty sample text rather than raising`` () =
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
         Assert.Equal("", actual.NormalizedText)
-        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], actual.FieldResults |> List.map (fun r -> r.Field))
+        Assert.Equal<string list>([ "Reference"; "Amount"; "Currency" ], actual.FieldResults |> List.map (fun fieldResult -> fieldResult.Field))
 
         for field in actual.FieldResults do
             Assert.False(field.Succeeded, $"{field.Field} should not have succeeded against empty sample text")
@@ -714,7 +714,7 @@ let ``TestTemplate renders extracted dates as ISO whatever the machine's culture
 
             let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-            let issueDate = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+            let issueDate = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "IssueDate")
             Assert.True(issueDate.Succeeded, $"IssueDate failed: {issueDate.FailureReason}")
             Assert.Equal("2026-03-04", issueDate.ParsedValue)
             Assert.Equal("2026-03-04", issueDate.RawValue)
@@ -722,7 +722,7 @@ let ``TestTemplate renders extracted dates as ISO whatever the machine's culture
             // withApi's supplier carries a 30-day term, so the derived due date is 3 April - a
             // DIFFERENT date from its source, which is what keeps this asserting the rendering of a
             // derived value rather than the rendering of the issue date twice.
-            let dueDate = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+            let dueDate = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "DueDate")
             Assert.True(dueDate.Succeeded, $"DueDate failed: {dueDate.FailureReason}")
             Assert.Equal("2026-04-03", dueDate.ParsedValue)
         )
@@ -754,12 +754,12 @@ let ``TestTemplate derives a due date with the supplier's own payment term, not 
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let issueDate = actual.FieldResults |> List.find (fun r -> r.Field = "IssueDate")
+        let issueDate = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "IssueDate")
         Assert.True(issueDate.Succeeded, $"IssueDate failed: {issueDate.FailureReason}")
         Assert.Equal("2026-03-04", issueDate.ParsedValue)
 
         // withApi inserts its supplier with PaymentTermDays = 30. 4 March + 30 days = 3 April.
-        let dueDate = actual.FieldResults |> List.find (fun r -> r.Field = "DueDate")
+        let dueDate = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "DueDate")
         Assert.True(dueDate.Succeeded, $"DueDate failed: {dueDate.FailureReason}")
         Assert.Equal("2026-04-03", dueDate.ParsedValue)
         Assert.Equal("2026-04-03", dueDate.RawValue)
@@ -864,7 +864,7 @@ let ``TestTemplate reports an unreadable amount as a sentence quoting the text i
 
         let actual = api.TestTemplate input |> okOrFail "TestTemplate"
 
-        let amountResult = actual.FieldResults |> List.find (fun r -> r.Field = "Amount")
+        let amountResult = actual.FieldResults |> List.find (fun fieldResult -> fieldResult.Field = "Amount")
         Assert.False amountResult.Succeeded
         Assert.Equal("The rule for Amount found 'two hundred', which is not a number it can read.", amountResult.FailureReason)
     )

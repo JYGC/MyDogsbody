@@ -50,8 +50,8 @@ let private withDatabase (test: DatabaseContext -> unit) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
-        failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
+        failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 /// Inserts a supplier directly (bypassing SupplierStore, so this file has no cross-store
 /// dependency) and returns its row id as a string, ready for a template's SupplierId.
@@ -106,7 +106,7 @@ let ``insertOne stores a template and getForSupplier returns it with its id surf
         Assert.Equal("Monthly statement", TemplateName.value (ValidTemplate.name inserted.Template))
         Assert.Equal<TargetField list>(
             [ Reference; Amount; Currency ],
-            (ValidTemplate.rules inserted.Template) |> List.map (fun r -> r.Field)
+            (ValidTemplate.rules inserted.Template) |> List.map (fun rule -> rule.Field)
         )
 
         let stored =
@@ -122,7 +122,7 @@ let ``insertOne stores a template and getForSupplier returns it with its id surf
         Assert.Equal(TemplateId.value inserted.Id, TemplateId.value readBack.Id)
         Assert.Equal<TargetField list>(
             [ Reference; Amount; Currency ],
-            (ValidTemplate.rules readBack.Template) |> List.map (fun r -> r.Field)
+            (ValidTemplate.rules readBack.Template) |> List.map (fun rule -> rule.Field)
         )
     )
 
@@ -163,14 +163,14 @@ let ``insertOne and getForSupplier round trip every rule kind, target field and 
             |> List.exactlyOne
 
         let rules = ValidTemplate.rules readBack.Template
-        Assert.Equal<TargetField list>([ Reference; Amount; Currency; IssueDate; DueDate ], rules |> List.map (fun r -> r.Field))
-        Assert.Equal(RegexCapture @"INV-(\d+)", (rules |> List.find (fun r -> r.Field = Reference)).Rule)
-        Assert.Equal(LinesAfterLabel("Total", 1), (rules |> List.find (fun r -> r.Field = Amount)).Rule)
-        Assert.Equal(AsMoney ',', (rules |> List.find (fun r -> r.Field = Amount)).Hint)
-        Assert.Equal(FixedValue "AUD", (rules |> List.find (fun r -> r.Field = Currency)).Rule)
-        Assert.Equal(AfterLabel "Date:", (rules |> List.find (fun r -> r.Field = IssueDate)).Rule)
-        Assert.Equal(AsDate "d MMM yyyy", (rules |> List.find (fun r -> r.Field = IssueDate)).Hint)
-        Assert.Equal(DateFromField IssueDate, (rules |> List.find (fun r -> r.Field = DueDate)).Rule)
+        Assert.Equal<TargetField list>([ Reference; Amount; Currency; IssueDate; DueDate ], rules |> List.map (fun rule -> rule.Field))
+        Assert.Equal(RegexCapture @"INV-(\d+)", (rules |> List.find (fun rule -> rule.Field = Reference)).Rule)
+        Assert.Equal(LinesAfterLabel("Total", 1), (rules |> List.find (fun rule -> rule.Field = Amount)).Rule)
+        Assert.Equal(AsMoney ',', (rules |> List.find (fun rule -> rule.Field = Amount)).Hint)
+        Assert.Equal(FixedValue "AUD", (rules |> List.find (fun rule -> rule.Field = Currency)).Rule)
+        Assert.Equal(AfterLabel "Date:", (rules |> List.find (fun rule -> rule.Field = IssueDate)).Rule)
+        Assert.Equal(AsDate "d MMM yyyy", (rules |> List.find (fun rule -> rule.Field = IssueDate)).Hint)
+        Assert.Equal(DateFromField IssueDate, (rules |> List.find (fun rule -> rule.Field = DueDate)).Rule)
 
         let compiled = ValidTemplate.compiledPatterns readBack.Template
         let regexMatch = (Map.find Reference compiled).Match "INV-4471"
@@ -205,7 +205,7 @@ let ``updateOne changes the addressed row and a re-read reflects the replaced ru
 
         match updated with
         | Some stored ->
-            Assert.Equal(FixedValue "USD", (ValidTemplate.rules stored.Template |> List.find (fun r -> r.Field = Currency)).Rule)
+            Assert.Equal(FixedValue "USD", (ValidTemplate.rules stored.Template |> List.find (fun rule -> rule.Field = Currency)).Rule)
         | None -> Assert.Fail("Expected the row to be found")
 
         let reread =
@@ -219,7 +219,7 @@ let ``updateOne changes the addressed row and a re-read reflects the replaced ru
             |> List.exactlyOne
 
         Assert.Equal(3, (ValidTemplate.rules reread.Template).Length)
-        Assert.Equal(FixedValue "USD", (ValidTemplate.rules reread.Template |> List.find (fun r -> r.Field = Currency)).Rule)
+        Assert.Equal(FixedValue "USD", (ValidTemplate.rules reread.Template |> List.find (fun rule -> rule.Field = Currency)).Rule)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -338,11 +338,11 @@ let ``reorder persists the new order`` () =
                 context.GetTemplateFieldRules
                 (SupplierId.create supplierIdString |> valueOrFail)
             |> okOrFail "getForSupplier"
-            |> List.sortBy (fun t -> ValidTemplate.position t.Template)
+            |> List.sortBy (fun template -> ValidTemplate.position template.Template)
 
         Assert.Equal<string list>(
             [ TemplateId.value third.Id; TemplateId.value first.Id; TemplateId.value second.Id ],
-            reread |> List.map (fun t -> TemplateId.value t.Id)
+            reread |> List.map (fun template -> TemplateId.value template.Id)
         )
     )
 
@@ -445,10 +445,10 @@ let ``updateOne leaves the original row untouched when a field-rule insert fails
         Assert.Equal("Monthly statement", TemplateName.value (ValidTemplate.name reread.Template))
         Assert.Equal<TargetField list>(
             [ Reference; Amount; Currency ],
-            (ValidTemplate.rules reread.Template) |> List.map (fun r -> r.Field)
+            (ValidTemplate.rules reread.Template) |> List.map (fun rule -> rule.Field)
         )
-        Assert.Equal(AfterLabel "Invoice:", (ValidTemplate.rules reread.Template |> List.find (fun r -> r.Field = Reference)).Rule)
-        Assert.Equal(FixedValue "AUD", (ValidTemplate.rules reread.Template |> List.find (fun r -> r.Field = Currency)).Rule)
+        Assert.Equal(AfterLabel "Invoice:", (ValidTemplate.rules reread.Template |> List.find (fun rule -> rule.Field = Reference)).Rule)
+        Assert.Equal(FixedValue "AUD", (ValidTemplate.rules reread.Template |> List.find (fun rule -> rule.Field = Currency)).Rule)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -497,7 +497,7 @@ let ``reorder leaves every position untouched when a later id fails to parse par
                 context.GetTemplateFieldRules
                 (SupplierId.create supplierIdString |> valueOrFail)
             |> okOrFail "getForSupplier"
-            |> List.find (fun t -> t.Id = third.Id)
+            |> List.find (fun template -> template.Id = third.Id)
 
         // third's position must still be its ORIGINAL 2, not the 0 the aborted reorder attempted
         Assert.Equal(2, ValidTemplate.position rereadThird.Template)
@@ -521,10 +521,10 @@ let ``getForSupplier reports a MyDogsbodyException carrying its declared action 
     let actual = TemplateStore.getForSupplier recordingHandleError failingConnection failingTemplates failingRules aSupplierId
 
     match actual with
-    | Error ex ->
-        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.getForSupplier, ex.ActionName)
-        Assert.Equal("Failed to retrieve templates for supplier.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.getForSupplier, caughtException.ActionName)
+        Assert.Equal("Failed to retrieve templates for supplier.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -536,10 +536,10 @@ let ``insertOne reports a MyDogsbodyException carrying its declared action when 
     let actual = TemplateStore.insertOne recordingHandleError failingConnection failingTemplates failingRules aValidTemplate
 
     match actual with
-    | Error ex ->
-        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.insertOne, ex.ActionName)
-        Assert.Equal("Failed to insert new template.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.insertOne, caughtException.ActionName)
+        Assert.Equal("Failed to insert new template.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -552,10 +552,10 @@ let ``updateOne reports a MyDogsbodyException carrying its declared action when 
         TemplateStore.updateOne recordingHandleError failingConnection failingTemplates failingRules aTemplateId aValidTemplate
 
     match actual with
-    | Error ex ->
-        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.updateOne, ex.ActionName)
-        Assert.Equal("Failed to update existing template.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.updateOne, caughtException.ActionName)
+        Assert.Equal("Failed to update existing template.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -567,10 +567,10 @@ let ``deleteOne reports a MyDogsbodyException carrying its declared action when 
     let actual = TemplateStore.deleteOne recordingHandleError failingConnection failingTemplates aTemplateId
 
     match actual with
-    | Error ex ->
-        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.deleteOne, ex.ActionName)
-        Assert.Equal("Failed to delete existing template.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.deleteOne, caughtException.ActionName)
+        Assert.Equal("Failed to delete existing template.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -582,9 +582,9 @@ let ``reorder reports a MyDogsbodyException carrying its declared action when th
     let actual = TemplateStore.reorder recordingHandleError failingConnection failingTemplates aSupplierId [ aTemplateId ]
 
     match actual with
-    | Error ex ->
-        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.reorder, ex.ActionName)
-        Assert.Equal("Failed to persist the new template order.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.TemplateStore.reorder, caughtException.ActionName)
+        Assert.Equal("Failed to persist the new template order.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")

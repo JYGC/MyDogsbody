@@ -157,13 +157,13 @@ let private toTemplateFieldRuleUiType (rule: TemplateFieldRule) : TemplateFieldR
 /// Stops at the first unrecognised shape, the same way SupplierApiMappers.toUnvalidatedMatchers
 /// stops at the first invalid matcher.
 let private toUnvalidatedRules (rules: TemplateFieldRuleUiType list) : Result<TemplateFieldRule list, TemplateError> =
-    let rec loop remaining acc =
+    let rec loop remaining accumulatedRules =
         match remaining with
-        | [] -> Ok (List.rev acc)
+        | [] -> Ok (List.rev accumulatedRules)
         | uiRule :: rest ->
             match toTemplateFieldRule uiRule with
             | Error error -> Error error
-            | Ok rule -> loop rest (rule :: acc)
+            | Ok rule -> loop rest (rule :: accumulatedRules)
 
     loop rules []
 
@@ -253,7 +253,7 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
 
 /// Inbound: an adapter's exception becomes the one domain case that stands for infrastructure
 /// failure. The adapter's handleError has already logged it, so nothing logs again here.
-let toTemplateError (ex: MyDogsbodyException) : TemplateError = TemplateStoreFailed ex.Message
+let toTemplateError (caughtException: MyDogsbodyException) : TemplateError = TemplateStoreFailed caughtException.Message
 
 /// The other outbound translation: an InvoiceError becomes the sentence the test panel prints
 /// against a field. InvoiceError carries no ActionName and never reaches handleError in this

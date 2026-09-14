@@ -47,7 +47,7 @@ let getGoogleAccountsBrowserModule
             | Ok secret ->
                 clientSecretCval.Value <- secret
                 errorCval.Value <- None
-            | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message)
+            | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message)
 
     /// Loads the calendars for one account, so its picker shows that account's own list
     /// (requirements.md: "populate it from that account's own calendars"). A failure here does
@@ -63,9 +63,9 @@ let getGoogleAccountsBrowserModule
         startWork (fun () ->
             match googleAccountApi.GetCalendarsFor account.Id with
             | Ok calendars -> changeCalendars (Map.add account.Id calendars) (fun () -> errorCval.Value <- None)
-            | Error(ex: MyDogsbodyException) ->
+            | Error(caughtException: MyDogsbodyException) ->
                 transact (fun _ ->
-                    errorCval.Value <- Some $"Could not load the calendars for {account.EmailAddress}: {ex.Message}"))
+                    errorCval.Value <- Some $"Could not load the calendars for {account.EmailAddress}: {caughtException.Message}"))
 
     /// Reloads the accounts table, then the calendars for every account that has a usable
     /// credential - a NOT READY account's picker needs populating so a calendar can be chosen at
@@ -86,7 +86,7 @@ let getGoogleAccountsBrowserModule
                 | Ok accounts ->
                     accountsCval.Value <- accounts
                     errorCval.Value <- None
-                | Error(ex: MyDogsbodyException) -> errorCval.Value <- Some ex.Message
+                | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message
 
                 isLoadingCval.Value <- false)
 
@@ -119,9 +119,9 @@ let getGoogleAccountsBrowserModule
                 // has to finish before a failing fetch can set one.
                 reloadClientSecret ()
                 loadAccounts ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false))
 
     let registerAccount () =
@@ -135,9 +135,9 @@ let getGoogleAccountsBrowserModule
                     isRegisteringCval.Value <- false)
 
                 loadAccounts ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isRegisteringCval.Value <- false))
 
     let reauthoriseAccount (accountId: string) =
@@ -151,9 +151,9 @@ let getGoogleAccountsBrowserModule
                     isRegisteringCval.Value <- false)
 
                 loadAccounts ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isRegisteringCval.Value <- false))
 
     let removeAccount (accountId: string) =
@@ -165,9 +165,9 @@ let getGoogleAccountsBrowserModule
                 changeCalendars (Map.remove accountId) (fun () -> errorCval.Value <- None)
 
                 loadAccounts ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false))
 
     /// Runs a write that produces an updated account and reloads, so the table shows what was
@@ -181,9 +181,9 @@ let getGoogleAccountsBrowserModule
             | Ok _ ->
                 transact (fun _ -> errorCval.Value <- None)
                 loadAccounts ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false))
 
     // Opening the page: the secret, then the accounts and their calendars, in one work item for the

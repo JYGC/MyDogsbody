@@ -36,7 +36,7 @@ module GoogleEmail =
         else
             Ok (GoogleEmail trimmed)
 
-    let value (GoogleEmail e) = e
+    let value (GoogleEmail emailAddress) = emailAddress
 
 /// A calendar's id at Google. Opaque - it is Google's business what shape it has.
 type CalendarId = private CalendarId of string
@@ -62,7 +62,7 @@ module CalendarName =
         else
             Ok (CalendarName value)
 
-    let value (CalendarName n) = n
+    let value (CalendarName name) = name
 
 /// A calendar as Google lists it. The domain carries only what a person picks from.
 type AvailableCalendar =

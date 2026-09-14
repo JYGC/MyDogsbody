@@ -12,7 +12,7 @@ open MyDogsbody.UI.Types
 let windowLabel (days: int) : string =
     match days with
     | 1 -> "mail received in the last day"
-    | n -> $"mail received in the last {n} days"
+    | dayCount -> $"mail received in the last {dayCount} days"
 
 let toUiType (window: StoredScanWindow) : ScanWindowUiType =
     let days = ScanWindowDays.value window.Days

@@ -61,8 +61,8 @@ let runRealConsentFlow (clientSecretJson: string) (accountId: string) (dataStore
             try
                 use stream = new MemoryStream(Encoding.UTF8.GetBytes clientSecretJson)
                 GoogleClientSecrets.FromStream(stream).Secrets
-            with ex ->
-                raise (FormatException("The client secret is not a Google OAuth client secret.", ex))
+            with caughtException ->
+                raise (FormatException("The client secret is not a Google OAuth client secret.", caughtException))
 
         use cts = new CancellationTokenSource(consentTimeout)
         return! GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes, accountId, cts.Token, dataStore)
@@ -134,12 +134,14 @@ let authoriseWith
                 // "invalid_client" for a wrong or rotated client_secret) happened AFTER the user
                 // consented, so it is not their choice to report back to them; it falls to the
                 // logged catch-all below, which keeps Google's code in the inner exception.
-                | :? TokenResponseException as ex when not (isNull ex.Error) && ex.Error.Error = "access_denied" ->
-                    Error(MyDogsbodyException(action, "The consent flow was cancelled or denied.", ex))
-                | :? Newtonsoft.Json.JsonException as ex ->
-                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
-                | :? FormatException as ex ->
-                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
+                | :? TokenResponseException as caughtAccessDeniedException when
+                    not (isNull caughtAccessDeniedException.Error) && caughtAccessDeniedException.Error.Error = "access_denied"
+                    ->
+                    Error(MyDogsbodyException(action, "The consent flow was cancelled or denied.", caughtAccessDeniedException))
+                | :? Newtonsoft.Json.JsonException as caughtJsonException ->
+                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", caughtJsonException))
+                | :? FormatException as caughtFormatException ->
+                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", caughtFormatException))
 
             // Completing consent is not the same as granting what was asked for. Google's granular
             // consent screen gives the calendar scope its own checkbox - a sign-in scope plus a
@@ -177,12 +179,12 @@ let authoriseWith
 
             return email, accountId
         with
-        | :? HttpListenerException as ex ->
-            return! MyDogsbodyException(action, "The loopback port is already in use.", ex)
-        | :? OperationCanceledException as ex ->
-            return! MyDogsbodyException(action, "The consent flow timed out.", ex)
-        | ex ->
-            return! MyDogsbodyException(action, "Authorisation failed.", ex)
+        | :? HttpListenerException as caughtHttpListenerException ->
+            return! MyDogsbodyException(action, "The loopback port is already in use.", caughtHttpListenerException)
+        | :? OperationCanceledException as caughtOperationCanceledException ->
+            return! MyDogsbodyException(action, "The consent flow timed out.", caughtOperationCanceledException)
+        | caughtException ->
+            return! MyDogsbodyException(action, "Authorisation failed.", caughtException)
     }
 
 /// Deletes the stored token for an account being removed (requirements.md: "deletes its local
@@ -208,8 +210,8 @@ let removeStoredToken
             let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
             dataStore.DeleteAsync<TokenResponse>(accountId) |> Async.AwaitTask |> Async.RunSynchronously
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to delete the stored Google credential.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to delete the stored Google credential.", caughtException)
     }
 
 /// `authoriseWith` for an account that does not exist yet, under an id minted for it - plus the
@@ -242,9 +244,9 @@ let authoriseNewAccountWith
     : Result<string * string, MyDogsbodyException> =
     match authoriseWith handleError getCredentialCollection runConsentFlow fetchAccountEmail clientSecretJson accountId () with
     | Ok authorised -> Ok authorised
-    | Error ex ->
+    | Error authorisationException ->
         removeStoredToken handleError getCredentialCollection accountId |> ignore
-        Error ex
+        Error authorisationException
 
 /// The composition root's entry point for registering a new account - the real consent flow and
 /// the real email fetch, bound, with a freshly minted account id whose token is handed back if
@@ -316,8 +318,8 @@ let loadCredential
                 try
                     use stream = new MemoryStream(Encoding.UTF8.GetBytes clientSecretJson)
                     Ok (GoogleClientSecrets.FromStream(stream).Secrets)
-                with ex ->
-                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", ex))
+                with caughtException ->
+                    Error(MyDogsbodyException(action, "The stored Google client secret is malformed.", caughtException))
 
             let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
 
@@ -341,6 +343,6 @@ let loadCredential
                     Ok stored
 
             return UserCredential(flow, accountId, storedToken)
-        with ex ->
-            return! MyDogsbodyException(action, "Authorisation failed.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Authorisation failed.", caughtException)
     }

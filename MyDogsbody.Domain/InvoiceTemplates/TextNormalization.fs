@@ -22,7 +22,7 @@ let private specialSpaces =
     ]
 
 let private foldSpecialSpaces (text: string) : string =
-    String(text.ToCharArray() |> Array.map (fun c -> if specialSpaces.Contains c then ' ' else c))
+    String(text.ToCharArray() |> Array.map (fun character -> if specialSpaces.Contains character then ' ' else character))
 
 /// Runs of plain spaces and tabs collapsed to one space. Only recognises ' ' and '\t' - it must
 /// run after NFKC, which is what turns a non-breaking space into a plain space (and therefore
@@ -36,11 +36,11 @@ let private foldSpecialSpaces (text: string) : string =
 let private collapseRuns (text: string) : string =
     let collapsed, _ =
         (([], false), text)
-        ||> Seq.fold (fun (accumulated, previousWasSpace) c ->
-            if c = ' ' || c = '\t' then
+        ||> Seq.fold (fun (accumulated, previousWasSpace) character ->
+            if character = ' ' || character = '\t' then
                 (if previousWasSpace then accumulated else ' ' :: accumulated), true
             else
-                c :: accumulated, false)
+                character :: accumulated, false)
 
     String(collapsed |> List.rev |> List.toArray)
 
@@ -76,7 +76,7 @@ let private normalizeText (text: string) : string =
         with :? ArgumentException ->
             safe
 
-    composed |> foldSpecialSpaces |> collapseRuns |> fun s -> s.Trim()
+    composed |> foldSpecialSpaces |> collapseRuns |> fun trimmedText -> trimmedText.Trim()
 
 /// One normalized line, together with the lines the document actually laid out to produce it.
 ///
@@ -110,17 +110,17 @@ let normalizeGrouped (lines: TextLine list) : NormalizedLine list =
     lines
     |> List.map (fun line -> { Line = { line with Text = normalizeText line.Text }; Segments = [] })
     |> List.fold
-        (fun acc (grouped: NormalizedLine) ->
+        (fun accumulatedGroupedLines (grouped: NormalizedLine) ->
             let line = grouped.Line
 
-            match acc with
+            match accumulatedGroupedLines with
             | previous :: rest when
                 previous.Line.BlockIndex = line.BlockIndex && isContinuation previous.Line.Text line.Text
                 ->
                 { Line = { previous.Line with Text = previous.Line.Text + " " + line.Text }
                   Segments = previous.Segments @ [ line ] }
                 :: rest
-            | _ -> { grouped with Segments = [ line ] } :: acc)
+            | _ -> { grouped with Segments = [ line ] } :: accumulatedGroupedLines)
         []
     |> List.rev
     |> List.filter (fun grouped -> not (String.IsNullOrEmpty grouped.Line.Text))

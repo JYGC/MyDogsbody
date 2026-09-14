@@ -29,7 +29,7 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
             use stream = new MemoryStream(source.Content)
             use document = WordprocessingDocument.Open(stream, false)
 
-            match Option.ofObj document.MainDocumentPart |> Option.bind (fun p -> Option.ofObj p.Document) with
+            match Option.ofObj document.MainDocumentPart |> Option.bind (fun mainDocumentPart -> Option.ofObj mainDocumentPart.Document) with
             | None -> Error(DocumentUnreadable "The document has no main part.")
             | Some root ->
                 // One paragraph is one block: a wrapped line inside a paragraph belongs with its
@@ -42,5 +42,5 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
                     |> Seq.toList
 
                 Ok lines
-        with ex ->
-            Error(DocumentUnreadable ex.Message)
+        with caughtException ->
+            Error(DocumentUnreadable caughtException.Message)

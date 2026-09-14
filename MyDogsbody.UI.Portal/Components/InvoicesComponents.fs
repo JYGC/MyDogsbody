@@ -9,7 +9,7 @@ open MyDogsbody.UI.Types.Module
 
 let private formatDate (value: DateTime option) =
     match value with
-    | Some d -> d.ToString("d MMM yyyy")
+    | Some date -> date.ToString("d MMM yyyy")
     | None -> "-"
 
 /// The window picker. A MudSelect, NOT a fixed MudToggleGroup - the number of windows is unknown
@@ -22,10 +22,10 @@ let private windowSelect (windows: ScanWindowUiType list) (selectedDays: int) (o
         ValueChanged(fun (days: int) -> onSelect days)
 
         fragment {
-            for w in windows do
+            for window in windows do
                 MudSelectItem'<int>() {
-                    Value w.Days
-                    w.Label
+                    Value window.Days
+                    window.Label
                 }
         }
     }
@@ -34,22 +34,22 @@ let private windowSelect (windows: ScanWindowUiType list) (selectedDays: int) (o
 /// ledger (instant); "Scan now" reads the mailbox resuming from watermarks (task 12.4 measured
 /// ~60 s, so it is never automatic); "Rescan everything" discards the watermarks first, for mail
 /// a plain scan resumes straight past (a folder read before its supplier existed).
-let private windowPicker (m: InvoicesModule) =
+let private windowPicker (invoicesModule: InvoicesModule) =
     adapt {
-        let! windows = m.ScanWindowsAval
-        let! selectedDays = m.SelectedWindowDaysAval
-        let! isScanning = m.IsScanningAval
+        let! windows = invoicesModule.ScanWindowsAval
+        let! selectedDays = invoicesModule.SelectedWindowDaysAval
+        let! isScanning = invoicesModule.IsScanningAval
 
         div {
             style' "display:flex; gap:1rem; align-items:flex-end"
-            windowSelect windows selectedDays m.SelectWindow
+            windowSelect windows selectedDays invoicesModule.SelectWindow
 
             MudButton'' {
                 Variant Variant.Filled
                 Color Color.Primary
                 StartIcon Icons.Material.Filled.Refresh
                 Disabled isScanning
-                OnClick(fun _ -> m.Rescan())
+                OnClick(fun _ -> invoicesModule.Rescan())
                 "Scan now"
             }
 
@@ -58,23 +58,23 @@ let private windowPicker (m: InvoicesModule) =
                 Color Color.Primary
                 StartIcon Icons.Material.Filled.RestartAlt
                 Disabled isScanning
-                OnClick(fun _ -> m.RescanEverything())
+                OnClick(fun _ -> invoicesModule.RescanEverything())
                 "Rescan everything"
             }
         }
     }
 
 /// "37 invoice(s), mail received in the last 90 days" - the count and window above the table.
-let private countLine (m: InvoicesModule) =
+let private countLine (invoicesModule: InvoicesModule) =
     adapt {
-        let! invoices = m.InvoicesAval
-        let! windows = m.ScanWindowsAval
-        let! selectedDays = m.SelectedWindowDaysAval
+        let! invoices = invoicesModule.InvoicesAval
+        let! windows = invoicesModule.ScanWindowsAval
+        let! selectedDays = invoicesModule.SelectedWindowDaysAval
 
         let label =
             windows
-            |> List.tryFind (fun w -> w.Days = selectedDays)
-            |> Option.map (fun w -> w.Label)
+            |> List.tryFind (fun window -> window.Days = selectedDays)
+            |> Option.map (fun window -> window.Label)
             |> Option.defaultValue $"the last {selectedDays} days"
 
         MudText'' {
@@ -83,9 +83,9 @@ let private countLine (m: InvoicesModule) =
         }
     }
 
-let private errorAlert (m: InvoicesModule) =
+let private errorAlert (invoicesModule: InvoicesModule) =
     adapt {
-        let! error = m.ErrorAval
+        let! error = invoicesModule.ErrorAval
 
         match error with
         | Some message ->
@@ -99,15 +99,15 @@ let private errorAlert (m: InvoicesModule) =
     }
 
 /// The invoices table with the window picker and the count line above it.
-let invoicesTable (m: InvoicesModule) (confirmAndDelete: InvoiceUiType -> unit) =
+let invoicesTable (invoicesModule: InvoicesModule) (confirmAndDelete: InvoiceUiType -> unit) =
     fragment {
-        errorAlert m
-        windowPicker m
-        countLine m
+        errorAlert invoicesModule
+        windowPicker invoicesModule
+        countLine invoicesModule
 
         adapt {
-            let! invoices = m.InvoicesAval
-            let! isScanning = m.IsScanningAval
+            let! invoices = invoicesModule.InvoicesAval
+            let! isScanning = invoicesModule.IsScanningAval
 
             MudTable'' {
                 Items invoices
@@ -172,9 +172,9 @@ let invoicesTable (m: InvoicesModule) (confirmAndDelete: InvoiceUiType -> unit) 
     }
 
 /// The problems view: sender, subject, date and cause per row.
-let problemsView (m: InvoicesModule) =
+let problemsView (invoicesModule: InvoicesModule) =
     adapt {
-        let! problems = m.ProblemsAval
+        let! problems = invoicesModule.ProblemsAval
 
         MudTable'' {
             Items problems
@@ -205,10 +205,10 @@ let problemsView (m: InvoicesModule) =
         }
     }
 
-/// The tombstones view with an un-delete. The page calls m.LoadTombstones() when this tab opens.
-let tombstonesView (m: InvoicesModule) =
+/// The tombstones view with an un-delete. The page calls invoicesModule.LoadTombstones() when this tab opens.
+let tombstonesView (invoicesModule: InvoicesModule) =
     adapt {
-        let! tombstones = m.TombstonesAval
+        let! tombstones = invoicesModule.TombstonesAval
 
         MudTable'' {
             Items tombstones
@@ -235,7 +235,7 @@ let tombstonesView (m: InvoicesModule) =
                         MudButton'' {
                             Variant Variant.Text
                             Color Color.Primary
-                            OnClick(fun _ -> m.UndeleteInvoice tombstone.SupplierId tombstone.Reference)
+                            OnClick(fun _ -> invoicesModule.UndeleteInvoice tombstone.SupplierId tombstone.Reference)
                             "Un-delete"
                         }
                     }

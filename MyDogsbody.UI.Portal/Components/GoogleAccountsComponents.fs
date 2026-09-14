@@ -45,12 +45,12 @@ let confirmAndRemove (dialogService: IDialogService) (removeAccount: string -> u
     |> ignore
 
 let googleAccountsBrowser
-    (m: GoogleAccountsBrowserModule)
+    (googleAccountsBrowserModule: GoogleAccountsBrowserModule)
     (confirmAndRemove: GoogleAccountUiType -> unit)
     =
     fragment {
         adapt {
-            let! error = m.ErrorAval
+            let! error = googleAccountsBrowserModule.ErrorAval
 
             match error with
             | Some message ->
@@ -63,8 +63,8 @@ let googleAccountsBrowser
             | None -> ()
         }
         adapt {
-            let! secret = m.ClientSecretAval
-            let! isEditing = m.IsEditingClientSecretAval
+            let! secret = googleAccountsBrowserModule.ClientSecretAval
+            let! isEditing = googleAccountsBrowserModule.IsEditingClientSecretAval
 
             if isEditing then
                 // requirements.md: pre-filled with the currently stored value, so a correction
@@ -91,17 +91,17 @@ let googleAccountsBrowser
                                 Label "Client secret (JSON)"
                                 Lines 3
                                 Value(secret |> Option.defaultValue "")
-                                ValueChanged(fun (v: string) -> editedSecret <- v)
+                                ValueChanged(fun (editedSecretText: string) -> editedSecret <- editedSecretText)
                             }
                             MudButton'' {
                                 Variant Variant.Filled
                                 Color Color.Primary
-                                OnClick(fun _ -> m.SetClientSecret editedSecret)
+                                OnClick(fun _ -> googleAccountsBrowserModule.SetClientSecret editedSecret)
                                 "Save"
                             }
                             MudButton'' {
                                 Variant Variant.Text
-                                OnClick(fun _ -> m.CancelEditingClientSecret())
+                                OnClick(fun _ -> googleAccountsBrowserModule.CancelEditingClientSecret())
                                 "Cancel"
                             }
                         }
@@ -120,7 +120,7 @@ let googleAccountsBrowser
                                 Variant Variant.Filled
                                 Color Color.Primary
                                 class' "pt-2"
-                                OnClick(fun _ -> m.StartEditingClientSecret())
+                                OnClick(fun _ -> googleAccountsBrowserModule.StartEditingClientSecret())
                                 "Add client secret"
                             }
                         }
@@ -140,14 +140,14 @@ let googleAccountsBrowser
                         }
                         MudButton'' {
                             Variant Variant.Text
-                            OnClick(fun _ -> m.StartEditingClientSecret())
+                            OnClick(fun _ -> googleAccountsBrowserModule.StartEditingClientSecret())
                             "Edit"
                         }
                     }
         }
         adapt {
-            let! secret = m.ClientSecretAval
-            let! isRegistering = m.IsRegisteringAval
+            let! secret = googleAccountsBrowserModule.ClientSecretAval
+            let! isRegistering = googleAccountsBrowserModule.IsRegisteringAval
             let buttonText = if isRegistering then "Adding account..." else "Add account"
 
             MudButton'' {
@@ -155,14 +155,14 @@ let googleAccountsBrowser
                 Color Color.Secondary
                 class' "py-2"
                 Disabled(secret.IsNone || isRegistering)
-                OnClick(fun _ -> m.RegisterAccount())
+                OnClick(fun _ -> googleAccountsBrowserModule.RegisterAccount())
                 buttonText
             }
         }
         adapt {
-            let! accounts = m.AccountsAval
-            let! calendarsByAccountId = m.CalendarsByAccountIdAval
-            let! isLoading = m.IsLoadingAval
+            let! accounts = googleAccountsBrowserModule.AccountsAval
+            let! calendarsByAccountId = googleAccountsBrowserModule.CalendarsByAccountIdAval
+            let! isLoading = googleAccountsBrowserModule.IsLoadingAval
 
             MudTable'' {
                 Items accounts
@@ -211,7 +211,7 @@ let googleAccountsBrowser
                                         Value(account.DefaultInvoiceCalendarId |> Option.defaultValue "")
                                         ValueChanged(fun (calendarId: string) ->
                                             if not (System.String.IsNullOrEmpty calendarId) then
-                                                m.SetDefaultInvoiceCalendar account.Id calendarId)
+                                                googleAccountsBrowserModule.SetDefaultInvoiceCalendar account.Id calendarId)
                                         fragment {
                                             for calendar in calendars do
                                                 let label = if calendar.IsPrimary then $"{calendar.Name} (primary)" else calendar.Name
@@ -258,7 +258,7 @@ let googleAccountsBrowser
                                         Variant Variant.Text
                                         Size Size.Small
                                         Color Color.Warning
-                                        OnClick(fun _ -> m.ReauthoriseAccount account.Id)
+                                        OnClick(fun _ -> googleAccountsBrowserModule.ReauthoriseAccount account.Id)
                                         "Re-authorise"
                                     }
                                 MudButton'' {

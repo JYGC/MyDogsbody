@@ -41,15 +41,15 @@ type InvoicesHarness
 /// empty Thunderbird LiteDB. component -> API record -> workflow -> adapter -> file -> back.
 let withInvoicesHarness (test: InvoicesHarness -> unit) =
     let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let thunderbirdDatabasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let connectionString = $"Data Source={mainPath}"
     MigrationSetup.setupMigrations connectionString
     let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
-    let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
+    let thunderbirdDatabaseContext = ThunderbirdDatabaseContextModule.getDatabaseContext thunderbirdDatabasePath "direct"
     let logged = ResizeArray<MyDogsbodyException>()
     let handleError = HandleErrorBuilder logged.Add
     let clock () = DateTime(2026, 6, 15, 12, 0, 0)
-    let invoiceApi = InvoiceApiFactory.createInvoiceApi handleError clock mainContext tbContext
+    let invoiceApi = InvoiceApiFactory.createInvoiceApi handleError clock mainContext thunderbirdDatabaseContext
     let scanWindowApi = ScanWindowApiFactory.createScanWindowApi handleError mainContext
     let harness = new InvoicesHarness(invoiceApi, scanWindowApi, connectionString, logged)
 
@@ -58,9 +58,9 @@ let withInvoicesHarness (test: InvoicesHarness -> unit) =
     finally
         harness.Dispose()
         mainContext.Dispose()
-        tbContext.Dispose()
+        thunderbirdDatabaseContext.Dispose()
         try File.Delete mainPath with _ -> ()
-        try File.Delete tbPath with _ -> ()
+        try File.Delete thunderbirdDatabasePath with _ -> ()
 
 /// The same over an API whose store cannot be reached, for the failure flow.
 let withUnreachableInvoiceStoreHarness (test: InvoicesHarness -> unit) =
@@ -83,9 +83,9 @@ let withUnreachableInvoiceStoreHarness (test: InvoicesHarness -> unit) =
           GetInvoiceSettings = fun () -> failwith "x"
           Dispose = fun () -> () }
 
-    let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
-    let invoiceApi = InvoiceApiFactory.createInvoiceApi handleError clock broken tbContext
+    let thunderbirdDatabasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
+    let thunderbirdDatabaseContext = ThunderbirdDatabaseContextModule.getDatabaseContext thunderbirdDatabasePath "direct"
+    let invoiceApi = InvoiceApiFactory.createInvoiceApi handleError clock broken thunderbirdDatabaseContext
     let scanWindowApi = ScanWindowApiFactory.createScanWindowApi handleError broken
     let harness = new InvoicesHarness(invoiceApi, scanWindowApi, "", logged)
 
@@ -93,5 +93,5 @@ let withUnreachableInvoiceStoreHarness (test: InvoicesHarness -> unit) =
         test harness
     finally
         harness.Dispose()
-        tbContext.Dispose()
-        try File.Delete tbPath with _ -> ()
+        thunderbirdDatabaseContext.Dispose()
+        try File.Delete thunderbirdDatabasePath with _ -> ()

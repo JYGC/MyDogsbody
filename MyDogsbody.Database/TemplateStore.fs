@@ -108,28 +108,28 @@ let getForSupplier
 
             let templateRows =
                 select {
-                    for t in getInvoiceTemplates () do
-                    where (t.SupplierId = supplierRowId)
+                    for templateRow in getInvoiceTemplates () do
+                    where (templateRow.SupplierId = supplierRowId)
                 }
                 |> connection.SelectAsync<InvoiceTemplateRecord>
                 |> runSync
                 |> Seq.toList
 
-            let templateIds = templateRows |> List.map (fun t -> t.Id) |> Set.ofList
+            let templateIds = templateRows |> List.map (fun templateRow -> templateRow.Id) |> Set.ofList
 
             // One query for every field rule, grouped in memory, rather than one query per
             // template - getForSupplier runs on every page load and after every write, the same
             // reasoning as SupplierStore.getAll's matcher loading.
             let ruleRowsByTemplateId =
                 select {
-                    for r in getTemplateFieldRules () do
+                    for fieldRuleRow in getTemplateFieldRules () do
                     selectAll
                 }
                 |> connection.SelectAsync<TemplateFieldRuleRecord>
                 |> runSync
                 |> Seq.toList
-                |> List.filter (fun r -> templateIds.Contains r.TemplateId)
-                |> List.groupBy (fun r -> r.TemplateId)
+                |> List.filter (fun fieldRuleRow -> templateIds.Contains fieldRuleRow.TemplateId)
+                |> List.groupBy (fun fieldRuleRow -> fieldRuleRow.TemplateId)
                 |> Map.ofList
 
             return
@@ -137,8 +137,8 @@ let getForSupplier
                 |> List.map (fun row ->
                     let ruleRows = ruleRowsByTemplateId |> Map.tryFind row.Id |> Option.defaultValue []
                     TemplateRecordMappers.toStoredTemplate row ruleRows |> mapOrRaise)
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve templates for supplier.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve templates for supplier.", caughtException)
     }
 
 let insertOne
@@ -176,8 +176,8 @@ let insertOne
                     { newRecord with Id = insertedId }
                     (ValidTemplate.rules template |> List.map (TemplateRecordMappers.toNewTemplateFieldRuleRecord insertedId))
                 |> mapOrRaise
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to insert new template.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to insert new template.", caughtException)
     }
 
 /// Ok None means no row carried that identifier. Reporting it rather than silently succeeding is
@@ -199,8 +199,8 @@ let updateOne
 
             let existing =
                 select {
-                    for t in getInvoiceTemplates () do
-                    where (t.Id = rowId)
+                    for templateRow in getInvoiceTemplates () do
+                    where (templateRow.Id = rowId)
                 }
                 |> connection.SelectAsync<InvoiceTemplateRecord>
                 |> runSync
@@ -214,13 +214,13 @@ let updateOne
 
                 inTransaction connection (fun transaction ->
                     update {
-                        for t in getInvoiceTemplates () do
-                        setColumn t.SupplierId supplierRowId
-                        setColumn t.Name (TemplateName.value (ValidTemplate.name template))
-                        setColumn t.DocumentPart documentPart
-                        setColumn t.AttachmentFormat attachmentFormat
-                        setColumn t.Position (ValidTemplate.position template)
-                        where (t.Id = rowId)
+                        for templateRow in getInvoiceTemplates () do
+                        setColumn templateRow.SupplierId supplierRowId
+                        setColumn templateRow.Name (TemplateName.value (ValidTemplate.name template))
+                        setColumn templateRow.DocumentPart documentPart
+                        setColumn templateRow.AttachmentFormat attachmentFormat
+                        setColumn templateRow.Position (ValidTemplate.position template)
+                        where (templateRow.Id = rowId)
                     }
                     |> fun query -> connection.UpdateAsync(query, transaction)
                     |> runSync
@@ -230,8 +230,8 @@ let updateOne
                     // the submitted list inserted fresh, matching EditTemplateWorkflow's own
                     // replace-not-merge behaviour at the storage level too.
                     delete {
-                        for r in getTemplateFieldRules () do
-                        where (r.TemplateId = rowId)
+                        for fieldRuleRow in getTemplateFieldRules () do
+                        where (fieldRuleRow.TemplateId = rowId)
                     }
                     |> fun query -> connection.DeleteAsync(query, transaction)
                     |> runSync
@@ -260,8 +260,8 @@ let updateOne
                         (ValidTemplate.rules template |> List.map (TemplateRecordMappers.toNewTemplateFieldRuleRecord rowId))
                     |> mapOrRaise
                     |> Some
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to update existing template.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to update existing template.", caughtException)
     }
 
 /// True when a row carried that identifier and was removed; false when it did not. Field rules
@@ -282,8 +282,8 @@ let deleteOne
 
             let existing =
                 select {
-                    for t in getInvoiceTemplates () do
-                    where (t.Id = rowId)
+                    for templateRow in getInvoiceTemplates () do
+                    where (templateRow.Id = rowId)
                 }
                 |> connection.SelectAsync<InvoiceTemplateRecord>
                 |> runSync
@@ -293,16 +293,16 @@ let deleteOne
             | None -> return false
             | Some _ ->
                 delete {
-                    for t in getInvoiceTemplates () do
-                    where (t.Id = rowId)
+                    for templateRow in getInvoiceTemplates () do
+                    where (templateRow.Id = rowId)
                 }
                 |> connection.DeleteAsync
                 |> runSync
                 |> ignore
 
                 return true
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to delete existing template.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to delete existing template.", caughtException)
     }
 
 /// Persists a new Position for every template named, atomically - a failure partway through
@@ -330,15 +330,15 @@ let reorder
                     let rowId = TemplateRecordMappers.toRowId templateId
 
                     update {
-                        for t in getInvoiceTemplates () do
-                        setColumn t.Position index
-                        where (t.Id = rowId && t.SupplierId = supplierRowId)
+                        for templateRow in getInvoiceTemplates () do
+                        setColumn templateRow.Position index
+                        where (templateRow.Id = rowId && templateRow.SupplierId = supplierRowId)
                     }
                     |> fun query -> connection.UpdateAsync(query, transaction)
                     |> runSync
                     |> ignore))
 
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to persist the new template order.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to persist the new template order.", caughtException)
     }

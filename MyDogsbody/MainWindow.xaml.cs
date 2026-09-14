@@ -19,16 +19,16 @@ namespace MyDogsbody
             InitializeComponent();
             var serviceCollection = new ServiceCollection();
             serviceCollection.AddWpfBlazorWebView();
-            serviceCollection.AddMudServices(config =>
+            serviceCollection.AddMudServices(configuration =>
             {
-                config.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.TopRight;
-                config.SnackbarConfiguration.PreventDuplicates = false;
-                config.SnackbarConfiguration.NewestOnTop = false;
-                config.SnackbarConfiguration.ShowCloseIcon = true;
-                config.SnackbarConfiguration.VisibleStateDuration = 5000;
-                config.SnackbarConfiguration.HideTransitionDuration = 500;
-                config.SnackbarConfiguration.ShowTransitionDuration = 500;
-                config.SnackbarConfiguration.SnackbarVariant = Variant.Filled;
+                configuration.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.TopRight;
+                configuration.SnackbarConfiguration.PreventDuplicates = false;
+                configuration.SnackbarConfiguration.NewestOnTop = false;
+                configuration.SnackbarConfiguration.ShowCloseIcon = true;
+                configuration.SnackbarConfiguration.VisibleStateDuration = 5000;
+                configuration.SnackbarConfiguration.HideTransitionDuration = 500;
+                configuration.SnackbarConfiguration.ShowTransitionDuration = 500;
+                configuration.SnackbarConfiguration.SnackbarVariant = Variant.Filled;
             });
             // Every application service is registered by the F# composition root, so this
             // file states that services exist without stating how they are built.

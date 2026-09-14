@@ -17,12 +17,12 @@ let private failure message =
 let private aSupplier id : SupplierUiType =
     { Id = id; Name = $"Supplier {id}"; PaymentTermDays = 30; Matchers = [] }
 
-let private api getAll add edit delete : SupplierApi =
+let private api getAllSuppliers addSupplier editSupplier deleteSupplier : SupplierApi =
     {
-        GetAllSuppliers = getAll
-        AddSupplier = add
-        EditSupplier = edit
-        DeleteSupplier = delete
+        GetAllSuppliers = getAllSuppliers
+        AddSupplier = addSupplier
+        EditSupplier = editSupplier
+        DeleteSupplier = deleteSupplier
     }
 
 [<Fact; Trait("Level", "Unit")>]

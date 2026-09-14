@@ -13,20 +13,20 @@ namespace MyDogsbody.Domain
 /// here is a discriminated union case and was never an exception in the first place.
 type ResultBuilder() =
 
-    member _.Bind(m: Result<'T, 'TError>, f: 'T -> Result<'U, 'TError>) : Result<'U, 'TError> =
-        match m with
-        | Ok value -> f value
+    member _.Bind(priorResult: Result<'T, 'TError>, continuation: 'T -> Result<'U, 'TError>) : Result<'U, 'TError> =
+        match priorResult with
+        | Ok value -> continuation value
         | Error error -> Error error
 
     member _.Return(value: 'T) : Result<'T, 'TError> = Ok value
 
-    member _.ReturnFrom(m: Result<'T, 'TError>) : Result<'T, 'TError> = m
+    member _.ReturnFrom(existingResult: Result<'T, 'TError>) : Result<'T, 'TError> = existingResult
 
     member this.Zero() : Result<unit, 'TError> = this.Return()
 
-    member _.Delay(f: unit -> Result<'T, 'TError>) = f
+    member _.Delay(generateResult: unit -> Result<'T, 'TError>) = generateResult
 
-    member _.Run(f: unit -> Result<'T, 'TError>) : Result<'T, 'TError> = f ()
+    member _.Run(generateResult: unit -> Result<'T, 'TError>) : Result<'T, 'TError> = generateResult ()
 
 [<AutoOpen>]
 module ResultBuilderInstance =

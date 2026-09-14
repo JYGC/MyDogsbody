@@ -225,7 +225,7 @@ let ``the accounts table states each account's on-disk size and what a scan of i
         rendered.WaitForAssertion(fun () -> Assert.Contains("Alpha Mail", rendered.Markup))
 
         let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
-        let alpha = accounts |> List.find (fun a -> a.DisplayName = "Alpha Mail")
+        let alpha = accounts |> List.find (fun mailAccount -> mailAccount.DisplayName = "Alpha Mail")
 
         let total = MailAccountsComponents.accountSizeBytes alpha
         let scannable = MailAccountsComponents.scannableSizeBytes alpha
@@ -254,14 +254,14 @@ let ``a message count survives the next scan and keeps the time it was taken`` (
 
         let alphaId =
             let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
-            (accounts |> List.find (fun a -> a.DisplayName = "Alpha Mail")).Id
+            (accounts |> List.find (fun mailAccount -> mailAccount.DisplayName = "Alpha Mail")).Id
 
         browserModule.CountMessages alphaId
 
         // The figure the fixture's alpha account actually holds, rendered with its timestamp.
         let counted =
             let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
-            accounts |> List.find (fun a -> a.Id = alphaId)
+            accounts |> List.find (fun mailAccount -> mailAccount.Id = alphaId)
 
         let takenAt =
             match counted.CachedMessageCount with
@@ -280,7 +280,7 @@ let ``a message count survives the next scan and keeps the time it was taken`` (
             Assert.Contains(rendersAs, rendered.Markup)
 
             let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
-            let alphaAfter = accounts |> List.find (fun a -> a.Id = alphaId)
+            let alphaAfter = accounts |> List.find (fun mailAccount -> mailAccount.Id = alphaId)
             Assert.Equal(Some(4, takenAt), alphaAfter.CachedMessageCount))
 
         Assert.Empty harness.Logged)
@@ -406,7 +406,7 @@ let ``two profiles declaring the same account are told apart on the page by the 
                 // Both are listed, as they must be...
                 let accounts, _ = harness.Api.GetAccounts() |> Result.defaultWith (fun _ -> failwith "expected Ok")
                 Assert.Equal(2, accounts.Length)
-                Assert.All(accounts, fun a -> Assert.Equal("Duplicated Mail", a.DisplayName))
+                Assert.All(accounts, fun mailAccount -> Assert.Equal("Duplicated Mail", mailAccount.DisplayName))
 
                 // ...and the page says which profile each one came from, so the two rows are not
                 // the same row twice.

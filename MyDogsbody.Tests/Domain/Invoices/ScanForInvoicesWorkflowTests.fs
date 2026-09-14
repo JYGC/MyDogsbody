@@ -59,7 +59,7 @@ let private acmeMessage (id: string) (reference: string) : MailMessage =
 let private textReader: ReadDocumentText =
     fun source ->
         Text.Encoding.UTF8.GetString source.Content
-        |> fun s -> s.Replace("\r\n", "\n").Split('\n')
+        |> fun decodedText -> decodedText.Replace("\r\n", "\n").Split('\n')
         |> Array.toList
         |> List.mapi (fun i t -> { Text = t; BlockIndex = i })
         |> Ok
@@ -114,24 +114,24 @@ type private Deps =
       SaveScanProblems: SaveScanProblems
       ClearScanProblems: ClearScanProblems }
 
-let private runWith (mode: ScanMode) (deps: Deps) (windowDays: int) =
+let private runWith (mode: ScanMode) (dependencies: Deps) (windowDays: int) =
     scanForInvoices
-        deps.GetCurrentTime
-        deps.LoadSelectedMailAccount
-        deps.ClearWatermarks
-        deps.ReadMailFolder
-        deps.ReadDocumentText
-        deps.LoadSuppliers
-        deps.LoadTemplatesForSupplier
-        deps.LoadTombstones
-        deps.UpsertInvoice
-        deps.SaveScanProblems
-        deps.ClearScanProblems
+        dependencies.GetCurrentTime
+        dependencies.LoadSelectedMailAccount
+        dependencies.ClearWatermarks
+        dependencies.ReadMailFolder
+        dependencies.ReadDocumentText
+        dependencies.LoadSuppliers
+        dependencies.LoadTemplatesForSupplier
+        dependencies.LoadTombstones
+        dependencies.UpsertInvoice
+        dependencies.SaveScanProblems
+        dependencies.ClearScanProblems
         mode
         (window windowDays)
 
 /// The ordinary path: resume each folder from its watermark.
-let private run (deps: Deps) (windowDays: int) = runWith IncrementalScan deps windowDays
+let private run (dependencies: Deps) (windowDays: int) = runWith IncrementalScan dependencies windowDays
 
 /// Records every MailAccountId handed to clearWatermarks, so a test can prove FullRescan clears
 /// and IncrementalScan does not, and that a fatal scan resets on the way out.
@@ -212,7 +212,7 @@ let ``a message matching a supplier and template becomes a stored invoice, every
 let ``no account selected short-circuits with the mail reader never called`` () =
     let mutable readCalled = false
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             LoadSelectedMailAccount = fun () -> Ok None
             ReadMailFolder =
@@ -220,7 +220,7 @@ let ``no account selected short-circuits with the mail reader never called`` () 
                     readCalled <- true
                     Ok [] }
 
-    match run deps 14 with
+    match run dependencies 14 with
     | Error NoAccountSelected -> Assert.False(readCalled, "readMailFolder must not be called")
     | other -> Assert.Fail($"Expected Error NoAccountSelected, got {other}")
 
@@ -229,7 +229,7 @@ let ``the cutoff handed to the mail reader is the one computeCutoff produces`` (
     let mutable seen: ScanCutoff option = None
     let now = DateTime(2026, 6, 15, 12, 0, 0)
 
-    let deps =
+    let dependencies =
         { baseDeps [] (FakeLedger()) (FakeProblemLog()) with
             GetCurrentTime = clock now
             ReadMailFolder =
@@ -237,7 +237,7 @@ let ``the cutoff handed to the mail reader is the one computeCutoff produces`` (
                     seen <- Some cutoff
                     Ok [] }
 
-    run deps 90 |> ignore
+    run dependencies 90 |> ignore
 
     Assert.Equal(
         Some(ScanCutoff.value (computeCutoff (clock now) (window 90))),
@@ -249,9 +249,9 @@ let ``a message that yields nothing produces a problem and the scan continues`` 
     let ledger = FakeLedger()
     let log = FakeProblemLog()
     let stranger = { acmeMessage "m-stranger" "X" with Sender = "noreply@unknown.test" }
-    let deps = baseDeps [ stranger; acmeMessage "m-good" "INV-2" ] ledger log
+    let dependencies = baseDeps [ stranger; acmeMessage "m-good" "INV-2" ] ledger log
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         Assert.Single result.Invoices |> ignore
         let problem = Assert.Single result.Problems
@@ -266,11 +266,11 @@ let ``a message that yields nothing produces a problem and the scan continues`` 
 let ``two suppliers matching one message is a problem naming all of them`` () =
     let acme2 = { acme with Id = SupplierId.create "acme-2" |> orFail }
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             LoadSuppliers = fun () -> Ok [ acme; acme2 ] }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         Assert.Empty result.Invoices
 
@@ -282,11 +282,11 @@ let ``two suppliers matching one message is a problem naming all of them`` () =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``no template for the matched supplier is a NoTemplateMatched problem`` () =
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             LoadTemplatesForSupplier = fun _ -> Ok [] }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         match (Assert.Single result.Problems).Cause with
         | NoTemplateMatched sid -> Assert.Equal("acme", SupplierId.value sid)
@@ -318,10 +318,10 @@ let ``an unreadable attachment on an unmatched message is an AttachmentUnreadabl
             Sender = "noreply@unknown.test"
             Attachments = [ { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] } ] }
 
-    let deps =
+    let dependencies =
         { baseDeps [ stranger ] (FakeLedger()) (FakeProblemLog()) with ReadDocumentText = brokenReader }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         match (Assert.Single result.Problems).Cause with
         | AttachmentUnreadable("invoice.pdf", reason) -> Assert.Equal("corrupt", reason)
@@ -361,10 +361,10 @@ let ``an unreadable attachment on a matched supplier's message is an AttachmentU
             { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] }
             "m-broken"
 
-    let deps =
+    let dependencies =
         { baseDeps [ message ] (FakeLedger()) (FakeProblemLog()) with ReadDocumentText = brokenReader }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         Assert.Empty result.Invoices
         let problem = Assert.Single result.Problems
@@ -423,12 +423,12 @@ let ``a supplier whose PDF template cannot see an unreadable PDF reports the att
             { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] }
             "m-pdf-template"
 
-    let deps =
+    let dependencies =
         { baseDeps [ message ] (FakeLedger()) (FakeProblemLog()) with
             LoadTemplatesForSupplier = fun _ -> Ok [ pdfTemplate ]
             ReadDocumentText = brokenReader }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         Assert.Empty result.Invoices
         Assert.Equal(AttachmentUnreadable("invoice.pdf", "corrupt"), (Assert.Single result.Problems).Cause)
@@ -472,12 +472,12 @@ let ``two suppliers matching stays SeveralSuppliersMatched even when an attachme
             { FileName = "invoice.pdf"; DeclaredContentType = "application/pdf"; Content = [| 1uy |] }
             "m-two"
 
-    let deps =
+    let dependencies =
         { baseDeps [ message ] (FakeLedger()) (FakeProblemLog()) with
             LoadSuppliers = fun () -> Ok [ acme; acme2 ]
             ReadDocumentText = brokenReader }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         match (Assert.Single result.Problems).Cause with
         | SeveralSuppliersMatched ids ->
@@ -503,11 +503,11 @@ let ``rescanning an overlapping window updates rather than duplicates`` () =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a supplier deleted at upsert time becomes a problem, not a stored row`` () =
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             UpsertInvoice = fun invoice -> Error(SupplierGone invoice.SupplierId) }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok result ->
         Assert.Empty result.Invoices
         Assert.Equal(NoSupplierMatched, (Assert.Single result.Problems).Cause)
@@ -515,11 +515,11 @@ let ``a supplier deleted at upsert time becomes a problem, not a stored row`` ()
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a store failure at upsert aborts the scan with that error`` () =
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             UpsertInvoice = fun _ -> Error(InvoiceStoreFailed "disk full") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed "disk full") -> ()
     | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed), got {other}")
 
@@ -534,11 +534,11 @@ let ``a tombstoned key is skipped - no invoice, no problem`` () =
           Reference = InvoiceReference.create "INV-7" |> orFail
           DeletedAt = DateTime(2026, 5, 1) }
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-7" ] ledger (FakeProblemLog()) with
             LoadTombstones = fun () -> Ok [ tombstone ] }
 
-    let result = run deps 30 |> orFail
+    let result = run dependencies 30 |> orFail
     Assert.Empty result.Invoices
     Assert.Empty result.Problems
     Assert.Empty ledger.Rows
@@ -582,7 +582,7 @@ let ``FullRescan clears the resolved account's watermarks once, before the mail 
     let spy = ClearWatermarksSpy()
     let events = ResizeArray<string>()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks =
                 fun id ->
@@ -593,7 +593,7 @@ let ``FullRescan clears the resolved account's watermarks once, before the mail 
                     events.Add "read"
                     Ok [ acmeMessage "m1" "INV-1" ] }
 
-    match runWith FullRescan deps 30 with
+    match runWith FullRescan dependencies 30 with
     | Ok _ ->
         Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
         Assert.Equal<string list>([ "clear"; "read" ], List.ofSeq events)
@@ -603,11 +603,11 @@ let ``FullRescan clears the resolved account's watermarks once, before the mail 
 let ``an IncrementalScan never clears the watermarks`` () =
     let spy = ClearWatermarksSpy()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency }
 
-    runWith IncrementalScan deps 30 |> ignore
+    runWith IncrementalScan dependencies 30 |> ignore
     Assert.Empty spy.Calls
 
 [<Fact; Trait("Level", "Unit")>]
@@ -615,7 +615,7 @@ let ``a clearWatermarks failure on a FullRescan aborts the scan and the mail rea
     let spy = ClearWatermarksSpy(Result = Error(MailStoreFailed "watermark store is unreachable"))
     let mutable readCalled = false
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             ReadMailFolder =
@@ -623,7 +623,7 @@ let ``a clearWatermarks failure on a FullRescan aborts the scan and the mail rea
                     readCalled <- true
                     Ok [] }
 
-    match runWith FullRescan deps 30 with
+    match runWith FullRescan dependencies 30 with
     | Error(InvoiceStoreFailed msg) ->
         Assert.Contains("watermark store is unreachable", msg)
         Assert.False(readCalled, "readMailFolder must not run after the pre-clear failed")
@@ -639,12 +639,12 @@ let ``a clearWatermarks failure on a FullRescan aborts the scan and the mail rea
 let ``a fatal store error at upsert resets the account's watermarks and still returns that error`` () =
     let spy = ClearWatermarksSpy()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             UpsertInvoice = fun _ -> Error(InvoiceStoreFailed "disk full") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed "disk full") -> Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
     | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"disk full\"), got {other}")
 
@@ -652,11 +652,11 @@ let ``a fatal store error at upsert resets the account's watermarks and still re
 let ``a scan that completes does not reset the watermarks`` () =
     let spy = ClearWatermarksSpy()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Ok _ -> Assert.Empty spy.Calls
     | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
 
@@ -664,12 +664,12 @@ let ``a scan that completes does not reset the watermarks`` () =
 let ``a clearWatermarks failure on the fatal path does not replace the fatal error`` () =
     let spy = ClearWatermarksSpy(Result = Error(MailStoreFailed "the reset failed too"))
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             UpsertInvoice = fun _ -> Error(InvoiceStoreFailed "disk full") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed "disk full") -> ()
     | other -> Assert.Fail($"Expected the original Error (InvoiceStoreFailed \"disk full\"), got {other}")
 
@@ -683,18 +683,18 @@ let ``a clearWatermarks failure on the fatal path does not replace the fatal err
 // `readMailFolder` advances every folder's watermark to EOF as part of reading, so the four steps
 // AFTER it - loadSuppliers, loadTombstones, saveScanProblems, clearScanProblems - abort over mail
 // that is already marked "already read". Each is a store failure of exactly the class the
-// ScanAcc.Fatal branch resets for.
+// ScanAccumulator.Fatal branch resets for.
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a loadSuppliers failure after the mailbox was read resets the watermarks and returns that error`` () =
     let spy = ClearWatermarksSpy()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             LoadSuppliers = fun () -> Error(SupplierStoreFailed "suppliers unreachable") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed msg) ->
         Assert.Contains("suppliers unreachable", msg)
         Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
@@ -704,12 +704,12 @@ let ``a loadSuppliers failure after the mailbox was read resets the watermarks a
 let ``a loadTombstones failure after the mailbox was read resets the watermarks and returns that error`` () =
     let spy = ClearWatermarksSpy()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             LoadTombstones = fun () -> Error(InvoiceStoreFailed "tombstones unreachable") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed "tombstones unreachable") ->
         Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
     | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"tombstones unreachable\"), got {other}")
@@ -719,12 +719,12 @@ let ``a saveScanProblems failure resets the watermarks and returns that error`` 
     let spy = ClearWatermarksSpy()
     let stranger = { acmeMessage "m1" "X" with Sender = "noreply@unknown.test" }
 
-    let deps =
+    let dependencies =
         { baseDeps [ stranger ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             SaveScanProblems = fun _ -> Error(InvoiceStoreFailed "problem store unreachable") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed "problem store unreachable") ->
         Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
     | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"problem store unreachable\"), got {other}")
@@ -733,12 +733,12 @@ let ``a saveScanProblems failure resets the watermarks and returns that error`` 
 let ``a clearScanProblems failure resets the watermarks and returns that error`` () =
     let spy = ClearWatermarksSpy()
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             ClearScanProblems = fun _ -> Error(InvoiceStoreFailed "problem store unreachable") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed "problem store unreachable") ->
         Assert.Equal<MailAccountId list>([ accountId ], spy.Calls)
     | other -> Assert.Fail($"Expected Error (InvoiceStoreFailed \"problem store unreachable\"), got {other}")
@@ -747,12 +747,12 @@ let ``a clearScanProblems failure resets the watermarks and returns that error``
 let ``a clearWatermarks failure on the loadSuppliers abort does not replace that error`` () =
     let spy = ClearWatermarksSpy(Result = Error(MailStoreFailed "the reset failed too"))
 
-    let deps =
+    let dependencies =
         { baseDeps [ acmeMessage "m1" "INV-1" ] (FakeLedger()) (FakeProblemLog()) with
             ClearWatermarks = spy.Dependency
             LoadSuppliers = fun () -> Error(SupplierStoreFailed "suppliers unreachable") }
 
-    match run deps 30 with
+    match run dependencies 30 with
     | Error(InvoiceStoreFailed msg) ->
         Assert.Contains("suppliers unreachable", msg)
         Assert.DoesNotContain("the reset failed too", msg)

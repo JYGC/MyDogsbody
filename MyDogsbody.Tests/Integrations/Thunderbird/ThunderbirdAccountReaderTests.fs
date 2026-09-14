@@ -8,7 +8,7 @@ open MyDogsbody.Integrations.Thunderbird
 open MyDogsbody.Tests.Fixtures.ThunderbirdFixturePaths
 
 let private byHostname (accounts: DiscoveredMailAccount list) (hostFragment: string) =
-    accounts |> List.find (fun a -> a.StoreDirectory.Contains(hostFragment, StringComparison.OrdinalIgnoreCase))
+    accounts |> List.find (fun account -> account.StoreDirectory.Contains(hostFragment, StringComparison.OrdinalIgnoreCase))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``read finds exactly the ten accounts prefs.js declares and none of the orphan directories`` () =
@@ -28,7 +28,7 @@ let ``read never invents an account at a gapped key`` () =
 
     match actual with
     | Ok accounts ->
-        let ids = accounts |> List.map (fun a -> MailAccountId.value a.Id)
+        let ids = accounts |> List.map (fun account -> MailAccountId.value account.Id)
         // Ids are "{profileDir}|account<N>" - the gapped keys 4,5,7,8,11-16 must never appear.
         for gap in [ 4; 5; 7; 8; 11; 12; 13; 14; 15; 16 ] do
             Assert.DoesNotContain(ids, fun id -> id.EndsWith($"|account{gap}"))
@@ -51,7 +51,7 @@ let ``read maps storeContractID to the store format`` () =
     let actual = ThunderbirdAccountReader.read measuredShapeProfile
 
     match actual with
-    | Ok accounts -> Assert.All(accounts, fun a -> Assert.Equal(Mbox, a.StoreFormat))
+    | Ok accounts -> Assert.All(accounts, fun account -> Assert.Equal(Mbox, account.StoreFormat))
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -73,7 +73,7 @@ let ``read lists an account with no identities with no email address`` () =
 
     match actual with
     | Ok accounts ->
-        let localFolders = accounts |> List.find (fun a -> a.StoreDirectory.EndsWith("Local Folders"))
+        let localFolders = accounts |> List.find (fun account -> account.StoreDirectory.EndsWith("Local Folders"))
         Assert.Empty localFolders.EmailAddresses
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
