@@ -78,6 +78,32 @@ with CLAUDE.md's "skip specs for exploratory/prototype work" carve-out applied t
 spirit here. `PdfProcessing` and `TestMsGraphToEmails` (both scratch too) had zero violations
 already.
 
+## Addendum: comment-word-limit raised from 80 to 200
+
+CLAUDE.md's naming section originally read "comments only when the name would exceed 80
+words"; this was raised to 200. Raising the limit makes the rule *stricter*, not looser — a
+comment compensating for a name that would need 81-200 words was allowed under the old
+threshold and is not allowed under the new one, so this could in principle have pulled
+additional comments into "must become a name."
+
+Audited the whole repo for this before concluding no code needed to change. Extracted every
+comment block of 25+ words (several hundred), read a sample spanning the full length range
+(25 to 558 words), and specifically filtered for blocks *without* the rationale language this
+codebase otherwise uses throughout (`because`, `since`, `used to`, `Q#.#`, `requirements.md`,
+`design.md`, `PR #`, `so a`/`so the`/`so it`, etc.) to surface anything that might be a pure
+"what is this" description rather than "why" — 55 blocks at 60+ words and 131 more at 25-59
+words matched that filter. Read every one.
+
+**Every block, at every length, is "why" content** — design rationale tied to
+`requirements.md`/`design.md` decisions, historical bug reports with measured evidence, race
+conditions and invariants, or workaround explanations — never a description of *what* an
+already-named thing is that merely happens to be long. The general coding-style rule
+("comments only for a hidden constraint, a subtle invariant, a workaround for a specific bug,
+behavior that would surprise a reader") already exempts this content regardless of word
+count; the naming section's threshold was never the operative constraint for any comment in
+this codebase, at 80 words or at 200. No identifier was renamed and no comment was removed as
+a result of this change — only the CLAUDE.md limit itself.
+
 ## Testing note
 
 This is a pure rename with no behavior change, so CLAUDE.md's "failing unit test lands

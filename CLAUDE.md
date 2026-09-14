@@ -30,7 +30,7 @@ If a request explicitly calls for an imperative or object-oriented shape, follow
 
 **Use long, self-documenting names.** This covers every function, value, parameter, type, record field, union case and module — anything you can name. A name says in full words what the thing is or does, so a reader never needs a comment to find out. Don't shorten a name to save space. No single letters and no abbreviations, and that includes lambda parameters: `fun validAccount -> ...`, not `fun a -> ...`, and `accountIsAlreadyLinked`, not `linked`.
 
-**Comments only when the name would exceed 80 words.** If a name that fully described the thing would need more than 80 words, you may add a comment for what the name can't hold. Below that limit, a comment means the name isn't finished yet, so lengthen the name instead of writing the comment.
+**Comments only when the name would exceed 200 words.** If a name that fully described the thing would need more than 200 words, you may add a comment for what the name can't hold. Below that limit, a comment means the name isn't finished yet, so lengthen the name instead of writing the comment.
 
 This applies to every name you introduce or change. Don't rename untouched code as a side effect of an unrelated change.
 
