@@ -68,6 +68,7 @@ let withUnreachableSupplierStoreHarness (test: SuppliersHarness -> unit) =
             GetInvoiceTombstones = fun () -> failwith "not used"
             GetScanWindows = fun () -> failwith "not used"
             GetInvoiceSettings = fun () -> failwith "not used"
+            GetInvoiceCalendarEvents = fun () -> failwith "not used"
             Dispose = fun () -> ()
         }
 

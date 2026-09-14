@@ -110,3 +110,19 @@ type ScanWindowRecord = { Id: int; Days: int }
 /// NULL means nothing chosen yet.
 [<CLIMutable>]
 type InvoiceSettingsRecord = { Id: int; SelectedScanWindowDays: int option }
+
+// --- change #7: the calendar sync record. History, not truth - the calendar itself remains the
+// source of truth for the diff; this table only answers "when did we last touch this event, and
+// on whose calendar?" ---
+
+/// GoogleAccountId / CalendarId / EventId are TEXT - all three are opaque strings at Google.
+/// LastSyncedAt is TEXT ISO 8601, matching ScannedAt elsewhere in this project.
+[<CLIMutable>]
+type InvoiceCalendarEventRecord = {
+    Id: int
+    InvoiceId: int
+    GoogleAccountId: string
+    CalendarId: string
+    EventId: string
+    LastSyncedAt: string
+}

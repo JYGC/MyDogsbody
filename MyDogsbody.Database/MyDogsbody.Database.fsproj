@@ -15,6 +15,7 @@
     <Compile Include="InvoiceRecordMappers.fs" />
     <Compile Include="InvoiceStore.fs" />
     <Compile Include="ScanWindowStore.fs" />
+    <Compile Include="InvoiceCalendarEventStore.fs" />
   </ItemGroup>
 
   <ItemGroup>

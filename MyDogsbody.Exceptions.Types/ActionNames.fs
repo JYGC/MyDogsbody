@@ -116,6 +116,13 @@ module MyDogsbody =
             let getSelectedScanWindow = $"{scanWindowStore}.getSelectedScanWindow"
             let saveSelectedScanWindow = $"{scanWindowStore}.saveSelectedScanWindow"
 
+        module InvoiceCalendarEventStore =
+            let private invoiceCalendarEventStore = $"{database}.InvoiceCalendarEventStore"
+            let markSynced = $"{invoiceCalendarEventStore}.markSynced"
+            let clearSyncRecord = $"{invoiceCalendarEventStore}.clearSyncRecord"
+            let loadAllLedgerKeys = $"{invoiceCalendarEventStore}.loadAllLedgerKeys"
+            let loadSyncRecords = $"{invoiceCalendarEventStore}.loadSyncRecords"
+
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
 

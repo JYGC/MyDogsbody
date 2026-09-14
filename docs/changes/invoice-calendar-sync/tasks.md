@@ -15,7 +15,12 @@ See [background → *One branch per change*](../invoice-to-calendar/background.m
 first, run, and confirmed to fail *for the reason expected* before the implementation. Tasks marked
 *(test-first)* carry production code.
 
-**Reserved migration timestamp for this change: `20260809000010`.**
+**Reserved migration timestamp for this change: `20260810000009`.** Renumbered from the
+originally-reserved `20260809000010` as the first task of this change, per
+[background → *Migration timestamps*](../invoice-to-calendar/background.md#migration-timestamps-reserved-across-the-series):
+`20260809000010` sorts *before* change #4's own migrations (renumbered to the `20260810000004`-`…0008`
+range), which would have run `CreateInvoiceCalendarEventsTable` before the `Invoices` table it has a
+foreign key to even exists, on a fresh database.
 
 > ### Write the two guard tests first — before the diff exists
 >
@@ -130,17 +135,17 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 6 — Persistence (required)
 
-- [ ] **6.1** *(test-first)* `Migration_20260809000010_CreateInvoiceCalendarEventsTable.fs`.
+- [x] **6.1** *(test-first)* `Migration_20260810000009_CreateInvoiceCalendarEventsTable.fs`.
       Tests: columns; the unique index on `InvoiceId`; **deleting an invoice cascades to its sync
       record**; `Down()` reverses it.
-- [ ] **6.2** *(test-first)* `InvoiceCalendarEventStore.fs` — `markSynced`, `clearSyncRecord`,
+- [x] **6.2** *(test-first)* `InvoiceCalendarEventStore.fs` — `markSynced`, `clearSyncRecord`,
       `loadSyncRecords`, and `loadAllLedgerKeys`.
       Tests *(Integration)*: round trips; `markSynced` twice updates rather than duplicating;
       **`loadAllLedgerKeys` returns every key in the ledger, ignoring any window** — this is the
       query hazard (a)'s guard depends on.
       Tests *(Unit)*: error paths assert the declared `ActionNames` string, message and inner
       exception.
-- [ ] **6.3** `ActionNames.MyDogsbody.Database.InvoiceCalendarEventStore.*`.
+- [x] **6.3** `ActionNames.MyDogsbody.Database.InvoiceCalendarEventStore.*`.
 
 ## Phase 7 — Composition root (required)
 
