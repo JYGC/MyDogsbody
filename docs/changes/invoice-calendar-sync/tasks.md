@@ -189,11 +189,11 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 9 — Contract suites (required)
 
-- [ ] **9.1** Shared suites for `ListCalendarEvents`, `CreateCalendarEvent`, `UpdateCalendarEvent`,
+- [x] **9.1** Shared suites for `ListCalendarEvents`, `CreateCalendarEvent`, `UpdateCalendarEvent`,
       `DeleteCalendarEvent`, `MarkSynced`, `ClearSyncRecord`, `LoadAllLedgerKeys` — every fake **and**
       the real adapter over stubbed HTTP (friction #2). `MemberData` sources are **public** `let`s.
-- [ ] **9.2** `InvoiceSyncApi` contract suite: real record and every fake.
-- [ ] **9.3** Persisted-shape test for `InvoiceCalendarEvents`.
+- [x] **9.2** `InvoiceSyncApi` contract suite: real record and every fake.
+- [x] **9.3** Persisted-shape test for `InvoiceCalendarEvents`.
 
 ## Phase 10 — End to end (required)
 

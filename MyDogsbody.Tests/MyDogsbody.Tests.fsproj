@@ -124,6 +124,13 @@
     <Compile Include="Contracts\GoogleAccountDependencyContractTests.fs" />
     <Compile Include="Contracts\ListCalendarsDependencyContractTests.fs" />
     <Compile Include="Contracts\GoogleAccountApiContractTests.fs" />
+    <Compile Include="Contracts\ListCalendarEventsDependencyContractTests.fs" />
+    <Compile Include="Contracts\CreateCalendarEventDependencyContractTests.fs" />
+    <Compile Include="Contracts\UpdateCalendarEventDependencyContractTests.fs" />
+    <Compile Include="Contracts\DeleteCalendarEventDependencyContractTests.fs" />
+    <Compile Include="Contracts\InvoiceCalendarEventStoreDependencyContractTests.fs" />
+    <Compile Include="Contracts\InvoiceCalendarEventsPersistedShapeTests.fs" />
+    <Compile Include="Contracts\InvoiceSyncApiContractTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\MailAccountsBrowserModuleCreatorsTests.fs" />
