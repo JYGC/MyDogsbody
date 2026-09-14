@@ -149,16 +149,16 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 7 — Composition root (required)
 
-- [ ] **7.1** *(test-first)* `InvoiceSyncApiMappers.fs` — domain ⇄ UI, error translation.
+- [x] **7.1** *(test-first)* `InvoiceSyncApiMappers.fs` — domain ⇄ UI, error translation.
       Tests: a `SyncAction` maps to a UI plan row **naming the invoice**, not just an event id;
       each `SyncOutcome` maps to its per-row rendering; each new `CalendarError` case maps to its
       intended action and message with the expected/unexpected split asserted.
-- [ ] **7.2** *(test-first)* `InvoiceSyncApiFactory.createInvoiceSyncApi` with `GetSyncPlan` and
+- [x] **7.2** *(test-first)* `InvoiceSyncApiFactory.createInvoiceSyncApi` with `GetSyncPlan` and
       `ExecuteSyncPlan`.
       Tests *(Integration)*: both members against a real temp SQLite database and stubbed HTTP.
       No module-level I/O.
-- [ ] **7.3** `ActionNames.MyDogsbody.Startup.InvoiceSyncApi.*`.
-- [ ] **7.4** `Startup.fs`: bind the four event operations, register `invoiceSyncApi`.
+- [x] **7.3** `ActionNames.MyDogsbody.Startup.InvoiceSyncApi.*`.
+- [x] **7.4** `Startup.fs`: bind the four event operations, register `invoiceSyncApi`.
       *Outcome:* `MainWindow.xaml.cs` unchanged. **This is the last registration in the series and
       the host has still only been touched once, in change #3.**
 

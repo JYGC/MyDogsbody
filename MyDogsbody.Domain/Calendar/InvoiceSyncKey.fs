@@ -35,3 +35,14 @@ module InvoiceSyncKey =
             | _ -> Error $"'{value}' is not a valid invoice sync key."
 
     let value (InvoiceSyncKey key) = key
+
+    /// The two raw parts a derived key is built from - the supplier's row id and the invoice
+    /// reference, both as plain strings. This is the only way to say which invoice a DeleteEvent's
+    /// event belonged to (design decision 3): the invoice itself is gone from the ledger by the
+    /// time a delete is produced, so nothing else carries its identity. `None` only for a key this
+    /// module did not itself derive or successfully parse, which cannot happen for a value that
+    /// reached this function through `derive` or `parse`.
+    let parts (InvoiceSyncKey key) : (string * string) option =
+        match key.Split(fieldSeparator) with
+        | [| supplierIdPart; referencePart |] -> Some(supplierIdPart, referencePart)
+        | _ -> None

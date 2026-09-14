@@ -22,7 +22,8 @@ let private anInvoice reference : InvoiceUiType =
       DueDate = None
       MessageReceivedAt = DateTime(2026, 5, 1)
       CanBecomeCalendarEvent = false
-      CannotUploadReason = Some "no due date" }
+      CannotUploadReason = Some "no due date"
+      SyncStatus = None }
 
 let private aWindow days : ScanWindowUiType =
     { Id = string days; Days = days; Label = $"mail received in the last {days} days" }

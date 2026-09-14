@@ -247,7 +247,7 @@ let private toEventStartDate (eventDateTime: Data.EventDateTime) : DateTime opti
     | null -> None
     | _ when not (isNull eventDateTime.Date) ->
         Some(DateTime.Parse(eventDateTime.Date, System.Globalization.CultureInfo.InvariantCulture))
-    | _ when eventDateTime.DateTime.HasValue -> Some eventDateTime.DateTime.Value.Date
+    | _ when eventDateTime.DateTimeDateTimeOffset.HasValue -> Some eventDateTime.DateTimeDateTimeOffset.Value.Date
     | _ -> None
 
 /// An event Google would never actually send with no id or no start (neither an all-day date nor

@@ -119,6 +119,143 @@ let bindListCalendars
                 |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
         }
 
+// ---------- Change #7: the four event operations, bound the same way bindListCalendars is -
+// the Google-facing call a parameter, so ListCalendarEventsDependencyContractTests (and its
+// three siblings) run this exact binding over a stubbed HttpMessageHandler rather than a copy of
+// it. Public for the same reason bindListCalendars is public - see its own comment. ----------
+
+/// `ListCalendarEvents` as the composition root binds it.
+let bindListCalendarEvents
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (listEventsWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> CalendarDateRange
+            -> Result<CalendarEvent list, MyDogsbodyException>)
+    : ListCalendarEvents =
+    let loadClientSecretValue = clientSecretValueFrom (bindLoadClientSecret handleError googleContext)
+
+    fun accountId calendarId range ->
+        result {
+            let! secret = loadClientSecretValue ()
+
+            let! credential =
+                GoogleAuthorization.loadCredential
+                    handleError
+                    googleContext.GetCredentialCollection
+                    secret
+                    (GoogleAccountId.value accountId)
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
+
+            return!
+                listEventsWith handleError (credential :> Google.Apis.Http.IConfigurableHttpClientInitializer) calendarId range
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarEventsError accountId calendarId)
+        }
+
+/// `CreateCalendarEvent` as the composition root binds it.
+let bindCreateCalendarEvent
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (createEventWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> InvoiceSyncKey
+            -> AllDayEvent
+            -> Result<CalendarEventId, MyDogsbodyException>)
+    : CreateCalendarEvent =
+    let loadClientSecretValue = clientSecretValueFrom (bindLoadClientSecret handleError googleContext)
+
+    fun accountId calendarId syncKey allDayEvent ->
+        result {
+            let! secret = loadClientSecretValue ()
+
+            let! credential =
+                GoogleAuthorization.loadCredential
+                    handleError
+                    googleContext.GetCredentialCollection
+                    secret
+                    (GoogleAccountId.value accountId)
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
+
+            return!
+                createEventWith
+                    handleError
+                    (credential :> Google.Apis.Http.IConfigurableHttpClientInitializer)
+                    calendarId
+                    syncKey
+                    allDayEvent
+                |> Result.mapError (GoogleAccountApiMappers.toCreateCalendarEventError accountId)
+        }
+
+/// `UpdateCalendarEvent` as the composition root binds it.
+let bindUpdateCalendarEvent
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (updateEventWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> CalendarEventId
+            -> AllDayEvent
+            -> Result<unit, MyDogsbodyException>)
+    : UpdateCalendarEvent =
+    let loadClientSecretValue = clientSecretValueFrom (bindLoadClientSecret handleError googleContext)
+
+    fun accountId calendarId eventId allDayEvent ->
+        result {
+            let! secret = loadClientSecretValue ()
+
+            let! credential =
+                GoogleAuthorization.loadCredential
+                    handleError
+                    googleContext.GetCredentialCollection
+                    secret
+                    (GoogleAccountId.value accountId)
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
+
+            return!
+                updateEventWith
+                    handleError
+                    (credential :> Google.Apis.Http.IConfigurableHttpClientInitializer)
+                    calendarId
+                    eventId
+                    allDayEvent
+                |> Result.mapError (GoogleAccountApiMappers.toUpdateCalendarEventError accountId eventId)
+        }
+
+/// `DeleteCalendarEvent` as the composition root binds it.
+let bindDeleteCalendarEvent
+    (handleError: HandleErrorBuilder)
+    (googleContext: GoogleDatabaseContext)
+    (deleteEventWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> CalendarEventId
+            -> Result<unit, MyDogsbodyException>)
+    : DeleteCalendarEvent =
+    let loadClientSecretValue = clientSecretValueFrom (bindLoadClientSecret handleError googleContext)
+
+    fun accountId calendarId eventId ->
+        result {
+            let! secret = loadClientSecretValue ()
+
+            let! credential =
+                GoogleAuthorization.loadCredential
+                    handleError
+                    googleContext.GetCredentialCollection
+                    secret
+                    (GoogleAccountId.value accountId)
+                |> Result.mapError (GoogleAccountApiMappers.toListCalendarsError accountId)
+
+            return!
+                deleteEventWith handleError (credential :> Google.Apis.Http.IConfigurableHttpClientInitializer) calendarId eventId
+                |> Result.mapError (GoogleAccountApiMappers.toDeleteCalendarEventError accountId eventId)
+        }
+
 // ---------- The members that go through Google, as the composition root composes them: each
 // workflow over the storage bindings above, its answer mapped to the UI record and its error
 // translated, with the Google-facing dependency a parameter. `createGoogleAccountApi` hands them

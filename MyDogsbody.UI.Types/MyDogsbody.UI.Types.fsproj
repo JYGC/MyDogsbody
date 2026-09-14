@@ -17,8 +17,10 @@
     <Compile Include="MailAccountApi.fs" />
     <Compile Include="FolderPicker.fs" />
     <Compile Include="Modules\MailAccountsBrowserModule.fs" />
+    <Compile Include="InvoiceSyncUiType.fs" />
     <Compile Include="InvoiceUiType.fs" />
     <Compile Include="InvoiceApi.fs" />
+    <Compile Include="InvoiceSyncApi.fs" />
     <Compile Include="Modules\InvoicesModule.fs" />
     <Compile Include="GoogleAccountUiType.fs" />
     <Compile Include="GoogleAccountApi.fs" />

@@ -29,7 +29,25 @@ type InvoicesModule =
       /// supplierId, reference - the natural key the tombstone row carries.
       UndeleteInvoice: string -> string -> unit
       LoadProblems: unit -> unit
-      LoadTombstones: unit -> unit }
+      LoadTombstones: unit -> unit
+
+      // --- change #7: calendar sync ---
+      SyncViewAval: aval<SyncViewUiType>
+      IsSyncingAval: aval<bool>
+      LoadSyncPlan: unit -> unit
+      /// The rows a person has ticked, by invoice id - view state only, never persisted (task
+      /// 8.2). A rescan clears it: a tick against a row that no longer exists is worse than no
+      /// tick at all.
+      SelectedInvoiceIdsAval: aval<Set<string>>
+      ToggleInvoice: string -> unit
+      ClearSelection: unit -> unit
+      /// The count the bulk button states before it is pressed - the selection's outstanding
+      /// actions when there is a selection, everything outstanding in the plan when there is not
+      /// (Q2.7).
+      PendingActionCountAval: aval<int>
+      /// Runs ExecuteSyncPlan over the current selection (or everything outstanding, if none is
+      /// selected) and reloads the plan on completion.
+      ExecuteSync: unit -> unit }
 
 /// The /settings/scan-windows page's adaptive state.
 type ScanWindowsBrowserModule =

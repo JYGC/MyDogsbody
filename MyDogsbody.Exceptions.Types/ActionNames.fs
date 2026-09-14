@@ -75,6 +75,11 @@ module MyDogsbody =
             let getCalendarsFor = $"{googleAccountApi}.getCalendarsFor"
             let setDefaultInvoiceCalendar = $"{googleAccountApi}.setDefaultInvoiceCalendar"
 
+        module InvoiceSyncApi =
+            let private invoiceSyncApi = $"{startup}.InvoiceSyncApi"
+            let getSyncPlan = $"{invoiceSyncApi}.getSyncPlan"
+            let executeSyncPlan = $"{invoiceSyncApi}.executeSyncPlan"
+
     /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
     /// it - MyDogsbody.Database is the application's main store, not an integration, so its
     /// entries do not go under Integrations.

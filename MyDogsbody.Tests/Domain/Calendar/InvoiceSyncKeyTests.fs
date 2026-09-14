@@ -55,3 +55,13 @@ let ``parse rejects a value that is not a derived key`` (entered: string) =
 [<Fact; Trait("Level", "Unit")>]
 let ``the extended-property name is a single literal`` () =
     Assert.Equal("mydogsbody.invoice", InvoiceSyncKey.PropertyName)
+
+[<Fact; Trait("Level", "Unit")>]
+let ``parts recovers the raw supplier id and reference a key was derived from`` () =
+    let derived = InvoiceSyncKey.derive (supplierId "42") (reference "INV-1042")
+
+    match InvoiceSyncKey.parts derived with
+    | Some(supplierIdPart, referencePart) ->
+        Assert.Equal("42", supplierIdPart)
+        Assert.Equal("INV-1042", referencePart)
+    | None -> Assert.Fail("Expected Some, but got None")
