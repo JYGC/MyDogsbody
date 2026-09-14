@@ -1,6 +1,9 @@
 module MyDogsbody.Tests.Domain.Invoices.InvoicesTypesTests
 
+open System
 open Xunit
+open MyDogsbody.Domain.Suppliers
+open MyDogsbody.Domain.InvoiceTemplates
 open MyDogsbody.Domain.Invoices
 
 [<Fact; Trait("Level", "Unit")>]
@@ -169,3 +172,49 @@ let ``ScanWindowId.create accepts a non-empty id and rejects a missing one`` () 
     match ScanWindowId.create "" with
     | Error reason -> Assert.Equal("Scan window id must not be empty.", reason)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
+
+// ============================ change #7, task 1.2 ============================
+
+let private orFail =
+    function
+    | Ok v -> v
+    | Error e -> failwith $"test setup: {e}"
+
+let private makeStoredInvoice (dueDate: InvoiceDueDate option) : StoredInvoice =
+    let supplierId = SupplierId.create "sup-1" |> orFail
+    let templateId = TemplateId.create "tpl-1" |> orFail
+    let messageId = SourceMessageId.create "msg-1" |> orFail
+    let reference = InvoiceReference.create "INV-1042" |> orFail
+    let amount = Money.create 249.95m "AUD" |> orFail
+
+    { Id = InvoiceId.create "1" |> orFail
+      ScannedAt = DateTime(2026, 1, 21, 8, 0, 0)
+      Invoice =
+        { SupplierId = supplierId
+          TemplateId = templateId
+          SourceMessageId = messageId
+          Reference = reference
+          Amount = amount
+          IssueDate = Some(InvoiceIssueDate.create (DateTime(2026, 2, 1)) |> orFail)
+          DueDate = dueDate
+          MessageReceivedAt = DateTime(2026, 1, 20, 8, 30, 0) } }
+
+[<Fact; Trait("Level", "Unit")>]
+let ``UploadableInvoice.ofStored converts a stored invoice with a due date, with every field asserted`` () =
+    let dueDate = InvoiceDueDate.create (DateTime(2026, 3, 3)) |> orFail
+    let stored = makeStoredInvoice (Some dueDate)
+
+    match UploadableInvoice.ofStored stored with
+    | Some uploadable ->
+        Assert.Equal(stored.Id, uploadable.Id)
+        Assert.Equal(stored.Invoice.SupplierId, uploadable.SupplierId)
+        Assert.Equal(stored.Invoice.Reference, uploadable.Reference)
+        Assert.Equal(stored.Invoice.Amount, uploadable.Amount)
+        Assert.Equal(dueDate, uploadable.DueDate)
+    | None -> Assert.Fail("Expected Some, but got None")
+
+[<Fact; Trait("Level", "Unit")>]
+let ``UploadableInvoice.ofStored returns None for a stored invoice with no due date`` () =
+    let stored = makeStoredInvoice None
+
+    Assert.Equal(None, UploadableInvoice.ofStored stored)

@@ -40,7 +40,9 @@
     <Compile Include="Domain\Invoices\ScanForInvoicesWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\DeleteInvoiceWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ScanWindowWorkflowsTests.fs" />
+    <Compile Include="Domain\Calendar\InvoiceSyncKeyTests.fs" />
     <Compile Include="Domain\Calendar\CalendarTypesTests.fs" />
+    <Compile Include="Domain\Calendar\CalendarDateRangeWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\RegisterGoogleAccountWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\ListGoogleAccountsWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\SetDefaultInvoiceCalendarWorkflowTests.fs" />

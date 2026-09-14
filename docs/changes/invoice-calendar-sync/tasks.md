@@ -31,26 +31,26 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 1 — Types (required)
 
-- [ ] **1.1** *(test-first)* `InvoiceSyncKey` in `Domain/Calendar/InvoiceSyncKey.fs` — **the one
+- [x] **1.1** *(test-first)* `InvoiceSyncKey` in `Domain/Calendar/InvoiceSyncKey.fs` — **the one
       derivation** (Q2.10).
       Tests: `derive` is stable for the same supplier and reference; two different invoices give
       different keys; `parse (value (derive a b))` round-trips; an unparseable value returns an
       error; the extended-property name is a single literal.
       *Rationale:* this key identifies a row in the ledger's unique index, an event on a calendar,
       **and** a tombstone. Three hand-rolled derivations would agree right up until one did not.
-- [ ] **1.2** *(test-first)* `UploadableInvoice` and `UploadableInvoice.ofStored` in
+- [x] **1.2** *(test-first)* `UploadableInvoice` and `UploadableInvoice.ofStored` in
       `Domain/Invoices/InvoicesTypes.fs`.
       Tests: a stored invoice with a due date converts with every field asserted; **one without a due
       date returns `None`**.
       *Outcome:* `DueDate` is **not** an option on this type, so the sync workflow cannot be handed
       an invoice that has none — a compile-time fact rather than a runtime check (Q1.10).
-- [ ] **1.3** `AllDayEvent`, `CalendarEventId`, `CalendarEvent`, `CalendarDateRange`, `SyncAction`,
+- [x] **1.3** `AllDayEvent`, `CalendarEventId`, `CalendarEvent`, `CalendarDateRange`, `SyncAction`,
       `LedgerSnapshot`, `SyncOutcome`, `SyncedInvoice`, the new `CalendarError` cases
       (`EventRejected`, `EventNoLongerExists`), and the six new dependency function types.
       *Note:* `AllDayEvent` carries **no time, no time zone, no duration** — every invoice event is
       all-day on the due date, so the domain carries nothing it never sets and the mapper cannot
       invent one.
-- [ ] **1.4** *(test-first)* `CalendarDateRangeWorkflow`.
+- [x] **1.4** *(test-first)* `CalendarDateRangeWorkflow`.
       Tests, with a fixed clock: the range is **mirrored** around today, not applied backwards only;
       **it stretches forward when an invoice in view falls due beyond it** — a supplier on 60-day
       terms inside a 14-day window; it never produces a range that excludes an invoice in view; an
