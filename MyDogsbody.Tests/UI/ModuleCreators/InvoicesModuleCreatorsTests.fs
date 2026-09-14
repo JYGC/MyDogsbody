@@ -73,7 +73,7 @@ type private InvoiceApiSpy() =
                 this.GetInvoicesCalls <- this.GetInvoicesCalls @ [ days ]
 
                 match this.GetInvoicesError with
-                | Some ex -> Error ex
+                | Some readException -> Error readException
                 | None -> Ok(this.GetInvoicesFor days)
           DeleteInvoice = fun _ -> Ok()
           GetProblems =
@@ -81,7 +81,7 @@ type private InvoiceApiSpy() =
                 this.GetProblemsCalls <- this.GetProblemsCalls + 1
 
                 match this.GetProblemsError with
-                | Some ex -> Error ex
+                | Some readException -> Error readException
                 | None -> Ok this.ProblemsInStore
           GetTombstones = fun () -> Ok []
           UndeleteInvoice = fun _ _ -> Ok() }
@@ -91,27 +91,27 @@ let ``the initial window comes from the API's resolved choice, never a literal 1
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 90)
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    Assert.Equal(90, AVal.force m.SelectedWindowDaysAval)
+    Assert.Equal(90, AVal.force invoicesModule.SelectedWindowDaysAval)
     // it scanned exactly the resolved window
     Assert.Equal<int list>([ 90 ], invoiceApi.ScanCalls)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``selecting a window persists the choice and reloads the ledger WITHOUT scanning the mailbox`` () =
     // Q1.9 fallback (12.4 measured a full re-read at ~60 s): a window change filters the ledger
-    // that is already stored, it does not read the mailbox again. A scan is m.Rescan only.
+    // that is already stored, it does not read the mailbox again. A scan is invoicesModule.Rescan only.
     let windowApi = ScanWindowApiSpy()
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    m.SelectWindow 7
+    invoicesModule.SelectWindow 7
 
     Assert.Equal<int list>([ 7 ], windowApi.SelectedCalls)
-    Assert.Equal(7, AVal.force m.SelectedWindowDaysAval)
+    Assert.Equal(7, AVal.force invoicesModule.SelectedWindowDaysAval)
     // the ledger was re-queried for the new window...
     Assert.Contains(7, invoiceApi.GetInvoicesCalls)
     // ...and the mailbox was NOT scanned: only the initial load's scan (14) ever ran
@@ -124,25 +124,25 @@ let ``narrowing the window re-queries the ledger for the smaller window`` () =
     let invoiceApi =
         InvoiceApiSpy(GetInvoicesFor = (fun days -> if days >= 90 then [ anInvoice "OLD"; anInvoice "NEW" ] else [ anInvoice "NEW" ]))
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    m.SelectWindow 7
-    Assert.Equal<string list>([ "NEW" ], AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference))
+    invoicesModule.SelectWindow 7
+    Assert.Equal<string list>([ "NEW" ], AVal.force invoicesModule.InvoicesAval |> List.map (fun invoice -> invoice.Reference))
 
     // widening brings the out-of-window invoice back - it was hidden, not forgotten
-    m.SelectWindow 90
-    Assert.Equal<string list>([ "OLD"; "NEW" ], AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference))
+    invoicesModule.SelectWindow 90
+    Assert.Equal<string list>([ "OLD"; "NEW" ], AVal.force invoicesModule.InvoicesAval |> List.map (fun invoice -> invoice.Reference))
 
 [<Fact; Trait("Level", "Unit")>]
 let ``Rescan reads the mailbox for the current window`` () =
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    m.Rescan()
+    invoicesModule.Rescan()
 
     // the initial load's scan (30) then the explicit Rescan (30)
     Assert.Equal<int list>([ 30; 30 ], invoiceApi.ScanCalls)
@@ -152,17 +152,17 @@ let ``Rescan everything reads the mailbox via RescanEverything for the current w
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
     let invoiceApi = InvoiceApiSpy(GetInvoicesFor = (fun _ -> [ anInvoice "INV-1" ]))
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    m.RescanEverything()
+    invoicesModule.RescanEverything()
 
     // the watermark-clearing scan ran for the current window...
     Assert.Equal<int list>([ 30 ], invoiceApi.RescanEverythingCalls)
     // ...and the ordinary Scan ran only on the initial load
     Assert.Equal<int list>([ 30 ], invoiceApi.ScanCalls)
     // the table is read back from the store afterward, same as Rescan
-    Assert.Equal<string list>([ "INV-1" ], AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference))
+    Assert.Equal<string list>([ "INV-1" ], AVal.force invoicesModule.InvoicesAval |> List.map (fun invoice -> invoice.Reference))
 
 let private aProblem messageId : ScanProblemUiType =
     { SourceMessageId = messageId
@@ -183,19 +183,19 @@ let ``a scan that finds no new mail leaves the stored ledger on screen`` () =
     let invoiceApi = InvoiceApiSpy(GetInvoicesFor = (fun _ -> [ anInvoice "INV-STORED" ]))
     // ScanResult stays the default Ok { Invoices = []; Problems = [] } - "nothing new in the mail"
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
     Assert.Equal<string list>(
         [ "INV-STORED" ],
-        AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference)
+        AVal.force invoicesModule.InvoicesAval |> List.map (fun invoice -> invoice.Reference)
     )
 
-    m.Rescan()
+    invoicesModule.Rescan()
 
     Assert.Equal<string list>(
         [ "INV-STORED" ],
-        AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference)
+        AVal.force invoicesModule.InvoicesAval |> List.map (fun invoice -> invoice.Reference)
     )
 
 [<Fact; Trait("Level", "Unit")>]
@@ -206,19 +206,19 @@ let ``a scan that records no new problems leaves the persisted problem rows on s
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
     let invoiceApi = InvoiceApiSpy(ProblemsInStore = [ aProblem "m1" ])
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
     Assert.Equal<string list>(
         [ "m1" ],
-        AVal.force m.ProblemsAval |> List.map (fun p -> p.SourceMessageId)
+        AVal.force invoicesModule.ProblemsAval |> List.map (fun problem -> problem.SourceMessageId)
     )
 
-    m.Rescan()
+    invoicesModule.Rescan()
 
     Assert.Equal<string list>(
         [ "m1" ],
-        AVal.force m.ProblemsAval |> List.map (fun p -> p.SourceMessageId)
+        AVal.force invoicesModule.ProblemsAval |> List.map (fun problem -> problem.SourceMessageId)
     )
 
 [<Fact; Trait("Level", "Unit")>]
@@ -226,22 +226,22 @@ let ``a scan failure sets ErrorAval; a later success clears it`` () =
     let windowApi = ScanWindowApiSpy()
     let invoiceApi = InvoiceApiSpy(ScanResult = Error(failure "the store is unreachable"))
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    Assert.Equal(Some "the store is unreachable", AVal.force m.ErrorAval)
+    Assert.Equal(Some "the store is unreachable", AVal.force invoicesModule.ErrorAval)
 
     // The scan now succeeds and stores INV-1. The table is read back from the STORE, not from
     // ScanResult (design decision 6), so that is where the spy holds it.
     invoiceApi.ScanResult <- Ok { Invoices = [ anInvoice "INV-1" ]; Problems = [] }
     invoiceApi.GetInvoicesFor <- fun _ -> [ anInvoice "INV-1" ]
-    m.Rescan()
+    invoicesModule.Rescan()
 
-    Assert.Equal(None, AVal.force m.ErrorAval)
+    Assert.Equal(None, AVal.force invoicesModule.ErrorAval)
 
     Assert.Equal<string list>(
         [ "INV-1" ],
-        AVal.force m.InvoicesAval |> List.map (fun i -> i.Reference)
+        AVal.force invoicesModule.InvoicesAval |> List.map (fun invoice -> invoice.Reference)
     )
 
 [<Fact; Trait("Level", "Unit")>]
@@ -251,10 +251,10 @@ let ``deleting an invoice reloads the current window WITHOUT scanning the mailbo
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    m.DeleteInvoice "INV-9"
+    invoicesModule.DeleteInvoice "INV-9"
 
     // the ledger was re-queried for the current window...
     Assert.Equal<int list>([ 30; 30 ], invoiceApi.GetInvoicesCalls) // initial load + after delete
@@ -266,10 +266,10 @@ let ``un-deleting an invoice scans the mailbox, since only a scan can restore th
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    m.UndeleteInvoice "1" "INV-9"
+    invoicesModule.UndeleteInvoice "1" "INV-9"
 
     // initial load (30) then the rescan a restore needs (30)
     Assert.Equal<int list>([ 30; 30 ], invoiceApi.ScanCalls)
@@ -288,13 +288,13 @@ let ``a ledger read that fails during a scan is reported, not swallowed`` () =
     let invoiceApi =
         InvoiceApiSpy(GetInvoicesError = Some(failure "a stored invoice is unusable"))
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
     // the scan itself succeeded, so nothing else says the table is wrong
     Assert.Equal<int list>([ 30 ], invoiceApi.ScanCalls)
-    Assert.Equal<InvoiceUiType list>([], AVal.force m.InvoicesAval)
-    Assert.Equal(Some "a stored invoice is unusable", AVal.force m.ErrorAval)
+    Assert.Equal<InvoiceUiType list>([], AVal.force invoicesModule.InvoicesAval)
+    Assert.Equal(Some "a stored invoice is unusable", AVal.force invoicesModule.ErrorAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``the scan's own failure still wins over a later read's`` () =
@@ -306,38 +306,38 @@ let ``the scan's own failure still wins over a later read's`` () =
             GetInvoicesError = Some(failure "a stored invoice is unusable")
         )
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    Assert.Equal(Some "the mailbox is unreachable", AVal.force m.ErrorAval)
+    Assert.Equal(Some "the mailbox is unreachable", AVal.force invoicesModule.ErrorAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a problems read that fails during a window change is reported, not swallowed`` () =
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 30)
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    Assert.Equal(None, AVal.force m.ErrorAval)
+    Assert.Equal(None, AVal.force invoicesModule.ErrorAval)
 
     invoiceApi.GetProblemsError <- Some(failure "the problems table is unreachable")
-    m.SelectWindow 7
+    invoicesModule.SelectWindow 7
 
     // a window change reloads the ledger only (no scan), so nothing else reports this
     Assert.Equal<int list>([ 30 ], invoiceApi.ScanCalls)
-    Assert.Equal(Some "the problems table is unreachable", AVal.force m.ErrorAval)
+    Assert.Equal(Some "the problems table is unreachable", AVal.force invoicesModule.ErrorAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a scan-window read that fails during a load is reported, not swallowed`` () =
     let windowApi = ScanWindowApiSpy(GetScanWindowsResult = Error(failure "the window list is unreachable"))
     let invoiceApi = InvoiceApiSpy()
 
-    let m =
+    let invoicesModule =
         InvoicesModuleCreators.getInvoicesModule runSynchronously invoiceApi.Api windowApi.Api
 
-    Assert.Equal<ScanWindowUiType list>([], AVal.force m.ScanWindowsAval)
-    Assert.Equal(Some "the window list is unreachable", AVal.force m.ErrorAval)
+    Assert.Equal<ScanWindowUiType list>([], AVal.force invoicesModule.ScanWindowsAval)
+    Assert.Equal(Some "the window list is unreachable", AVal.force invoicesModule.ErrorAval)
 
 // ---- /settings/scan-windows: the same class, and this module creator had no test at all ----
 
@@ -345,26 +345,26 @@ let ``a scan-window read that fails during a load is reported, not swallowed`` (
 let ``the scan-windows browser loads the windows and marks the remembered choice`` () =
     let windowApi = ScanWindowApiSpy(GetSelectedResult = Ok 90)
 
-    let m =
+    let scanWindowsBrowserModule =
         InvoicesModuleCreators.getScanWindowsBrowserModule runSynchronously windowApi.Api
 
-    Assert.Equal<int list>([ 7; 14; 90 ], AVal.force m.WindowsAval |> List.map (fun w -> w.Days))
-    Assert.Equal(90, AVal.force m.SelectedWindowDaysAval)
-    Assert.Equal(None, AVal.force m.ErrorAval)
-    Assert.False(AVal.force m.IsLoadingAval)
+    Assert.Equal<int list>([ 7; 14; 90 ], AVal.force scanWindowsBrowserModule.WindowsAval |> List.map (fun window -> window.Days))
+    Assert.Equal(90, AVal.force scanWindowsBrowserModule.SelectedWindowDaysAval)
+    Assert.Equal(None, AVal.force scanWindowsBrowserModule.ErrorAval)
+    Assert.False(AVal.force scanWindowsBrowserModule.IsLoadingAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``the scan-windows browser reports a failed selected-window read rather than opening on nothing`` () =
     let windowApi =
         ScanWindowApiSpy(GetSelectedResult = Error(failure "the settings row is unreachable"))
 
-    let m =
+    let scanWindowsBrowserModule =
         InvoicesModuleCreators.getScanWindowsBrowserModule runSynchronously windowApi.Api
 
     // the list loaded, so without an alert the page just marks nothing as current
-    Assert.Equal<int list>([ 7; 14; 90 ], AVal.force m.WindowsAval |> List.map (fun w -> w.Days))
-    Assert.Equal(0, AVal.force m.SelectedWindowDaysAval)
-    Assert.Equal(Some "the settings row is unreachable", AVal.force m.ErrorAval)
+    Assert.Equal<int list>([ 7; 14; 90 ], AVal.force scanWindowsBrowserModule.WindowsAval |> List.map (fun window -> window.Days))
+    Assert.Equal(0, AVal.force scanWindowsBrowserModule.SelectedWindowDaysAval)
+    Assert.Equal(Some "the settings row is unreachable", AVal.force scanWindowsBrowserModule.ErrorAval)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``the module creator uses no Async.Start`` () =

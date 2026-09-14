@@ -15,7 +15,7 @@ open MyDogsbody.Domain.InvoiceTemplates
 /// attachment filename must produce one value, or the natural key later turns one invoice into
 /// two ledger rows and two calendar events. Folded where the two sources first meet.
 let foldReferenceWhitespace (raw: string) : string =
-    if isNull raw then "" else raw |> String.filter (fun c -> not (Char.IsWhiteSpace c))
+    if isNull raw then "" else raw |> String.filter (fun character -> not (Char.IsWhiteSpace character))
 
 /// One free-standing string - a mail subject, an attachment filename - put through the same
 /// normalization a document line gets, by making it a one-line, one-block document.

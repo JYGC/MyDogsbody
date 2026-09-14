@@ -13,12 +13,12 @@ let private runSynchronously (work: unit -> unit) = work ()
 
 let private failure message = MyDogsbodyException("test.action", message, ApplicationException(message))
 
-let private anAccount id defaultCalendarId needsReauth : GoogleAccountUiType =
+let private anAccount id defaultCalendarId needsReauthorisation : GoogleAccountUiType =
     {
         Id = id
         EmailAddress = $"{id}@example.com"
         DefaultInvoiceCalendarId = defaultCalendarId
-        NeedsReauthorisation = needsReauth
+        NeedsReauthorisation = needsReauthorisation
     }
 
 let private aCalendar id name isPrimary : CalendarUiType = { Id = id; Name = name; IsPrimary = isPrimary }
@@ -206,8 +206,8 @@ let ``CancelEditingClientSecret closes the field without saving anything`` () =
     let googleAccountApi =
         api
             (fun () -> Ok(Some "the-stored-secret"))
-            (fun s ->
-                saveCalls.Add s
+            (fun secret ->
+                saveCalls.Add secret
                 Ok())
             (fun () -> Ok [])
             (fun () -> failwith "unused")
@@ -556,7 +556,7 @@ let ``calendars fetched for several accounts at once all reach the picker map`` 
     // picker with neither the no-calendars caption nor an alert, because for that account nothing
     // failed and nothing came back empty - its calendars are simply not there.
     let accountCount = 8
-    let ids = [ for i in 1..accountCount -> string i ]
+    let ids = [ for accountNumber in 1..accountCount -> string accountNumber ]
     let started = Collections.Concurrent.ConcurrentQueue<Threading.Thread>()
 
     let onItsOwnThread (work: unit -> unit) =

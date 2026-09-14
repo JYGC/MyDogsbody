@@ -11,7 +11,7 @@ let private startWork (work: unit -> unit) = Async.Start(async { work () })
 
 let private confirmAndDelete
     (dialogService: IDialogService)
-    (m: MyDogsbody.UI.Types.Module.InvoicesModule)
+    (invoicesModule: MyDogsbody.UI.Types.Module.InvoicesModule)
     (invoice: InvoiceUiType) =
     task {
         let! confirmed =
@@ -23,14 +23,14 @@ let private confirmAndDelete
             )
 
         if confirmed.HasValue && confirmed.Value then
-            m.DeleteInvoice invoice.Id
+            invoicesModule.DeleteInvoice invoice.Id
     }
     :> System.Threading.Tasks.Task
     |> ignore
 
 let getView () =
     html.inject (fun (invoiceApi: InvoiceApi, scanWindowApi: ScanWindowApi, dialogService: IDialogService) ->
-        let m =
+        let invoicesModule =
             InvoicesModuleCreators.getInvoicesModule startWork invoiceApi scanWindowApi
 
         MudTabs'' {
@@ -39,19 +39,19 @@ let getView () =
 
             MudTabPanel'' {
                 Text "Invoices"
-                InvoicesComponents.invoicesTable m (confirmAndDelete dialogService m)
+                InvoicesComponents.invoicesTable invoicesModule (confirmAndDelete dialogService invoicesModule)
             }
 
             MudTabPanel'' {
                 Text "Problems"
-                OnClick(fun _ -> m.LoadProblems())
-                InvoicesComponents.problemsView m
+                OnClick(fun _ -> invoicesModule.LoadProblems())
+                InvoicesComponents.problemsView invoicesModule
             }
 
             MudTabPanel'' {
                 Text "Deleted"
-                OnClick(fun _ -> m.LoadTombstones())
-                InvoicesComponents.tombstonesView m
+                OnClick(fun _ -> invoicesModule.LoadTombstones())
+                InvoicesComponents.tombstonesView invoicesModule
             }
         })
 

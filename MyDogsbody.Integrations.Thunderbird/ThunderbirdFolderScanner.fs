@@ -30,9 +30,9 @@ let scan (rootPath: string) : ScanOutcome =
     // strings can reach the same physical directory without this ever noticing. Resolving the
     // reparse point to its final target is what makes a junction pointing at an ancestor
     // collapse onto the same visited entry as that ancestor.
-    let canonicalize (dir: string) : string option =
+    let canonicalize (directoryPath: string) : string option =
         try
-            let info = DirectoryInfo(Path.GetFullPath dir)
+            let info = DirectoryInfo(Path.GetFullPath directoryPath)
 
             match info.ResolveLinkTarget true with
             | null -> Some info.FullName
@@ -40,11 +40,11 @@ let scan (rootPath: string) : ScanOutcome =
         with _ ->
             None
 
-    let rec walk (dir: string) (depth: int) =
+    let rec walk (directoryPath: string) (depth: int) =
         if depth > MaxDepth then
             ()
         else
-            let canonical = canonicalize dir
+            let canonical = canonicalize directoryPath
 
             match canonical with
             | None -> ()
@@ -54,13 +54,13 @@ let scan (rootPath: string) : ScanOutcome =
                 else
                     let entries =
                         try
-                            Ok(Directory.GetFileSystemEntries dir)
+                            Ok(Directory.GetFileSystemEntries directoryPath)
                         with
-                        | :? UnauthorizedAccessException as ex -> Error ex.Message
-                        | :? IOException as ex -> Error ex.Message
+                        | :? UnauthorizedAccessException as caughtUnauthorizedAccessException -> Error caughtUnauthorizedAccessException.Message
+                        | :? IOException as caughtIOException -> Error caughtIOException.Message
 
                     match entries with
-                    | Error reason -> unreadable.Add { Path = dir; Reason = reason }
+                    | Error reason -> unreadable.Add { Path = directoryPath; Reason = reason }
                     | Ok entries ->
                         let hasPrefsJs =
                             entries
@@ -69,7 +69,7 @@ let scan (rootPath: string) : ScanOutcome =
                                 && String.Equals(Path.GetFileName entry, "prefs.js", StringComparison.OrdinalIgnoreCase))
 
                         if hasPrefsJs then
-                            profiles.Add dir
+                            profiles.Add directoryPath
 
                         for entry in entries do
                             if Directory.Exists entry then

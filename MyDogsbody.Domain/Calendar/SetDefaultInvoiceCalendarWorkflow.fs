@@ -22,13 +22,13 @@ let setDefaultInvoiceCalendar
         let! accounts = listGoogleAccounts ()
 
         let! account =
-            match accounts |> List.tryFind (fun a -> a.Id = accountId) with
+            match accounts |> List.tryFind (fun account -> account.Id = accountId) with
             | Some account -> Ok account
             | None -> Error (AccountNotRegistered accountId)
 
         let! calendars = listCalendars accountId
 
-        let calendarExists = calendars |> List.exists (fun c -> c.Id = calendarId)
+        let calendarExists = calendars |> List.exists (fun calendar -> calendar.Id = calendarId)
 
         if not calendarExists then
             return! Error (CalendarNoLongerExists calendarId)

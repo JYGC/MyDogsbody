@@ -12,13 +12,13 @@ let private buildRunner (connectionString: string) =
     let serviceProvider =
         ServiceCollection()
             .AddFluentMigratorCore()
-            .ConfigureRunner(fun rb ->
-                rb.AddSQLite()
+            .ConfigureRunner(fun runnerBuilder ->
+                runnerBuilder.AddSQLite()
                   .WithGlobalConnectionString(connectionString)
                   .ScanIn(typeof<Migrations.CreateBlogTable>.Assembly).For.Migrations()
                 |> ignore
             )
-            .AddLogging(fun lb -> lb.AddFluentMigratorConsole() |> ignore)
+            .AddLogging(fun loggingBuilder -> loggingBuilder.AddFluentMigratorConsole() |> ignore)
             .BuildServiceProvider(false)
 
     serviceProvider, serviceProvider.GetRequiredService<IMigrationRunner>()

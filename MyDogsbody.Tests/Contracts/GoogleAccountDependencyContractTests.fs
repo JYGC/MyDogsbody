@@ -108,14 +108,14 @@ let private withFakeDependencies (test: GoogleAccountDependencies -> unit) =
             ListGoogleAccounts = fun () -> Ok(List.ofSeq accounts)
             SaveGoogleAccount =
                 fun account ->
-                    match accounts |> Seq.tryFindIndex (fun a -> a.Id = account.Id) with
+                    match accounts |> Seq.tryFindIndex (fun existingAccount -> existingAccount.Id = account.Id) with
                     | Some index -> accounts.[index] <- account
                     | None -> accounts.Add account
 
                     Ok account
             RemoveGoogleAccount =
                 fun accountId ->
-                    match accounts |> Seq.tryFindIndex (fun a -> a.Id = accountId) with
+                    match accounts |> Seq.tryFindIndex (fun existingAccount -> existingAccount.Id = accountId) with
                     | Some index ->
                         accounts.RemoveAt index
                         Ok true
@@ -155,23 +155,23 @@ let private anAccount id emailValue : RegisteredGoogleAccount =
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``LoadClientSecret returns None before anything is saved`` (implementation: string) =
-    withImplementation implementation (fun deps -> Assert.Equal(None, deps.LoadClientSecret() |> okOrFail "LoadClientSecret"))
+    withImplementation implementation (fun dependencies -> Assert.Equal(None, dependencies.LoadClientSecret() |> okOrFail "LoadClientSecret"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``SaveClientSecret then LoadClientSecret round trips the value`` (implementation: string) =
-    withImplementation implementation (fun deps ->
-        deps.SaveClientSecret "the-secret" |> okOrFail "SaveClientSecret"
-        Assert.Equal(Some "the-secret", deps.LoadClientSecret() |> okOrFail "LoadClientSecret")
+    withImplementation implementation (fun dependencies ->
+        dependencies.SaveClientSecret "the-secret" |> okOrFail "SaveClientSecret"
+        Assert.Equal(Some "the-secret", dependencies.LoadClientSecret() |> okOrFail "LoadClientSecret")
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``saving a client secret twice replaces the stored value`` (implementation: string) =
-    withImplementation implementation (fun deps ->
-        deps.SaveClientSecret "first" |> okOrFail "SaveClientSecret first"
-        deps.SaveClientSecret "second" |> okOrFail "SaveClientSecret second"
-        Assert.Equal(Some "second", deps.LoadClientSecret() |> okOrFail "LoadClientSecret")
+    withImplementation implementation (fun dependencies ->
+        dependencies.SaveClientSecret "first" |> okOrFail "SaveClientSecret first"
+        dependencies.SaveClientSecret "second" |> okOrFail "SaveClientSecret second"
+        Assert.Equal(Some "second", dependencies.LoadClientSecret() |> okOrFail "LoadClientSecret")
     )
 
 // ---------- accounts ----------
@@ -179,15 +179,15 @@ let ``saving a client secret twice replaces the stored value`` (implementation: 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``ListGoogleAccounts returns an empty list for a fresh store`` (implementation: string) =
-    withImplementation implementation (fun deps -> Assert.Empty(deps.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts"))
+    withImplementation implementation (fun dependencies -> Assert.Empty(dependencies.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``SaveGoogleAccount then ListGoogleAccounts returns every field intact`` (implementation: string) =
-    withImplementation implementation (fun deps ->
-        let saved = anAccount "507f1f77bcf86cd799439011" "person@gmail.com" |> deps.SaveGoogleAccount |> okOrFail "SaveGoogleAccount"
+    withImplementation implementation (fun dependencies ->
+        let saved = anAccount "507f1f77bcf86cd799439011" "person@gmail.com" |> dependencies.SaveGoogleAccount |> okOrFail "SaveGoogleAccount"
 
-        let listed = Assert.Single(deps.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts")
+        let listed = Assert.Single(dependencies.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts")
         Assert.Equal(saved.Id, listed.Id)
         Assert.Equal("person@gmail.com", GoogleEmail.value listed.EmailAddress)
         Assert.Equal(None, listed.DefaultInvoiceCalendar)
@@ -197,36 +197,36 @@ let ``SaveGoogleAccount then ListGoogleAccounts returns every field intact`` (im
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``saving an account twice updates rather than duplicating`` (implementation: string) =
-    withImplementation implementation (fun deps ->
+    withImplementation implementation (fun dependencies ->
         let original = anAccount "507f1f77bcf86cd799439011" "person@gmail.com"
-        original |> deps.SaveGoogleAccount |> okOrFail "SaveGoogleAccount first" |> ignore
+        original |> dependencies.SaveGoogleAccount |> okOrFail "SaveGoogleAccount first" |> ignore
 
         { original with NeedsReauthorisation = true }
-        |> deps.SaveGoogleAccount
+        |> dependencies.SaveGoogleAccount
         |> okOrFail "SaveGoogleAccount second"
         |> ignore
 
-        let listed = Assert.Single(deps.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts")
+        let listed = Assert.Single(dependencies.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts")
         Assert.True listed.NeedsReauthorisation
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``RemoveGoogleAccount deletes a known account and reports true`` (implementation: string) =
-    withImplementation implementation (fun deps ->
+    withImplementation implementation (fun dependencies ->
         let saved =
-            anAccount "507f1f77bcf86cd799439011" "person@gmail.com" |> deps.SaveGoogleAccount |> okOrFail "SaveGoogleAccount"
+            anAccount "507f1f77bcf86cd799439011" "person@gmail.com" |> dependencies.SaveGoogleAccount |> okOrFail "SaveGoogleAccount"
 
-        Assert.True(deps.RemoveGoogleAccount saved.Id |> okOrFail "RemoveGoogleAccount")
-        Assert.Empty(deps.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts")
+        Assert.True(dependencies.RemoveGoogleAccount saved.Id |> okOrFail "RemoveGoogleAccount")
+        Assert.Empty(dependencies.ListGoogleAccounts() |> okOrFail "ListGoogleAccounts")
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``RemoveGoogleAccount reports false for an id that carries no row`` (implementation: string) =
-    withImplementation implementation (fun deps ->
+    withImplementation implementation (fun dependencies ->
         let unknownId = GoogleAccountId.create "507f1f77bcf86cd799439099" |> valueOrFail
-        Assert.False(deps.RemoveGoogleAccount unknownId |> okOrFail "RemoveGoogleAccount")
+        Assert.False(dependencies.RemoveGoogleAccount unknownId |> okOrFail "RemoveGoogleAccount")
     )
 
 // ---------- discarding an authorisation ----------
@@ -239,40 +239,40 @@ let ``RemoveGoogleAccount reports false for an id that carries no row`` (impleme
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``DiscardAuthorisation removes the authorisation it names`` (implementation: string) =
-    withImplementation implementation (fun deps ->
+    withImplementation implementation (fun dependencies ->
         let accountId = GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail
-        deps.StoreAuthorisationFor accountId
-        Assert.Equal(1, deps.AuthorisationCount())
+        dependencies.StoreAuthorisationFor accountId
+        Assert.Equal(1, dependencies.AuthorisationCount())
 
-        deps.DiscardAuthorisation accountId |> okOrFail "DiscardAuthorisation"
+        dependencies.DiscardAuthorisation accountId |> okOrFail "DiscardAuthorisation"
 
-        Assert.Equal(0, deps.AuthorisationCount())
+        Assert.Equal(0, dependencies.AuthorisationCount())
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``DiscardAuthorisation leaves every other account's authorisation alone`` (implementation: string) =
-    withImplementation implementation (fun deps ->
+    withImplementation implementation (fun dependencies ->
         let discarded = GoogleAccountId.create "507f1f77bcf86cd799439011" |> valueOrFail
         let kept = GoogleAccountId.create "507f1f77bcf86cd799439012" |> valueOrFail
-        deps.StoreAuthorisationFor discarded
-        deps.StoreAuthorisationFor kept
+        dependencies.StoreAuthorisationFor discarded
+        dependencies.StoreAuthorisationFor kept
 
-        deps.DiscardAuthorisation discarded |> okOrFail "DiscardAuthorisation"
+        dependencies.DiscardAuthorisation discarded |> okOrFail "DiscardAuthorisation"
 
-        Assert.Equal(1, deps.AuthorisationCount())
+        Assert.Equal(1, dependencies.AuthorisationCount())
     )
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
 let ``DiscardAuthorisation succeeds for an id that was never authorised`` (implementation: string) =
-    withImplementation implementation (fun deps ->
+    withImplementation implementation (fun dependencies ->
         // Nothing to discard is not a failure - the workflow calls this on a path where the
         // authorisation may already be gone, and a reported error there would replace
         // AccountAlreadyRegistered with noise.
         let accountId = GoogleAccountId.create "507f1f77bcf86cd799439099" |> valueOrFail
 
-        deps.DiscardAuthorisation accountId |> okOrFail "DiscardAuthorisation"
+        dependencies.DiscardAuthorisation accountId |> okOrFail "DiscardAuthorisation"
 
-        Assert.Equal(0, deps.AuthorisationCount())
+        Assert.Equal(0, dependencies.AuthorisationCount())
     )

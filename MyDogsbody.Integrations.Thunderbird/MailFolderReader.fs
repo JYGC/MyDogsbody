@@ -36,12 +36,12 @@ let private dateHeaderPattern = Regex(@"(?im)^Date:[ \t]*(?<value>.+?)\r?$", Reg
 let private messageIdHeaderPattern = Regex(@"(?im)^Message-ID:[ \t]*(?<value>.+?)\r?$", RegexOptions.Compiled)
 
 let private tryParseHeaderDate (headerBlock: string) : DateTimeOffset option =
-    let m = dateHeaderPattern.Match headerBlock
+    let dateMatch = dateHeaderPattern.Match headerBlock
 
-    if not m.Success then
+    if not dateMatch.Success then
         None
     else
-        match DateUtils.TryParse(m.Groups.["value"].Value) with
+        match DateUtils.TryParse(dateMatch.Groups.["value"].Value) with
         | true, date -> Some date
         | false, _ -> None
 
@@ -53,9 +53,9 @@ let private synthesizeMessageId (headerBlock: string) : string =
     "synthesized:" + Convert.ToHexString(bytes).ToLowerInvariant()
 
 let private messageIdOf (headerBlock: string) : string =
-    let m = messageIdHeaderPattern.Match headerBlock
-    if m.Success && not (String.IsNullOrWhiteSpace m.Groups.["value"].Value) then
-        m.Groups.["value"].Value.Trim()
+    let messageIdMatch = messageIdHeaderPattern.Match headerBlock
+    if messageIdMatch.Success && not (String.IsNullOrWhiteSpace messageIdMatch.Groups.["value"].Value) then
+        messageIdMatch.Groups.["value"].Value.Trim()
     else
         synthesizeMessageId headerBlock
 
@@ -157,10 +157,10 @@ let resumeOffset
     match existingWatermark with
     // Written before the cutoff was recorded: unknown, not "no cutoff". One full re-read, after
     // which the stored value is real.
-    | Some wm when wm.CutoffReached = DateTime.MinValue -> 0L
-    | Some wm when cutoffAt < wm.CutoffReached -> 0L // the window widened
-    | Some wm when currentSize = wm.SizeBytes && currentModifiedAt = wm.ModifiedAt -> wm.OffsetReached
-    | Some wm when currentSize > wm.SizeBytes && currentModifiedAt >= wm.ModifiedAt -> wm.OffsetReached
+    | Some watermark when watermark.CutoffReached = DateTime.MinValue -> 0L
+    | Some watermark when cutoffAt < watermark.CutoffReached -> 0L // the window widened
+    | Some watermark when currentSize = watermark.SizeBytes && currentModifiedAt = watermark.ModifiedAt -> watermark.OffsetReached
+    | Some watermark when currentSize > watermark.SizeBytes && currentModifiedAt >= watermark.ModifiedAt -> watermark.OffsetReached
     | _ -> 0L // no watermark, a shrunk file, or an inconsistent mtime - full re-read
 
 /// "From " as bytes: F r o m space.
@@ -186,15 +186,15 @@ let segmentStartOffsets (bytes: byte[]) : int list =
     if startsWithFrom bytes 0 then
         offsets.Add 0
 
-    // A boundary "From " begins at j+1, where bytes.[j] = '\n' and the line before it was blank:
-    // bytes.[j-1] = '\n', or bytes.[j-1] = '\r' with bytes.[j-2] = '\n'.
-    for j in 1 .. bytes.Length - 2 do
-        if bytes.[j] = 10uy && startsWithFrom bytes (j + 1) then
+    // A boundary "From " begins at index+1, where bytes.[index] = '\n' and the line before it was
+    // blank: bytes.[index-1] = '\n', or bytes.[index-1] = '\r' with bytes.[index-2] = '\n'.
+    for index in 1 .. bytes.Length - 2 do
+        if bytes.[index] = 10uy && startsWithFrom bytes (index + 1) then
             let blankLineBefore =
-                bytes.[j - 1] = 10uy || (bytes.[j - 1] = 13uy && j >= 2 && bytes.[j - 2] = 10uy)
+                bytes.[index - 1] = 10uy || (bytes.[index - 1] = 13uy && index >= 2 && bytes.[index - 2] = 10uy)
 
             if blankLineBefore then
-                offsets.Add(j + 1)
+                offsets.Add(index + 1)
 
     List.ofSeq offsets
 
@@ -273,7 +273,7 @@ let foldMboxSegments
                 progress <- false
 
                 if seeking then
-                    match segmentStartOffsets pending |> List.filter (fun o -> o > 0) with
+                    match segmentStartOffsets pending |> List.filter (fun boundaryOffset -> boundaryOffset > 0) with
                     | boundary :: _ ->
                         pendingStart <- pendingStart + int64 boundary
                         pending <- pending.[boundary..]
@@ -295,14 +295,19 @@ let foldMboxSegments
                         pending <- pending.[first..]
                         progress <- true
                     | offsets ->
-                        let bs = List.toArray offsets
+                        let boundaryOffsets = List.toArray offsets
 
-                        if bs.Length >= 2 then
+                        if boundaryOffsets.Length >= 2 then
                             // Every boundary but the last closes a complete segment.
-                            for i in 0 .. bs.Length - 2 do
-                                state <- onSegment state (pendingStart + int64 bs.[i]) pending.[bs.[i] .. bs.[i + 1] - 1] false
+                            for index in 0 .. boundaryOffsets.Length - 2 do
+                                state <-
+                                    onSegment
+                                        state
+                                        (pendingStart + int64 boundaryOffsets.[index])
+                                        pending.[boundaryOffsets.[index] .. boundaryOffsets.[index + 1] - 1]
+                                        false
 
-                            let last = bs.[bs.Length - 1]
+                            let last = boundaryOffsets.[boundaryOffsets.Length - 1]
                             pendingStart <- pendingStart + int64 last
                             pending <- pending.[last..]
                         elif pending.Length > maxMessageBytes then
@@ -470,8 +475,9 @@ let private readMboxFile (cutoff: ScanCutoff) (path: string) (fromOffset: int64)
 
         Ok(List.ofSeq messages, finalOffset)
     with
-    | :? IOException as ex -> Error(MailFolderUnreadable(path, ex.Message))
-    | :? UnauthorizedAccessException as ex -> Error(MailFolderUnreadable(path, ex.Message))
+    | :? IOException as caughtIOException -> Error(MailFolderUnreadable(path, caughtIOException.Message))
+    | :? UnauthorizedAccessException as caughtUnauthorizedAccessException ->
+        Error(MailFolderUnreadable(path, caughtUnauthorizedAccessException.Message))
     | :? OutOfMemoryException ->
         Error(MailFolderUnreadable(path, "The folder holds a single message too large to read into memory."))
 
@@ -481,9 +487,9 @@ let private readMaildirFolder (cutoff: ScanCutoff) (folderDirectory: string) : R
     try
         let files =
             [ "cur"; "new" ]
-            |> List.collect (fun sub ->
-                let dir = Path.Combine(folderDirectory, sub)
-                if Directory.Exists dir then Directory.GetFiles dir |> Array.toList else [])
+            |> List.collect (fun subdirectoryName ->
+                let subdirectoryPath = Path.Combine(folderDirectory, subdirectoryName)
+                if Directory.Exists subdirectoryPath then Directory.GetFiles subdirectoryPath |> Array.toList else [])
 
         let messages =
             files
@@ -509,8 +515,9 @@ let private readMaildirFolder (cutoff: ScanCutoff) (folderDirectory: string) : R
 
         Ok messages
     with
-    | :? IOException as ex -> Error(MailFolderUnreadable(folderDirectory, ex.Message))
-    | :? UnauthorizedAccessException as ex -> Error(MailFolderUnreadable(folderDirectory, ex.Message))
+    | :? IOException as caughtIOException -> Error(MailFolderUnreadable(folderDirectory, caughtIOException.Message))
+    | :? UnauthorizedAccessException as caughtUnauthorizedAccessException ->
+        Error(MailFolderUnreadable(folderDirectory, caughtUnauthorizedAccessException.Message))
 
 /// Reads one folder, consulting and then updating its watermark. Exposed (not private) so the
 /// locked-file and incremental-read scenarios are testable directly against one file, without
@@ -580,7 +587,7 @@ let private accountWithReadableStore
 
         let! account =
             match accountOpt with
-            | Some a -> Ok a
+            | Some discoveredAccount -> Ok discoveredAccount
             | None -> Error(MailAccountNotFound accountId)
 
         if not (Directory.Exists account.StoreDirectory) then
@@ -602,13 +609,14 @@ let read
     result {
         let! account = accountWithReadableStore lookupAccount accountId
 
-        let orderedFolders = account.Folders |> List.filter (fun f -> f.IsScannable) |> List.sortBy (fun f -> f.SizeBytes)
+        let orderedFolders =
+            account.Folders |> List.filter (fun folder -> folder.IsScannable) |> List.sortBy (fun folder -> folder.SizeBytes)
 
         let messages =
             orderedFolders
             |> List.collect (fun folder ->
                 match readFolder loadWatermark saveWatermark accountId folder account.StoreDirectory account.StoreFormat cutoff with
-                | Ok msgs -> msgs
+                | Ok folderMessages -> folderMessages
                 | Error _ -> [])
 
         return messages
@@ -632,9 +640,9 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
             match account.StoreFormat with
             | Maildir ->
                 [ "cur"; "new" ]
-                |> List.sumBy (fun sub ->
-                    let dir = Path.Combine(fullPath, sub)
-                    if Directory.Exists dir then Directory.GetFiles(dir).Length else 0)
+                |> List.sumBy (fun subdirectoryName ->
+                    let subdirectoryPath = Path.Combine(fullPath, subdirectoryName)
+                    if Directory.Exists subdirectoryPath then Directory.GetFiles(subdirectoryPath).Length else 0)
                 |> Ok
             | Mbox ->
                 if not (File.Exists fullPath) then
@@ -658,7 +666,7 @@ let countMessages (lookupAccount: LookupAccount) (accountId: MailAccountId) : Re
 
         return!
             account.Folders
-            |> List.filter (fun f -> f.IsScannable)
+            |> List.filter (fun folder -> folder.IsScannable)
             |> List.fold
                 (fun running folder ->
                     running |> Result.bind (fun total -> countOneFolder folder |> Result.map (fun count -> total + count)))

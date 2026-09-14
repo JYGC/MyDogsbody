@@ -29,7 +29,7 @@ let ``readText splits on line breaks and keeps order`` () =
             [ "Invoice Number: TXT-9001"; "Amount Due: $42.00"; "Due 1 March 2026" ],
             lines |> List.map (fun line -> line.Text)
         )
-    | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
+    | Error error -> Assert.Fail($"Expected Ok, got Error {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``readText makes a blank line a block boundary and drops the blank`` () =
@@ -43,15 +43,15 @@ let ``readText makes a blank line a block boundary and drops the blank`` () =
             [ "Header line", 0; "Second line", 0; "Paragraph after the gap", 1 ],
             lines |> List.map (fun line -> line.Text, line.BlockIndex)
         )
-    | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
+    | Error error -> Assert.Fail($"Expected Ok, got Error {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``readText collapses consecutive blank lines into one boundary`` () =
     let actual = PlainTextDocumentReader.readText (source (utf8 "one\n\n\n\ntwo"))
 
     match actual with
-    | Ok lines -> Assert.Equal<(string * int) list>([ "one", 0; "two", 1 ], lines |> List.map (fun l -> l.Text, l.BlockIndex))
-    | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
+    | Ok lines -> Assert.Equal<(string * int) list>([ "one", 0; "two", 1 ], lines |> List.map (fun line -> line.Text, line.BlockIndex))
+    | Error error -> Assert.Fail($"Expected Ok, got Error {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``readText reports DocumentUnreadable for zero bytes`` () =

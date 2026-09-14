@@ -27,7 +27,7 @@ let ``readText returns each .docx paragraph as a line in its own block`` () =
             lines |> List.map (fun line -> line.Text)
         )
         Assert.Equal<int list>([ 0; 1; 2 ], lines |> List.map (fun line -> line.BlockIndex))
-    | Error err -> Assert.Fail($"Expected Ok, but got Error: {err}")
+    | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText reports DocumentFormatUnsupported naming "doc" for a legacy binary Word file`` () =

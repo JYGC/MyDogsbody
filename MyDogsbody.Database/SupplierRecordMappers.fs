@@ -38,14 +38,14 @@ let toStoredSupplier
     (row: SupplierRecord)
     (matcherRows: SupplierMatcherRecord list)
     : Result<StoredSupplier, string> =
-    let rec mapMatchers remaining acc =
+    let rec mapMatchers remaining accumulatedMatchers =
         match remaining with
-        | [] -> Ok (List.rev acc)
+        | [] -> Ok (List.rev accumulatedMatchers)
         | (matcherRow: SupplierMatcherRecord) :: rest ->
             result {
                 let! kind = fromMatcherKindString matcherRow.Kind
                 let! matcher = SupplierMatcher.create kind matcherRow.Value
-                return! mapMatchers rest (matcher :: acc)
+                return! mapMatchers rest (matcher :: accumulatedMatchers)
             }
 
     result {

@@ -106,16 +106,16 @@ let private withProfileRootImplementation (name: string) (test: ProfileRootDepen
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof profileRootImplementations)>]
 let ``LoadProfileRoot returns None for a fresh store`` (implementation: string) =
-    withProfileRootImplementation implementation (fun deps -> Assert.Equal(None, deps.Load() |> okOrFail "Load"))
+    withProfileRootImplementation implementation (fun dependencies -> Assert.Equal(None, dependencies.Load() |> okOrFail "Load"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof profileRootImplementations)>]
 let ``a saved profile root is visible to a later load`` (implementation: string) =
-    withProfileRootImplementation implementation (fun deps ->
+    withProfileRootImplementation implementation (fun dependencies ->
         let path = ProfileRootPath.create @"C:\Thunderbird" |> valueOrFail
-        deps.Save path |> okOrFail "Save"
+        dependencies.Save path |> okOrFail "Save"
 
-        let loaded = deps.Load() |> okOrFail "Load"
+        let loaded = dependencies.Load() |> okOrFail "Load"
         Assert.Equal(Some @"C:\Thunderbird", loaded |> Option.map ProfileRootPath.value))
 
 // ---------- Accounts: LoadMailAccounts / SaveMailAccounts ----------
@@ -163,16 +163,16 @@ let private withAccountsImplementation (name: string) (test: AccountsDependencie
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof accountsImplementations)>]
 let ``LoadMailAccounts returns an empty list for a fresh store`` (implementation: string) =
-    withAccountsImplementation implementation (fun deps -> Assert.Empty(deps.Load() |> okOrFail "Load"))
+    withAccountsImplementation implementation (fun dependencies -> Assert.Empty(dependencies.Load() |> okOrFail "Load"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof accountsImplementations)>]
 let ``a saved account with a folder is visible to a later load`` (implementation: string) =
-    withAccountsImplementation implementation (fun deps ->
+    withAccountsImplementation implementation (fun dependencies ->
         let account = anAccount @"C:\p|account1" @"C:\p\a1"
-        deps.Save [ account ] |> okOrFail "Save"
+        dependencies.Save [ account ] |> okOrFail "Save"
 
-        let loaded = deps.Load() |> okOrFail "Load"
+        let loaded = dependencies.Load() |> okOrFail "Load"
         let readBack = Assert.Single loaded
         Assert.Equal(@"C:\p|account1", MailAccountId.value readBack.Id)
         let folder = Assert.Single readBack.Folders
@@ -181,11 +181,11 @@ let ``a saved account with a folder is visible to a later load`` (implementation
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof accountsImplementations)>]
 let ``SaveMailAccounts replaces the previous set rather than accumulating`` (implementation: string) =
-    withAccountsImplementation implementation (fun deps ->
-        deps.Save [ anAccount @"C:\p|account1" @"C:\p\a1" ] |> okOrFail "Save 1"
-        deps.Save [ anAccount @"C:\p|account2" @"C:\p\a2" ] |> okOrFail "Save 2"
+    withAccountsImplementation implementation (fun dependencies ->
+        dependencies.Save [ anAccount @"C:\p|account1" @"C:\p\a1" ] |> okOrFail "Save 1"
+        dependencies.Save [ anAccount @"C:\p|account2" @"C:\p\a2" ] |> okOrFail "Save 2"
 
-        let loaded = deps.Load() |> okOrFail "Load"
+        let loaded = dependencies.Load() |> okOrFail "Load"
         let only = Assert.Single loaded
         Assert.Equal(@"C:\p|account2", MailAccountId.value only.Id))
 
@@ -230,18 +230,18 @@ let private withSelectionImplementation (name: string) (test: SelectionDependenc
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof selectionImplementations)>]
 let ``LoadSelectedMailAccount returns None for a fresh store`` (implementation: string) =
-    withSelectionImplementation implementation (fun deps -> Assert.Equal(None, deps.Load() |> okOrFail "Load"))
+    withSelectionImplementation implementation (fun dependencies -> Assert.Equal(None, dependencies.Load() |> okOrFail "Load"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof selectionImplementations)>]
 let ``a saved selection is visible to a later load, and clearing it persists as absent`` (implementation: string) =
-    withSelectionImplementation implementation (fun deps ->
+    withSelectionImplementation implementation (fun dependencies ->
         let id = MailAccountId.create @"C:\p|account1" |> valueOrFail
-        deps.Save(Some id) |> okOrFail "Save"
-        Assert.Equal(Some id, deps.Load() |> okOrFail "Load")
+        dependencies.Save(Some id) |> okOrFail "Save"
+        Assert.Equal(Some id, dependencies.Load() |> okOrFail "Load")
 
-        deps.Save None |> okOrFail "Clear"
-        Assert.Equal(None, deps.Load() |> okOrFail "Load"))
+        dependencies.Save None |> okOrFail "Clear"
+        Assert.Equal(None, dependencies.Load() |> okOrFail "Load"))
 
 // ---------- Watermarks: LoadWatermark / SaveWatermark (integration-internal) / ClearWatermarks ----------
 
@@ -312,28 +312,28 @@ let private withWatermarkImplementation (name: string) (test: WatermarkDependenc
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof watermarkImplementations)>]
 let ``LoadWatermark returns None when nothing has been saved`` (implementation: string) =
-    withWatermarkImplementation implementation (fun deps ->
+    withWatermarkImplementation implementation (fun dependencies ->
         let id = MailAccountId.create "a" |> valueOrFail
-        Assert.Equal(None, deps.Load id "INBOX" |> okOrFail "Load"))
+        Assert.Equal(None, dependencies.Load id "INBOX" |> okOrFail "Load"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof watermarkImplementations)>]
 let ``a saved watermark is visible to a later load, and ClearWatermarks removes it`` (implementation: string) =
-    withWatermarkImplementation implementation (fun deps ->
+    withWatermarkImplementation implementation (fun dependencies ->
         let id = MailAccountId.create "a" |> valueOrFail
         let watermark: FolderWatermark =
             { SizeBytes = 100L; ModifiedAt = DateTime(2026, 8, 20); OffsetReached = 50L; CutoffReached = DateTime(2026, 8, 1) }
 
-        deps.Save id "INBOX" watermark |> okOrFail "Save"
-        Assert.Equal(Some watermark, deps.Load id "INBOX" |> okOrFail "Load")
+        dependencies.Save id "INBOX" watermark |> okOrFail "Save"
+        Assert.Equal(Some watermark, dependencies.Load id "INBOX" |> okOrFail "Load")
 
-        deps.Clear id |> okOrFail "Clear"
-        Assert.Equal(None, deps.Load id "INBOX" |> okOrFail "Load"))
+        dependencies.Clear id |> okOrFail "Clear"
+        Assert.Equal(None, dependencies.Load id "INBOX" |> okOrFail "Load"))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof watermarkImplementations)>]
 let ``a watermark carrying a filesystem modification time round trips it exactly, kind included`` (implementation: string) =
-    withWatermarkImplementation implementation (fun deps ->
+    withWatermarkImplementation implementation (fun dependencies ->
         let id = MailAccountId.create "a" |> valueOrFail
 
         // Exactly the value readFolder stores: File.GetLastWriteTimeUtc, so Kind = Utc, and NTFS
@@ -347,10 +347,10 @@ let ``a watermark carrying a filesystem modification time round trips it exactly
         let watermark: FolderWatermark =
             { SizeBytes = 100L; ModifiedAt = modifiedAt; OffsetReached = 50L; CutoffReached = DateTime(2026, 8, 1) }
 
-        deps.Save id "INBOX" watermark |> okOrFail "Save"
+        dependencies.Save id "INBOX" watermark |> okOrFail "Save"
 
         let loaded =
-            deps.Load id "INBOX"
+            dependencies.Load id "INBOX"
             |> okOrFail "Load"
             |> Option.defaultWith (fun () -> failwith "expected a saved watermark")
 
@@ -409,9 +409,9 @@ let private withCountMessagesImplementation (name: string) (test: CountMessagesD
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof countMessagesImplementations)>]
 let ``CountMessages returns MailAccountNotFound for an unknown account`` (implementation: string) =
-    withCountMessagesImplementation implementation (fun deps ->
+    withCountMessagesImplementation implementation (fun dependencies ->
         let unknown = MailAccountId.create "not-alpha" |> valueOrFail
-        Assert.Equal(Error(MailAccountNotFound unknown), deps.Count unknown))
+        Assert.Equal(Error(MailAccountNotFound unknown), dependencies.Count unknown))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof countMessagesImplementations)>]
@@ -420,10 +420,10 @@ let ``CountMessages reports a store directory that is gone rather than counting 
     // arrive as the same one - a count of zero for an account whose mail directory has been
     // deleted or whose drive is unplugged is a silent wrong result. The `alpha` case above pins
     // the other half: a store that IS there and holds nothing still counts zero.
-    withCountMessagesImplementation implementation (fun deps ->
+    withCountMessagesImplementation implementation (fun dependencies ->
         let gone = MailAccountId.create "gone" |> valueOrFail
 
-        match deps.Count gone with
+        match dependencies.Count gone with
         | Error(StoreDirectoryMissing(id, path)) ->
             Assert.Equal(gone, id)
             Assert.Equal(goneStoreDirectory, path)
@@ -435,10 +435,10 @@ let ``CountMessages counts an account whose store directory is on disk`` (implem
     // The half the guard must not swallow. Both sides hold different fixtures, so the count
     // itself differs - what the contract pins is that a store that IS there is counted, never
     // refused as missing.
-    withCountMessagesImplementation implementation (fun deps ->
+    withCountMessagesImplementation implementation (fun dependencies ->
         let alpha = MailAccountId.create "alpha" |> valueOrFail
 
-        match deps.Count alpha with
+        match dependencies.Count alpha with
         | Ok count -> Assert.True(count >= 0)
         | other -> Assert.Fail(sprintf "Expected Ok, but got: %A" other))
 
@@ -453,8 +453,8 @@ let private discoverMailAccounts: DiscoverMailAccounts =
 
         let accounts =
             scanOutcome.ProfileDirectories
-            |> List.collect (fun dir ->
-                match ThunderbirdAccountReader.read dir with
+            |> List.collect (fun discoveredDirectory ->
+                match ThunderbirdAccountReader.read discoveredDirectory with
                 | Ok accts -> accts
                 | Error _ -> [])
             |> List.map (fun account ->
@@ -502,9 +502,9 @@ let private withDiscoverImplementation (name: string) (test: DiscoverDependencie
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof discoverImplementations)>]
 let ``DiscoverMailAccounts finds at least one account under the measured-shape fixture`` (implementation: string) =
-    withDiscoverImplementation implementation (fun deps ->
+    withDiscoverImplementation implementation (fun dependencies ->
         let path = ProfileRootPath.create measuredShapeProfile |> valueOrFail
-        let result = deps.Discover path |> okOrFail "Discover"
+        let result = dependencies.Discover path |> okOrFail "Discover"
         Assert.NotEmpty result.Accounts
         Assert.Equal<string list>([ measuredShapeProfile ], result.ProfilesFound)
         // Discovery never reads the stored selection, so neither implementation may claim to have
@@ -514,14 +514,14 @@ let ``DiscoverMailAccounts finds at least one account under the measured-shape f
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof discoverImplementations)>]
 let ``DiscoverMailAccounts reports NoProfileFound for a folder with no prefs.js`` (implementation: string) =
-    withDiscoverImplementation implementation (fun deps ->
+    withDiscoverImplementation implementation (fun dependencies ->
         let emptyFolder = Path.Combine(Path.GetTempPath(), $"mdb-contract-{Guid.NewGuid()}")
         Directory.CreateDirectory emptyFolder |> ignore
 
         try
             let path = ProfileRootPath.create emptyFolder |> valueOrFail
 
-            match deps.Discover path with
+            match dependencies.Discover path with
             | Error(NoProfileFound reportedPath) -> Assert.Equal(emptyFolder, reportedPath)
             | other -> Assert.Fail($"Expected Error(NoProfileFound _), but got: {other}")
         finally
@@ -585,11 +585,11 @@ let private withReadMailFolderImplementation (name: string) (test: ReadMailFolde
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof readMailFolderImplementations)>]
 let ``ReadMailFolder returns at least one message with every field populated for a known account`` (implementation: string) =
-    withReadMailFolderImplementation implementation (fun deps ->
+    withReadMailFolderImplementation implementation (fun dependencies ->
         let id = MailAccountId.create "reader-account" |> valueOrFail
         let cutoff = ScanCutoff.ofStartOfDay (DateTime(2000, 1, 1))
 
-        let messages = deps.Read id cutoff |> okOrFail "Read"
+        let messages = dependencies.Read id cutoff |> okOrFail "Read"
 
         let message = Assert.Single messages
         Assert.False(String.IsNullOrWhiteSpace message.SourceMessageId)
@@ -599,20 +599,20 @@ let ``ReadMailFolder returns at least one message with every field populated for
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof readMailFolderImplementations)>]
 let ``ReadMailFolder returns MailAccountNotFound for an unknown account`` (implementation: string) =
-    withReadMailFolderImplementation implementation (fun deps ->
+    withReadMailFolderImplementation implementation (fun dependencies ->
         let unknown = MailAccountId.create "not-reader-account" |> valueOrFail
         let cutoff = ScanCutoff.ofStartOfDay (DateTime(2000, 1, 1))
 
-        Assert.Equal(Error(MailAccountNotFound unknown), deps.Read unknown cutoff))
+        Assert.Equal(Error(MailAccountNotFound unknown), dependencies.Read unknown cutoff))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof readMailFolderImplementations)>]
 let ``ReadMailFolder reports a store directory that is gone rather than returning no messages`` (implementation: string) =
-    withReadMailFolderImplementation implementation (fun deps ->
+    withReadMailFolderImplementation implementation (fun dependencies ->
         let gone = MailAccountId.create "gone-account" |> valueOrFail
         let cutoff = ScanCutoff.ofStartOfDay (DateTime(2000, 1, 1))
 
-        match deps.Read gone cutoff with
+        match dependencies.Read gone cutoff with
         | Error(StoreDirectoryMissing(id, path)) ->
             Assert.Equal(gone, id)
             Assert.Equal(goneStoreDirectory, path)

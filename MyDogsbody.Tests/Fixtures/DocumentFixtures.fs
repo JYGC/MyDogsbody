@@ -66,19 +66,19 @@ let docxWithParagraphs (paragraphs: string list) : byte[] =
     use stream = new MemoryStream()
 
     (
-        use doc =
+        use wordDocument =
             WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document)
 
-        let main = doc.AddMainDocumentPart()
-        main.Document <- Document()
-        let body = main.Document.AppendChild(Body())
+        let mainDocumentPart = wordDocument.AddMainDocumentPart()
+        mainDocumentPart.Document <- Document()
+        let body = mainDocumentPart.Document.AppendChild(Body())
 
         for text in paragraphs do
             let paragraph = body.AppendChild(Paragraph())
             let run = paragraph.AppendChild(Run())
             run.AppendChild(Text(text, Space = SpaceProcessingModeValues.Preserve)) |> ignore
 
-        main.Document.Save()
+        mainDocumentPart.Document.Save()
     )
 
     stream.ToArray()

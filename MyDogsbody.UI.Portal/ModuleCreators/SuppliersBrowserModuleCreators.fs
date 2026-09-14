@@ -25,8 +25,8 @@ let getSuppliersBrowserModule
                 | Ok suppliers ->
                     suppliersListCval.Value <- suppliers
                     errorCval.Value <- None
-                | Error ex ->
-                    errorCval.Value <- Some ex.Message
+                | Error caughtException ->
+                    errorCval.Value <- Some caughtException.Message
                 isLoadingCval.Value <- false
             )
         )
@@ -43,9 +43,9 @@ let getSuppliersBrowserModule
                     isLoadingCval.Value <- false
                 )
                 loadSuppliers ()
-            | Error (ex: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
+            | Error (caughtException: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false
                 )
         )

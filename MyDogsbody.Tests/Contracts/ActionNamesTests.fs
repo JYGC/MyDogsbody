@@ -35,7 +35,7 @@ let private handleError = HandleErrorBuilder ignore
 
 let private actionOf result =
     match result with
-    | Error (ex: MyDogsbodyException) -> ex.ActionName
+    | Error (capturedException: MyDogsbodyException) -> capturedException.ActionName
     | Ok _ -> failwith "Expected Error, but got Ok"
 
 let private aValidGoogleCredential: ValidGoogleCredential =

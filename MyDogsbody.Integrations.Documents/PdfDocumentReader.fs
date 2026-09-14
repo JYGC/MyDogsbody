@@ -30,7 +30,7 @@ let private pageLines (words: (float * float * string) list) : (float * string) 
         let text =
             banded
             |> List.sortBy (fun (_, left, _) -> left)
-            |> List.map (fun (_, _, t) -> t)
+            |> List.map (fun (_, _, wordText) -> wordText)
             |> String.concat " "
 
         band, text)
@@ -50,15 +50,15 @@ let private tagBlocks (startBlock: int) (lines: (float * string) list) : TextLin
     let tagged, lastBlock =
         lines
         |> List.fold
-            (fun (acc, block, previousBand) (band, text) ->
+            (fun (reversedTaggedLines, block, previousBand) (band, text) ->
                 let block =
                     match previousBand with
                     | Some prev when prev - band > blockGapFactor * pitch -> block + 1
                     | _ -> block
 
-                ({ Text = text; BlockIndex = block } :: acc, block, Some band))
+                ({ Text = text; BlockIndex = block } :: reversedTaggedLines, block, Some band))
             ([], startBlock, None)
-        |> fun (acc, block, _) -> List.rev acc, block
+        |> fun (reversedTaggedLines, block, _) -> List.rev reversedTaggedLines, block
 
     tagged, lastBlock + 1
 
@@ -86,14 +86,14 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
                 let lines, _ =
                     wordsByPage
                     |> List.fold
-                        (fun (acc, nextBlock) words ->
+                        (fun (accumulatedLines, nextBlock) words ->
                             let tagged, nextBlock = tagBlocks nextBlock (pageLines words)
-                            acc @ tagged, nextBlock)
+                            accumulatedLines @ tagged, nextBlock)
                         ([], 0)
 
                 Ok lines
-        with ex ->
-            Error(DocumentUnreadable ex.Message)
+        with caughtException ->
+            Error(DocumentUnreadable caughtException.Message)
 
 let readContent
     (handleError: HandleErrorBuilder)
@@ -128,6 +128,6 @@ let readContent
                                     }
                     ]
             }
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to extract content from PDF.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to extract content from PDF.", caughtException)
     }

@@ -28,32 +28,32 @@ let private withApi (test: ScanWindowApi -> unit) =
 let private ok label =
     function
     | Ok v -> v
-    | Error(ex: MyDogsbodyException) -> failwith $"{label}: {ex.Message}"
+    | Error(caughtException: MyDogsbodyException) -> failwith $"{label}: {caughtException.Message}"
 
 [<Fact; Trait("Level", "Integration")>]
 let ``GetScanWindows returns the seeded five with composed labels`` () =
     withApi (fun api ->
         let windows = api.GetScanWindows() |> ok "GetScanWindows"
-        Assert.Equal<int list>([ 7; 14; 30; 90; 180 ], windows |> List.map (fun w -> w.Days))
-        Assert.Contains(windows, (fun w -> w.Label = "mail received in the last 14 days")))
+        Assert.Equal<int list>([ 7; 14; 30; 90; 180 ], windows |> List.map (fun window -> window.Days))
+        Assert.Contains(windows, (fun window -> window.Label = "mail received in the last 14 days")))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``AddScanWindow then it appears; DeleteScanWindow then it is gone`` () =
     withApi (fun api ->
         api.AddScanWindow 45 |> ok "AddScanWindow"
-        let added = api.GetScanWindows() |> ok "get" |> List.find (fun w -> w.Days = 45)
+        let added = api.GetScanWindows() |> ok "get" |> List.find (fun window -> window.Days = 45)
         api.DeleteScanWindow added.Id |> ok "DeleteScanWindow"
-        Assert.DoesNotContain(api.GetScanWindows() |> ok "get", (fun w -> w.Days = 45)))
+        Assert.DoesNotContain(api.GetScanWindows() |> ok "get", (fun window -> window.Days = 45)))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``AddScanWindow refuses a duplicate and an out-of-bounds value with an alert`` () =
     withApi (fun api ->
         match api.AddScanWindow 14 with
-        | Error ex -> Assert.Contains("already exists", ex.Message)
+        | Error caughtException -> Assert.Contains("already exists", caughtException.Message)
         | Ok _ -> Assert.Fail("expected the duplicate to be refused")
 
         match api.AddScanWindow 5000 with
-        | Error ex -> Assert.Contains("3650", ex.Message)
+        | Error caughtException -> Assert.Contains("3650", caughtException.Message)
         | Ok _ -> Assert.Fail("expected the out-of-bounds value to be refused"))
 
 [<Fact; Trait("Level", "Integration")>]
@@ -61,12 +61,12 @@ let ``deleting down to the last window is refused with a named message`` () =
     withApi (fun api ->
         let windows = api.GetScanWindows() |> ok "get"
         // delete all but one
-        for w in windows |> List.take 4 do
-            api.DeleteScanWindow w.Id |> ok "DeleteScanWindow"
+        for window in windows |> List.take 4 do
+            api.DeleteScanWindow window.Id |> ok "DeleteScanWindow"
 
         let last = api.GetScanWindows() |> ok "get" |> List.exactlyOne
         match api.DeleteScanWindow last.Id with
-        | Error ex -> Assert.Contains("last scan window", ex.Message)
+        | Error caughtException -> Assert.Contains("last scan window", caughtException.Message)
         | Ok _ -> Assert.Fail("expected the last window's deletion to be refused"))
 
 [<Fact; Trait("Level", "Integration")>]
@@ -78,7 +78,7 @@ let ``GetSelectedScanWindow opens on 14 for a fresh database, then on the last c
         Assert.Equal(90, api.GetSelectedScanWindow() |> ok "GetSelectedScanWindow")
 
         // delete the remembered window's row - the resolver falls back to 14
-        let ninety = api.GetScanWindows() |> ok "get" |> List.find (fun w -> w.Days = 90)
+        let ninety = api.GetScanWindows() |> ok "get" |> List.find (fun window -> window.Days = 90)
         api.DeleteScanWindow ninety.Id |> ok "DeleteScanWindow"
         Assert.Equal(14, api.GetSelectedScanWindow() |> ok "GetSelectedScanWindow"))
 
@@ -86,5 +86,5 @@ let ``GetSelectedScanWindow opens on 14 for a fresh database, then on the last c
 let ``SelectScanWindow refuses a window that is not in the list`` () =
     withApi (fun api ->
         match api.SelectScanWindow 45 with
-        | Error ex -> Assert.Contains("no 45-day scan window", ex.Message)
+        | Error caughtException -> Assert.Contains("no 45-day scan window", caughtException.Message)
         | Ok _ -> Assert.Fail("expected a window not in the list to be refused"))

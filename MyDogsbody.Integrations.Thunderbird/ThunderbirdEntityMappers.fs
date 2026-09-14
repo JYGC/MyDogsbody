@@ -102,8 +102,8 @@ let toNewSelectedAccountEntity (id: MailAccountId) : SelectedAccountEntity =
 let toSelectedMailAccountId (entity: SelectedAccountEntity option) : Result<MailAccountId option, string> =
     match entity with
     | None -> Ok None
-    | Some e ->
-        match MailAccountId.create e.AccountId with
+    | Some selectedAccountEntity ->
+        match MailAccountId.create selectedAccountEntity.AccountId with
         | Ok id -> Ok(Some id)
         | Error reason -> Error reason
 

@@ -23,7 +23,7 @@ let private handleError = HandleErrorBuilder (fun _ -> ())
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 // ---------- the log store ----------
 

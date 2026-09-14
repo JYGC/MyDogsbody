@@ -47,8 +47,8 @@ let private withStore (test: (unit -> Database.Types.GoogleCredentialsCollection
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) ->
-        failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbodyException) ->
+        failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 [<Fact; Trait("Level", "Integration")>]
 let ``insertOne stores a credential and returns it with the identifier the store assigned`` () =
@@ -165,8 +165,8 @@ let ``updateOne changes only the addressed row when two credentials look alike``
         let stored = GoogleCredentialStore.getAll handleError getCollection () |> okOrFail "getAll"
         Assert.Equal(2, List.length stored)
 
-        let reloadedFirst = stored |> List.find (fun c -> c.Id = first.Id)
-        let reloadedSecond = stored |> List.find (fun c -> c.Id = second.Id)
+        let reloadedFirst = stored |> List.find (fun credential -> credential.Id = first.Id)
+        let reloadedSecond = stored |> List.find (fun credential -> credential.Id = second.Id)
         Assert.Equal("first-secret", GoogleCredentialSecret.value reloadedFirst.Secret)
         Assert.Equal("second-rotated", GoogleCredentialSecret.value reloadedSecond.Secret)
     )
@@ -199,13 +199,13 @@ let ``getAll reports a MyDogsbodyException carrying its action when the collecti
 
     // Act
     match GoogleCredentialStore.getAll recordingHandleError failingGetter () with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.getAll,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to retrieve all credentials.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to retrieve all credentials.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -221,13 +221,13 @@ let ``insertOne reports a MyDogsbodyException carrying its action when the colle
         credential "secret" "person@gmail.com"
         |> GoogleCredentialStore.insertOne recordingHandleError failingGetter
     with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.insertOne,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to insert new credential.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to insert new credential.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -243,12 +243,12 @@ let ``updateOne reports a MyDogsbodyException carrying its action when the colle
         edit "507f1f77bcf86cd799439011" "secret" "person@gmail.com"
         |> GoogleCredentialStore.updateOne recordingHandleError failingGetter
     with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.updateOne,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to update existing credential.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to update existing credential.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")

@@ -15,18 +15,18 @@ let private toBlocks (text: string) : TextLine list =
 
     rawLines
     |> Array.fold
-        (fun (acc, block, sawContentInBlock, pendingBoundary) rawLine ->
+        (fun (reversedTaggedLines, block, sawContentInBlock, pendingBoundary) rawLine ->
             let line = rawLine.Trim()
 
             if line = "" then
                 // A blank line: mark that the NEXT content line starts a new block, but only if
                 // this block already has content (so leading blank lines don't count).
-                (acc, block, sawContentInBlock, sawContentInBlock)
+                (reversedTaggedLines, block, sawContentInBlock, sawContentInBlock)
             else
                 let block = if pendingBoundary then block + 1 else block
-                ({ Text = line; BlockIndex = block } :: acc, block, true, false))
+                ({ Text = line; BlockIndex = block } :: reversedTaggedLines, block, true, false))
         ([], 0, false, false)
-    |> fun (acc, _, _, _) -> List.rev acc
+    |> fun (reversedTaggedLines, _, _, _) -> List.rev reversedTaggedLines
 
 /// Returns DocumentError directly - see the invoice-extraction design.md -> "Action names".
 let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
@@ -39,5 +39,5 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
             // measured mailbox's text parts use.
             use reader = new StreamReader(stream, Encoding.UTF8, true)
             Ok(toBlocks (reader.ReadToEnd()))
-        with ex ->
-            Error(DocumentUnreadable ex.Message)
+        with caughtException ->
+            Error(DocumentUnreadable caughtException.Message)

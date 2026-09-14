@@ -85,15 +85,15 @@ let private withFakeApi (test: MailAccountApi -> unit) =
                         // about what a second scan costs the user.
                         let previousCounts =
                             accounts
-                            |> Seq.choose (fun a -> a.CachedMessageCount |> Option.map (fun cached -> a.Id, cached))
+                            |> Seq.choose (fun account -> account.CachedMessageCount |> Option.map (fun cached -> account.Id, cached))
                             |> Map.ofSeq
 
                         accounts.Clear()
 
                         accounts.AddRange
                             [
-                                for i in 1..10 ->
-                                    let fresh = fakeAccount $"fake-account-{i}"
+                                for accountNumber in 1..10 ->
+                                    let fresh = fakeAccount $"fake-account-{accountNumber}"
 
                                     match Map.tryFind fresh.Id previousCounts with
                                     | Some cached -> { fresh with CachedMessageCount = Some cached }
@@ -115,7 +115,7 @@ let private withFakeApi (test: MailAccountApi -> unit) =
 
             SelectAccount =
                 fun id ->
-                    if accounts |> Seq.exists (fun a -> a.Id = id) then
+                    if accounts |> Seq.exists (fun account -> account.Id = id) then
                         selected <- Some id
                         Ok()
                     else
@@ -123,7 +123,7 @@ let private withFakeApi (test: MailAccountApi -> unit) =
 
             CountMessages =
                 fun id ->
-                    match accounts |> Seq.tryFindIndex (fun a -> a.Id = id) with
+                    match accounts |> Seq.tryFindIndex (fun account -> account.Id = id) with
                     | None -> fail ActionNames.MyDogsbody.Startup.MailAccountApi.countMessages $"No mail account was found with id '{id}'."
                     | Some index ->
                         accounts.[index] <- { accounts.[index] with CachedMessageCount = Some(4, DateTime.UtcNow) }
@@ -131,7 +131,7 @@ let private withFakeApi (test: MailAccountApi -> unit) =
 
             ClearWatermarks =
                 fun id ->
-                    if accounts |> Seq.exists (fun a -> a.Id = id) then
+                    if accounts |> Seq.exists (fun account -> account.Id = id) then
                         Ok()
                     else
                         fail ActionNames.MyDogsbody.Startup.MailAccountApi.clearWatermarks $"No mail account was found with id '{id}'."
@@ -149,11 +149,11 @@ let private withImplementation (name: string) (test: MailAccountApi -> unit) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error(ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error(caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 let private errorOrFail label result =
     match result with
-    | Error(ex: MyDogsbodyException) -> ex
+    | Error(caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 // ---------- the shared suite ----------
@@ -205,8 +205,8 @@ let ``SelectAccount reports an unlogged error for an id not among the discovered
         api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
         api.ScanForAccounts() |> okOrFail "ScanForAccounts" |> ignore
 
-        let ex = api.SelectAccount "not-a-real-account-id" |> errorOrFail "SelectAccount"
-        Assert.False(String.IsNullOrWhiteSpace ex.Message))
+        let caughtException = api.SelectAccount "not-a-real-account-id" |> errorOrFail "SelectAccount"
+        Assert.False(String.IsNullOrWhiteSpace caughtException.Message))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
@@ -219,7 +219,7 @@ let ``CountMessages returns a count, and GetAccounts reflects a cached count aft
         api.CountMessages firstId |> okOrFail "CountMessages" |> ignore
 
         let accounts, _ = api.GetAccounts() |> okOrFail "GetAccounts"
-        let account = accounts |> List.find (fun a -> a.Id = firstId)
+        let account = accounts |> List.find (fun account -> account.Id = firstId)
         Assert.True(account.CachedMessageCount.IsSome))
 
 [<Theory; Trait("Level", "Contract")>]
@@ -236,7 +236,7 @@ let ``every account GetAccounts returns names the profile it was discovered in``
 
         let accounts, _ = api.GetAccounts() |> okOrFail "GetAccounts"
         Assert.NotEmpty accounts
-        Assert.All(accounts, (fun a -> Assert.Equal(measuredShapeProfile, a.ProfilePath))))
+        Assert.All(accounts, (fun account -> Assert.Equal(measuredShapeProfile, account.ProfilePath))))
 
 [<Theory; Trait("Level", "Contract")>]
 [<MemberData(nameof implementations)>]
@@ -255,7 +255,7 @@ let ``a rescan keeps a cached message count for an account it finds again`` (imp
         api.CountMessages firstId |> okOrFail "CountMessages" |> ignore
 
         let accountsBefore, _ = api.GetAccounts() |> okOrFail "GetAccounts before"
-        let before = accountsBefore |> List.find (fun a -> a.Id = firstId)
+        let before = accountsBefore |> List.find (fun account -> account.Id = firstId)
 
         let cached =
             match before.CachedMessageCount with
@@ -265,7 +265,7 @@ let ``a rescan keeps a cached message count for an account it finds again`` (imp
         api.ScanForAccounts() |> okOrFail "ScanForAccounts second" |> ignore
 
         let accountsAfter, _ = api.GetAccounts() |> okOrFail "GetAccounts after"
-        let after = accountsAfter |> List.find (fun a -> a.Id = firstId)
+        let after = accountsAfter |> List.find (fun account -> account.Id = firstId)
 
         // Both the count and the time it was taken - a rescan must not silently re-time a reading
         // it did not take.
@@ -284,5 +284,5 @@ let ``ClearWatermarks succeeds for a known account`` (implementation: string) =
 [<MemberData(nameof implementations)>]
 let ``ScanForAccounts reports an unlogged error when no profile folder has been chosen`` (implementation: string) =
     withImplementation implementation (fun api ->
-        let ex = api.ScanForAccounts() |> errorOrFail "ScanForAccounts"
-        Assert.False(String.IsNullOrWhiteSpace ex.Message))
+        let caughtException = api.ScanForAccounts() |> errorOrFail "ScanForAccounts"
+        Assert.False(String.IsNullOrWhiteSpace caughtException.Message))

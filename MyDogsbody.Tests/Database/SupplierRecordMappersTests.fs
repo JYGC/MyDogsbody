@@ -75,8 +75,8 @@ let ``toStoredSupplier attaches every matcher row, mapped by kind`` () =
     match actual with
     | Ok stored ->
         Assert.Equal(2, List.length stored.Matchers)
-        Assert.Contains(stored.Matchers, fun m -> SupplierMatcher.kind m = Domain && SupplierMatcher.value m = "acme.example")
-        Assert.Contains(stored.Matchers, fun m -> SupplierMatcher.kind m = Sender && SupplierMatcher.value m = "billing@acme.example")
+        Assert.Contains(stored.Matchers, fun matcher -> SupplierMatcher.kind matcher = Domain && SupplierMatcher.value matcher = "acme.example")
+        Assert.Contains(stored.Matchers, fun matcher -> SupplierMatcher.kind matcher = Sender && SupplierMatcher.value matcher = "billing@acme.example")
     | Error reason -> Assert.Fail($"Expected Ok, but got Error: {reason}")
 
 [<Fact; Trait("Level", "Unit")>]

@@ -32,7 +32,7 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
                     accountsCval.Value <- accounts
                     selectedAccountIdCval.Value <- selected
                     errorCval.Value <- None
-                | Error ex -> errorCval.Value <- Some ex.Message
+                | Error caughtException -> errorCval.Value <- Some caughtException.Message
 
                 isLoadingCval.Value <- false))
 
@@ -45,7 +45,7 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
                 | Ok path ->
                     profileRootCval.Value <- path
                     errorCval.Value <- None
-                | Error ex -> errorCval.Value <- Some ex.Message))
+                | Error caughtException -> errorCval.Value <- Some caughtException.Message))
 
     let setProfileRoot (path: string) =
         transact (fun _ -> isLoadingCval.Value <- true)
@@ -61,9 +61,9 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
                 // trims, so what was stored is not always what was typed, and the page must show
                 // the stored value. Same shape as scanForAccounts reloading the selection.
                 loadProfileRoot ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false))
 
     let scanForAccounts () =
@@ -84,9 +84,9 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
                 // A scan can reconcile the selection (an account it names may be gone), so the
                 // selection is re-read from the store rather than assumed unchanged.
                 loadAccounts ()
-            | Error ex ->
+            | Error caughtException ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isScanningCval.Value <- false))
 
     /// Runs a write and reloads, so the table shows what was actually stored rather than what
@@ -101,9 +101,9 @@ let getMailAccountsBrowserModule (startWork: (unit -> unit) -> unit) (mailAccoun
             | Ok() ->
                 onSuccess ()
                 loadAccounts ()
-            | Error(ex: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
+            | Error(caughtException: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
                 transact (fun _ ->
-                    errorCval.Value <- Some ex.Message
+                    errorCval.Value <- Some caughtException.Message
                     isLoadingCval.Value <- false))
 
     loadProfileRoot ()

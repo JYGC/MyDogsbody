@@ -30,8 +30,8 @@ let ``readText keeps a table label and its value adjacent in one block`` () =
         let labelLine = lines |> List.find (fun line -> line.Text = "Invoice Number")
         let valueLine = lines |> List.find (fun line -> line.Text = "HTML-500")
         Assert.Equal(labelLine.BlockIndex, valueLine.BlockIndex)
-        Assert.Equal(1, (lines |> List.findIndex (fun l -> l.Text = "HTML-500")) - (lines |> List.findIndex (fun l -> l.Text = "Invoice Number")))
-    | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
+        Assert.Equal(1, (lines |> List.findIndex (fun line -> line.Text = "HTML-500")) - (lines |> List.findIndex (fun line -> line.Text = "Invoice Number")))
+    | Error error -> Assert.Fail($"Expected Ok, got Error {error}")
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText puts separate rows in separate blocks and a paragraph in its own block`` () =
@@ -39,10 +39,10 @@ let ``readText puts separate rows in separate blocks and a paragraph in its own 
 
     match actual with
     | Ok lines ->
-        let block t = (lines |> List.find (fun l -> l.Text = t)).BlockIndex
+        let block lineText = (lines |> List.find (fun line -> line.Text = lineText)).BlockIndex
         Assert.NotEqual<int>(block "Invoice Number", block "Amount Due")
         Assert.NotEqual<int>(block "Please find your invoice below.", block "Invoice Number")
-    | Error err -> Assert.Fail($"Expected Ok, got Error {err}")
+    | Error error -> Assert.Fail($"Expected Ok, got Error {error}")
 
 [<Fact; Trait("Level", "Unit")>]
 let ``readText strips markup when the HTML has no table structure`` () =

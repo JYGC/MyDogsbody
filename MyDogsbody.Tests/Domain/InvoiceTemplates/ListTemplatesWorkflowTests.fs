@@ -37,7 +37,7 @@ let ``listTemplates returns the supplier's templates ordered by Position regardl
     | Ok templates ->
         Assert.Equal<string list>(
             [ "1"; "2"; "3" ],
-            templates |> List.map (fun t -> TemplateId.value t.Id)
+            templates |> List.map (fun template -> TemplateId.value template.Id)
         )
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 

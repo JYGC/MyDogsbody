@@ -162,8 +162,8 @@ let toStoredTemplate (row: InvoiceTemplateRecord) (fieldRuleRows: TemplateFieldR
             |> List.fold
                 (fun accumulated fieldRuleRow ->
                     accumulated
-                    |> Result.bind (fun acc ->
-                        fromTemplateFieldRuleRecord fieldRuleRow |> Result.map (fun rule -> rule :: acc)))
+                    |> Result.bind (fun accumulatedRules ->
+                        fromTemplateFieldRuleRecord fieldRuleRow |> Result.map (fun rule -> rule :: accumulatedRules)))
                 (Ok [])
             |> Result.map List.rev
 

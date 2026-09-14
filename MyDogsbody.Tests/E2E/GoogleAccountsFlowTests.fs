@@ -134,7 +134,7 @@ let private errorAlerts (rendered: IRenderedFragment) =
 let private storedAccountCount (harness: GoogleAccountsHarness) =
     match harness.Api.GetAccounts() with
     | Ok accounts -> List.length accounts
-    | Error ex -> failwith ex.Message
+    | Error error -> failwith error.Message
 
 [<Fact; Trait("Level", "E2E")>]
 let ``registering an account shows it marked not ready, with no default calendar chosen`` () =
@@ -249,7 +249,7 @@ let ``choosing from an account's own calendar picker stores that calendar agains
 
         match harness.Api.GetAccounts() with
         | Ok stored -> Assert.Equal<MyDogsbody.UI.Types.GoogleAccountUiType list>(expected, stored)
-        | Error ex -> failwith ex.Message
+        | Error error -> failwith error.Message
 
         Assert.Empty harness.Logged)
 
@@ -540,7 +540,7 @@ let ``correcting a malformed client secret fills the calendar picker it had left
             fun () ->
                 match harness.Api.GetClientSecret() with
                 | Ok secret -> secret
-                | Error ex -> failwith ex.Message
+                | Error error -> failwith error.Message
 
         harness.Api.SetClientSecret "the-secret" |> ignore
         harness.Api.RegisterAccount() |> ignore
@@ -598,6 +598,6 @@ let ``saving the client secret field blank says so, and registration stays disab
 
         match harness.Api.GetClientSecret() with
         | Ok stored -> Assert.Equal(None, stored)
-        | Error ex -> failwith ex.Message
+        | Error error -> failwith error.Message
 
         Assert.Empty harness.Logged)

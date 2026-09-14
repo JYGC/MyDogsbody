@@ -25,7 +25,7 @@ let ``listGoogleAccounts orders the accounts by email`` () =
 
     match actual with
     | Ok accounts ->
-        let emails = accounts |> List.map (fun a -> GoogleEmail.value a.EmailAddress)
+        let emails = accounts |> List.map (fun registeredAccount -> GoogleEmail.value registeredAccount.EmailAddress)
         Assert.Equal<string list>([ "amy@example.com"; "mid@example.com"; "zed@example.com" ], emails)
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 

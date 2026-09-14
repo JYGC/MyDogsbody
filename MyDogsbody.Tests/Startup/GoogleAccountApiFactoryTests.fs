@@ -93,11 +93,11 @@ let private registerByHand (context: GoogleDatabaseContext) (accountId: string) 
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 let private errorOrFail label result =
     match result with
-    | Error (ex: MyDogsbodyException) -> ex
+    | Error (caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 [<Fact; Trait("Level", "Integration")>]
@@ -117,11 +117,11 @@ let ``SetClientSecret refuses a blank secret without writing anything, as an unl
     // was supplied, enabled "Add account", and registering failed at the authorisation call as
     // "malformed", which requirements.md's "say so and disable account registration" rules out.
     withApiOver id (fun context api ->
-        let ex = api.SetClientSecret " \r\n " |> errorOrFail "SetClientSecret"
+        let caughtException = api.SetClientSecret " \r\n " |> errorOrFail "SetClientSecret"
 
-        Assert.Equal("Google client secret must not be empty.", ex.Message)
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret, ex.ActionName)
-        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        Assert.Equal("Google client secret must not be empty.", caughtException.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setClientSecret, caughtException.ActionName)
+        let inner = Assert.IsType<ApplicationException>(caughtException.InnerException)
         Assert.Equal("Google client secret must not be empty.", inner.Message)
         Assert.Equal(0, context.GetClientSecretCollection().Count())
         Assert.Equal(None, api.GetClientSecret() |> okOrFail "GetClientSecret")
@@ -158,10 +158,10 @@ let ``GetAccounts lists every stored account ordered by email, with every field 
 [<Fact; Trait("Level", "Integration")>]
 let ``RegisterAccount refuses with an unlogged exception when no client secret has been supplied`` () =
     withApi (fun api ->
-        let ex = api.RegisterAccount() |> errorOrFail "RegisterAccount"
+        let caughtException = api.RegisterAccount() |> errorOrFail "RegisterAccount"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, ex.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, caughtException.ActionName)
 
         // The browser must never open for a registration that cannot succeed - so nothing was
         // ever saved.
@@ -173,10 +173,10 @@ let ``ReauthoriseAccount refuses an unregistered account as an unlogged exceptio
     withApi (fun api ->
         api.SetClientSecret sampleClientSecret |> okOrFail "SetClientSecret"
 
-        let ex = api.ReauthoriseAccount "never-registered" |> errorOrFail "ReauthoriseAccount"
+        let caughtException = api.ReauthoriseAccount "never-registered" |> errorOrFail "ReauthoriseAccount"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount, ex.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount, caughtException.ActionName)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -185,10 +185,10 @@ let ``RemoveAccount reports an unregistered account as an unlogged exception`` (
         // A well-formed but never-stored id - GoogleAccountStore.removeOne addresses the row by
         // ObjectId, so an arbitrary string (unlike the other members, which never parse the id
         // this way) would report a store failure instead of "not registered".
-        let ex = api.RemoveAccount "507f1f77bcf86cd799439011" |> errorOrFail "RemoveAccount"
+        let caughtException = api.RemoveAccount "507f1f77bcf86cd799439011" |> errorOrFail "RemoveAccount"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.removeAccount, ex.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.removeAccount, caughtException.ActionName)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -198,27 +198,27 @@ let ``GetCalendarsFor an unregistered account reports NotAuthorised, without rea
 
         // No token was ever stored for this account, so `loadCredential` refuses before
         // `CalendarService` is ever constructed - this genuinely never reaches the network.
-        let ex = api.GetCalendarsFor "never-authorised" |> errorOrFail "GetCalendarsFor"
+        let caughtException = api.GetCalendarsFor "never-authorised" |> errorOrFail "GetCalendarsFor"
 
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, ex.ActionName)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, caughtException.ActionName)
     )
 
 [<Fact; Trait("Level", "Integration")>]
 let ``GetCalendarsFor reports ClientSecretMissing when no secret has been supplied`` () =
     withApi (fun api ->
-        let ex = api.GetCalendarsFor "any-account" |> errorOrFail "GetCalendarsFor"
+        let caughtException = api.GetCalendarsFor "any-account" |> errorOrFail "GetCalendarsFor"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, ex.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, caughtException.ActionName)
     )
 
 [<Fact; Trait("Level", "Integration")>]
 let ``SetDefaultInvoiceCalendar refuses an unregistered account as an unlogged exception, without reaching Google`` () =
     withApi (fun api ->
-        let ex = api.SetDefaultInvoiceCalendar "never-registered" "cal-1" |> errorOrFail "SetDefaultInvoiceCalendar"
+        let caughtException = api.SetDefaultInvoiceCalendar "never-registered" "cal-1" |> errorOrFail "SetDefaultInvoiceCalendar"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, ex.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, caughtException.ActionName)
     )
 
 [<Fact; Trait("Level", "Integration")>]
@@ -255,7 +255,7 @@ let ``RemoveAccount reports an unreachable credential store as an Error, rather 
         // reporting a failure would tell the user to retry something already done.
         match api.RemoveAccount "507f1f77bcf86cd799439011" with
         | Ok () -> Assert.Equal(0, context.GetAccountCollection().Count())
-        | Error ex -> Assert.Fail($"RemoveAccount expected Ok, but got Error: {ex.Message}")
+        | Error caughtException -> Assert.Fail($"RemoveAccount expected Ok, but got Error: {caughtException.Message}")
     )
 
 // ---------- The members that go through Google, handed a fake in Google's place.
@@ -350,13 +350,13 @@ let ``registerAccountWith refuses an account already registered, and discards th
                 storeTokenFor context "507f1f77bcf86cd799439012"
                 Ok(emailOf "person@gmail.com", accountIdOf "507f1f77bcf86cd799439012")
 
-        let ex =
+        let caughtException =
             GoogleAccountApiFactory.registerAccountWith handleError context authoriseAccount ()
             |> errorOrFail "RegisterAccount"
 
-        Assert.Equal("The account 'person@gmail.com' is already registered.", ex.Message)
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, ex.ActionName)
-        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        Assert.Equal("The account 'person@gmail.com' is already registered.", caughtException.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, caughtException.ActionName)
+        let inner = Assert.IsType<ApplicationException>(caughtException.InnerException)
         Assert.Equal("The account 'person@gmail.com' is already registered.", inner.Message)
 
         Assert.False(hasStoredToken context "507f1f77bcf86cd799439012")
@@ -375,13 +375,13 @@ let ``registerAccountWith refuses before any consent flow when no client secret 
                 consentFlows.Add "consent"
                 Error AuthorisationCancelled
 
-        let ex =
+        let caughtException =
             GoogleAccountApiFactory.registerAccountWith handleError context authoriseAccount ()
             |> errorOrFail "RegisterAccount"
 
-        Assert.Equal("No Google client secret has been supplied yet.", ex.Message)
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, ex.ActionName)
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+        Assert.Equal("No Google client secret has been supplied yet.", caughtException.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, caughtException.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
         Assert.Empty(consentFlows)
         Assert.Equal(0, context.GetAccountCollection().Count())
         Assert.Empty(logged)
@@ -400,11 +400,11 @@ let ``RegisterAccount over a malformed stored client secret says so through the 
         let api = GoogleAccountApiFactory.createGoogleAccountApi handleError context
         api.SetClientSecret "not json at all" |> okOrFail "SetClientSecret"
 
-        let ex = api.RegisterAccount() |> errorOrFail "RegisterAccount"
+        let caughtException = api.RegisterAccount() |> errorOrFail "RegisterAccount"
 
-        Assert.Equal("The stored Google client secret is malformed.", ex.Message)
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, ex.ActionName)
-        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+        Assert.Equal("The stored Google client secret is malformed.", caughtException.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount, caughtException.ActionName)
+        let inner = Assert.IsType<ApplicationException>(caughtException.InnerException)
         Assert.Equal("The stored Google client secret is malformed.", inner.Message)
 
         Assert.Equal(0, context.GetAccountCollection().Count())
@@ -448,13 +448,13 @@ let ``reauthoriseAccountWith reports a cancelled consent as an unlogged exceptio
 
         let reauthoriseAccount: ReauthoriseAccount = fun _ -> Error AuthorisationCancelled
 
-        let ex =
+        let caughtException =
             GoogleAccountApiFactory.reauthoriseAccountWith handleError context reauthoriseAccount "507f1f77bcf86cd799439011"
             |> errorOrFail "ReauthoriseAccount"
 
-        Assert.Equal("The consent flow was cancelled or denied.", ex.Message)
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount, ex.ActionName)
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+        Assert.Equal("The consent flow was cancelled or denied.", caughtException.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount, caughtException.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
 
         let stored = storedAccount context
         Assert.Equal("old@gmail.com", stored.EmailAddress)
@@ -488,24 +488,24 @@ let ``getCalendarsForWith refuses a blank account id as an unlogged exception, w
             askedFor.Add(GoogleAccountId.value accountId)
             Ok []
 
-    let ex = GoogleAccountApiFactory.getCalendarsForWith listCalendars " " |> errorOrFail "GetCalendarsFor"
+    let caughtException = GoogleAccountApiFactory.getCalendarsForWith listCalendars " " |> errorOrFail "GetCalendarsFor"
 
-    Assert.Equal("Google account id must not be empty.", ex.Message)
-    Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, ex.ActionName)
-    Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+    Assert.Equal("Google account id must not be empty.", caughtException.Message)
+    Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, caughtException.ActionName)
+    Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
     Assert.Empty(askedFor)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``getCalendarsForWith passes a failed calendar fetch on with its own message`` () =
     let listCalendars: ListCalendars = fun _ -> Error(CalendarUnreachable "Could not reach Google Calendar.")
 
-    let ex =
+    let caughtException =
         GoogleAccountApiFactory.getCalendarsForWith listCalendars "507f1f77bcf86cd799439011"
         |> errorOrFail "GetCalendarsFor"
 
-    Assert.Equal("Could not reach Google Calendar.", ex.Message)
-    Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, ex.ActionName)
-    Assert.Null(ex.InnerException)
+    Assert.Equal("Could not reach Google Calendar.", caughtException.Message)
+    Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.getCalendarsFor, caughtException.ActionName)
+    Assert.Null(caughtException.InnerException)
 
 [<Fact; Trait("Level", "Integration")>]
 let ``setDefaultInvoiceCalendarWith stores a calendar the account still has`` () =
@@ -542,7 +542,7 @@ let ``setDefaultInvoiceCalendarWith refuses a calendar the account no longer has
 
         let listCalendars: ListCalendars = fun _ -> Ok [ aCalendar "cal-2" "Personal" true ]
 
-        let ex =
+        let caughtException =
             GoogleAccountApiFactory.setDefaultInvoiceCalendarWith
                 handleError
                 context
@@ -551,9 +551,9 @@ let ``setDefaultInvoiceCalendarWith refuses a calendar the account no longer has
                 "cal-1"
             |> errorOrFail "SetDefaultInvoiceCalendar"
 
-        Assert.Equal("The calendar 'cal-1' no longer exists.", ex.Message)
-        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, ex.ActionName)
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
+        Assert.Equal("The calendar 'cal-1' no longer exists.", caughtException.Message)
+        Assert.Equal(ActionNames.MyDogsbody.Startup.GoogleAccountApi.setDefaultInvoiceCalendar, caughtException.ActionName)
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
         Assert.Null((storedAccount context).DefaultInvoiceCalendarId)
         Assert.Empty(logged)
     )

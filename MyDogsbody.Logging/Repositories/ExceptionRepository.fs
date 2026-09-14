@@ -25,8 +25,8 @@ let insertOne
             )
             |> getExceptionCollection().Insert
             |> ignore
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to write an exception log entry.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to write an exception log entry.", caughtException)
     }
 
 let getAll
@@ -49,6 +49,6 @@ let getAll
                     }
                 )
                 |> Seq.toList
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to read the exception log.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to read the exception log.", caughtException)
     }

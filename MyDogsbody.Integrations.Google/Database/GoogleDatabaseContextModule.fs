@@ -32,17 +32,17 @@ let getDatabaseContext databasePath connectionType : GoogleDatabaseContext =
     mapper.ToDocument(GoogleClientSecretEntity()) |> ignore
 
     let liteDatabaseConnectionString = $"Filename={databasePath};connection={connectionType}"
-    let dbConnection = new LiteDatabase(liteDatabaseConnectionString, mapper)
+    let databaseConnection = new LiteDatabase(liteDatabaseConnectionString, mapper)
 
     {
         GetCredentialCollection = fun () ->
-            dbConnection.GetCollection<GoogleCredential>(credentialCollectionName)
+            databaseConnection.GetCollection<GoogleCredential>(credentialCollectionName)
 
         GetAccountCollection = fun () ->
-            dbConnection.GetCollection<GoogleAccountEntity>(accountCollectionName)
+            databaseConnection.GetCollection<GoogleAccountEntity>(accountCollectionName)
 
         GetClientSecretCollection = fun () ->
-            dbConnection.GetCollection<GoogleClientSecretEntity>(clientSecretCollectionName)
+            databaseConnection.GetCollection<GoogleClientSecretEntity>(clientSecretCollectionName)
 
-        Dispose = fun () -> dbConnection.Dispose()
+        Dispose = fun () -> databaseConnection.Dispose()
     }

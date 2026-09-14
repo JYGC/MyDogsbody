@@ -236,7 +236,7 @@ let ``toStoredTemplate carries every field of a row with its rules`` () =
         Assert.Equal(3, (ValidTemplate.rules stored.Template).Length)
         Assert.Equal<TargetField list>(
             [ Reference; Amount; Currency ],
-            (ValidTemplate.rules stored.Template) |> List.map (fun r -> r.Field)
+            (ValidTemplate.rules stored.Template) |> List.map (fun rule -> rule.Field)
         )
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 

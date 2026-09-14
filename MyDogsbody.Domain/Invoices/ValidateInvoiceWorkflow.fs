@@ -11,15 +11,15 @@ open MyDogsbody.Domain.Invoices
 /// back in ApplyTemplateWorkflow; by here the value is a DateTime.
 let private optionalIssueDate (value: System.DateTime option) : InvoiceIssueDate option =
     value
-    |> Option.bind (fun dt ->
-        match InvoiceIssueDate.create dt with
+    |> Option.bind (fun dateTime ->
+        match InvoiceIssueDate.create dateTime with
         | Ok date -> Some date
         | Error _ -> None)
 
 let private optionalDueDate (value: System.DateTime option) : InvoiceDueDate option =
     value
-    |> Option.bind (fun dt ->
-        match InvoiceDueDate.create dt with
+    |> Option.bind (fun dateTime ->
+        match InvoiceDueDate.create dateTime with
         | Ok date -> Some date
         | Error _ -> None)
 

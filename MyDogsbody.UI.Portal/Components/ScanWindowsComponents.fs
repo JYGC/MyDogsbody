@@ -8,10 +8,10 @@ open MyDogsbody.UI.Types.Module
 
 /// The /settings/scan-windows list: add, delete, the remembered one marked, and the LAST one's
 /// delete shown as unavailable with the reason (CannotDeleteLastScanWindow is a domain rule).
-let scanWindowsBrowser (m: ScanWindowsBrowserModule) (newDaysCval: cval<int>) =
+let scanWindowsBrowser (scanWindowsBrowserModule: ScanWindowsBrowserModule) (newDaysCval: cval<int>) =
     fragment {
         adapt {
-            let! error = m.ErrorAval
+            let! error = scanWindowsBrowserModule.ErrorAval
 
             match error with
             | Some message ->
@@ -42,7 +42,7 @@ let scanWindowsBrowser (m: ScanWindowsBrowserModule) (newDaysCval: cval<int>) =
                 MudNumericField'<int>() {
                     Label "Days"
                     Value newDays
-                    ValueChanged(fun (d: int) -> transact (fun _ -> newDaysCval.Value <- d))
+                    ValueChanged(fun (days: int) -> transact (fun _ -> newDaysCval.Value <- days))
                     Min 1
                     Max 3650
                 }
@@ -50,15 +50,15 @@ let scanWindowsBrowser (m: ScanWindowsBrowserModule) (newDaysCval: cval<int>) =
                 MudButton'' {
                     Variant Variant.Filled
                     Color Color.Primary
-                    OnClick(fun _ -> m.AddWindow newDays)
+                    OnClick(fun _ -> scanWindowsBrowserModule.AddWindow newDays)
                     "Add window"
                 }
             }
         }
 
         adapt {
-            let! windows = m.WindowsAval
-            let! selectedDays = m.SelectedWindowDaysAval
+            let! windows = scanWindowsBrowserModule.WindowsAval
+            let! selectedDays = scanWindowsBrowserModule.SelectedWindowDaysAval
             let onlyOne = List.length windows <= 1
 
             MudTable'' {
@@ -72,12 +72,12 @@ let scanWindowsBrowser (m: ScanWindowsBrowserModule) (newDaysCval: cval<int>) =
                     }
                 )
 
-                RowTemplate(fun (w: ScanWindowUiType) ->
+                RowTemplate(fun (window: ScanWindowUiType) ->
                     fragment {
                         MudTd'' {
-                            span { w.Label }
+                            span { window.Label }
 
-                            if w.Days = selectedDays then
+                            if window.Days = selectedDays then
                                 span {
                                     class' "mud-primary-text"
                                     "  (current)"
@@ -98,7 +98,7 @@ let scanWindowsBrowser (m: ScanWindowsBrowserModule) (newDaysCval: cval<int>) =
                                 MudButton'' {
                                     Variant Variant.Text
                                     Color Color.Error
-                                    OnClick(fun _ -> m.DeleteWindow w.Id)
+                                    OnClick(fun _ -> scanWindowsBrowserModule.DeleteWindow window.Id)
                                     "Delete"
                                 }
                         }

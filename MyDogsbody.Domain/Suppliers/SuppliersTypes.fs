@@ -129,9 +129,9 @@ module SupplierMatcher =
 
     let value (matcher: SupplierMatcher) : string =
         match matcher with
-        | SenderAddress v -> v
-        | SenderDomain v -> v
-        | SubjectPattern v -> v
+        | SenderAddress matchedValue -> matchedValue
+        | SenderDomain matchedValue -> matchedValue
+        | SubjectPattern matchedValue -> matchedValue
 
 // One type per pipeline stage.
 

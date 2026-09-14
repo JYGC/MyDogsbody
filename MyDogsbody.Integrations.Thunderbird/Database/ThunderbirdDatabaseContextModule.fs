@@ -18,14 +18,14 @@ let getDatabaseContext (databasePath: string) (connectionType: string) : Thunder
     BsonMapper.Global.ToDocument(ScanWatermarkEntity()) |> ignore
 
     let connectionString = $"Filename={databasePath};connection={connectionType}"
-    let db = new LiteDatabase(connectionString)
+    let databaseConnection = new LiteDatabase(connectionString)
 
     {
-        GetProfileRootCollection = fun () -> db.GetCollection<ThunderbirdProfileRoot> "ProfileRoot"
-        GetAccountsCollection = fun () -> db.GetCollection<DiscoveredAccountEntity> "Accounts"
-        GetFoldersCollection = fun () -> db.GetCollection<DiscoveredFolderEntity> "Folders"
-        GetSelectedAccountCollection = fun () -> db.GetCollection<SelectedAccountEntity> "SelectedAccount"
-        GetWatermarksCollection = fun () -> db.GetCollection<ScanWatermarkEntity> "Watermarks"
+        GetProfileRootCollection = fun () -> databaseConnection.GetCollection<ThunderbirdProfileRoot> "ProfileRoot"
+        GetAccountsCollection = fun () -> databaseConnection.GetCollection<DiscoveredAccountEntity> "Accounts"
+        GetFoldersCollection = fun () -> databaseConnection.GetCollection<DiscoveredFolderEntity> "Folders"
+        GetSelectedAccountCollection = fun () -> databaseConnection.GetCollection<SelectedAccountEntity> "SelectedAccount"
+        GetWatermarksCollection = fun () -> databaseConnection.GetCollection<ScanWatermarkEntity> "Watermarks"
 
-        Dispose = fun () -> db.Dispose()
+        Dispose = fun () -> databaseConnection.Dispose()
     }

@@ -95,7 +95,7 @@ let getAll
 
             let supplierRows =
                 select {
-                    for s in getSuppliers () do
+                    for supplierRow in getSuppliers () do
                     selectAll
                 }
                 |> connection.SelectAsync<SupplierRecord>
@@ -106,13 +106,13 @@ let getAll
             // getAll runs on every page load and after every write.
             let matchersBySupplierId =
                 select {
-                    for m in getSupplierMatchers () do
+                    for matcherRow in getSupplierMatchers () do
                     selectAll
                 }
                 |> connection.SelectAsync<SupplierMatcherRecord>
                 |> runSync
                 |> Seq.toList
-                |> List.groupBy (fun m -> m.SupplierId)
+                |> List.groupBy (fun matcherRow -> matcherRow.SupplierId)
                 |> Map.ofList
 
             return
@@ -120,8 +120,8 @@ let getAll
                 |> List.map (fun row ->
                     let matchers = matchersBySupplierId |> Map.tryFind row.Id |> Option.defaultValue []
                     SupplierRecordMappers.toStoredSupplier row matchers |> mapOrRaise)
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve all suppliers.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve all suppliers.", caughtException)
     }
 
 let insertOne
@@ -158,8 +158,8 @@ let insertOne
                     { newRecord with Id = insertedId }
                     (supplier.Matchers |> List.map (SupplierRecordMappers.toNewMatcherRecord insertedId))
                 |> mapOrRaise
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to insert new supplier.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to insert new supplier.", caughtException)
     }
 
 /// Ok None means no row carried that identifier. Reporting it rather than silently succeeding is
@@ -180,8 +180,8 @@ let updateOne
 
             let existing =
                 select {
-                    for s in getSuppliers () do
-                    where (s.Id = rowId)
+                    for supplierRow in getSuppliers () do
+                    where (supplierRow.Id = rowId)
                 }
                 |> connection.SelectAsync<SupplierRecord>
                 |> runSync
@@ -192,10 +192,10 @@ let updateOne
             | Some _ ->
                 inTransaction connection (fun transaction ->
                     update {
-                        for s in getSuppliers () do
-                        setColumn s.Name (SupplierName.value edit.Name)
-                        setColumn s.PaymentTermDays (PaymentTermDays.value edit.PaymentTermDays)
-                        where (s.Id = rowId)
+                        for supplierRow in getSuppliers () do
+                        setColumn supplierRow.Name (SupplierName.value edit.Name)
+                        setColumn supplierRow.PaymentTermDays (PaymentTermDays.value edit.PaymentTermDays)
+                        where (supplierRow.Id = rowId)
                     }
                     |> fun query -> connection.UpdateAsync(query, transaction)
                     |> runSync
@@ -204,8 +204,8 @@ let updateOne
                     // The matcher set is replaced, not merged - every existing row is removed and
                     // the submitted list inserted fresh.
                     delete {
-                        for m in getSupplierMatchers () do
-                        where (m.SupplierId = rowId)
+                        for matcherRow in getSupplierMatchers () do
+                        where (matcherRow.SupplierId = rowId)
                     }
                     |> fun query -> connection.DeleteAsync(query, transaction)
                     |> runSync
@@ -231,8 +231,8 @@ let updateOne
                         (edit.Matchers |> List.map (SupplierRecordMappers.toNewMatcherRecord rowId))
                     |> mapOrRaise
                     |> Some
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to update existing supplier.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to update existing supplier.", caughtException)
     }
 
 /// True when a row carried that identifier and was removed; false when it did not. Matchers are
@@ -253,8 +253,8 @@ let deleteOne
 
             let existing =
                 select {
-                    for s in getSuppliers () do
-                    where (s.Id = rowId)
+                    for supplierRow in getSuppliers () do
+                    where (supplierRow.Id = rowId)
                 }
                 |> connection.SelectAsync<SupplierRecord>
                 |> runSync
@@ -264,14 +264,14 @@ let deleteOne
             | None -> return false
             | Some _ ->
                 delete {
-                    for s in getSuppliers () do
-                    where (s.Id = rowId)
+                    for supplierRow in getSuppliers () do
+                    where (supplierRow.Id = rowId)
                 }
                 |> connection.DeleteAsync
                 |> runSync
                 |> ignore
 
                 return true
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to delete existing supplier.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to delete existing supplier.", caughtException)
     }

@@ -12,12 +12,12 @@ let private accountId value = GoogleAccountId.create value |> valueOrFail
 let private email value = GoogleEmail.create value |> valueOrFail
 let private calendarId value = CalendarId.create value |> valueOrFail
 
-let private account id emailValue defaultCalendar needsReauth : RegisteredGoogleAccount =
+let private account id emailValue defaultCalendar needsReauthorisation : RegisteredGoogleAccount =
     {
         Id = accountId id
         EmailAddress = email emailValue
         DefaultInvoiceCalendar = defaultCalendar
-        NeedsReauthorisation = needsReauth
+        NeedsReauthorisation = needsReauthorisation
     }
 
 let private recordingSave () =

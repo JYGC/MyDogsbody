@@ -33,56 +33,56 @@ let private days (d: int) = ScanWindowDays.create d |> orFail
 
 [<Fact; Trait("Level", "Integration")>]
 let ``the seeded five windows are present after migration`` () =
-    withStore (fun ctx ->
-        let windows = ScanWindowStore.getScanWindows handleError ctx.GetDatabaseConnection ctx.GetScanWindows () |> orFail
+    withStore (fun context ->
+        let windows = ScanWindowStore.getScanWindows handleError context.GetDatabaseConnection context.GetScanWindows () |> orFail
 
         Assert.Equal<int list>(
             [ 7; 14; 30; 90; 180 ],
-            windows |> List.map (fun w -> ScanWindowDays.value w.Days) |> List.sort
+            windows |> List.map (fun window -> ScanWindowDays.value window.Days) |> List.sort
         ))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``a window can be added and then deleted`` () =
-    withStore (fun ctx ->
-        let added = ScanWindowStore.saveScanWindow handleError ctx.GetDatabaseConnection (days 45) |> orFail
+    withStore (fun context ->
+        let added = ScanWindowStore.saveScanWindow handleError context.GetDatabaseConnection (days 45) |> orFail
         Assert.Equal(45, ScanWindowDays.value added.Days)
 
-        Assert.True(ScanWindowStore.deleteScanWindow handleError ctx.GetDatabaseConnection added.Id |> orFail)
+        Assert.True(ScanWindowStore.deleteScanWindow handleError context.GetDatabaseConnection added.Id |> orFail)
 
         let remaining =
-            ScanWindowStore.getScanWindows handleError ctx.GetDatabaseConnection ctx.GetScanWindows () |> orFail
-            |> List.map (fun w -> ScanWindowDays.value w.Days)
+            ScanWindowStore.getScanWindows handleError context.GetDatabaseConnection context.GetScanWindows () |> orFail
+            |> List.map (fun window -> ScanWindowDays.value window.Days)
 
         Assert.DoesNotContain(45, remaining))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``the selected window persists as a number and survives its row being deleted`` () =
-    withStore (fun ctx ->
+    withStore (fun context ->
         // fresh database: nothing chosen
-        Assert.Equal(None, ScanWindowStore.getSelectedScanWindow handleError ctx.GetDatabaseConnection () |> orFail)
+        Assert.Equal(None, ScanWindowStore.getSelectedScanWindow handleError context.GetDatabaseConnection () |> orFail)
 
-        ScanWindowStore.saveSelectedScanWindow handleError ctx.GetDatabaseConnection (days 90) |> orFail
-        Assert.Equal(Some 90, ScanWindowStore.getSelectedScanWindow handleError ctx.GetDatabaseConnection () |> orFail |> Option.map ScanWindowDays.value)
+        ScanWindowStore.saveSelectedScanWindow handleError context.GetDatabaseConnection (days 90) |> orFail
+        Assert.Equal(Some 90, ScanWindowStore.getSelectedScanWindow handleError context.GetDatabaseConnection () |> orFail |> Option.map ScanWindowDays.value)
 
         // saving again overwrites the single row
-        ScanWindowStore.saveSelectedScanWindow handleError ctx.GetDatabaseConnection (days 30) |> orFail
-        Assert.Equal(Some 30, ScanWindowStore.getSelectedScanWindow handleError ctx.GetDatabaseConnection () |> orFail |> Option.map ScanWindowDays.value)
+        ScanWindowStore.saveSelectedScanWindow handleError context.GetDatabaseConnection (days 30) |> orFail
+        Assert.Equal(Some 30, ScanWindowStore.getSelectedScanWindow handleError context.GetDatabaseConnection () |> orFail |> Option.map ScanWindowDays.value)
 
         // delete the 30-day row - the remembered NUMBER is unaffected
         let thirty =
-            ScanWindowStore.getScanWindows handleError ctx.GetDatabaseConnection ctx.GetScanWindows () |> orFail
-            |> List.find (fun w -> ScanWindowDays.value w.Days = 30)
+            ScanWindowStore.getScanWindows handleError context.GetDatabaseConnection context.GetScanWindows () |> orFail
+            |> List.find (fun window -> ScanWindowDays.value window.Days = 30)
 
-        ScanWindowStore.deleteScanWindow handleError ctx.GetDatabaseConnection thirty.Id |> orFail
-        Assert.Equal(Some 30, ScanWindowStore.getSelectedScanWindow handleError ctx.GetDatabaseConnection () |> orFail |> Option.map ScanWindowDays.value))
+        ScanWindowStore.deleteScanWindow handleError context.GetDatabaseConnection thirty.Id |> orFail
+        Assert.Equal(Some 30, ScanWindowStore.getSelectedScanWindow handleError context.GetDatabaseConnection () |> orFail |> Option.map ScanWindowDays.value))
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a store failure reports the declared action and preserves the inner exception`` () =
     let boom () : SqliteConnection = raise (InvalidOperationException "down")
 
     match ScanWindowStore.getScanWindows handleError boom (fun () -> failwith "unused") () with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Database.ScanWindowStore.getScanWindows, ex.ActionName)
-        Assert.Equal("Failed to retrieve scan windows.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Database.ScanWindowStore.getScanWindows, caughtException.ActionName)
+        Assert.Equal("Failed to retrieve scan windows.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
     | Ok _ -> Assert.Fail("expected Error")

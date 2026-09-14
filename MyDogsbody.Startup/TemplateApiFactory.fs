@@ -37,12 +37,12 @@ let private splitPastedTextIntoLines (text: string) : TextLine list =
 
     rawLines
     |> List.fold
-        (fun (blockIndex, previousWasBlank, acc) lineText ->
+        (fun (blockIndex, previousWasBlank, accumulatedLines) lineText ->
             let isBlank = String.IsNullOrWhiteSpace lineText
             let nextBlockIndex = if isBlank && not previousWasBlank then blockIndex + 1 else blockIndex
-            nextBlockIndex, isBlank, { Text = lineText; BlockIndex = nextBlockIndex } :: acc)
+            nextBlockIndex, isBlank, { Text = lineText; BlockIndex = nextBlockIndex } :: accumulatedLines)
         (0, false, [])
-    |> fun (_, _, acc) -> List.rev acc
+    |> fun (_, _, accumulatedLines) -> List.rev accumulatedLines
 
 /// Builds the ScannedMessage TestTemplate applies against: the pasted subject, the sample
 /// filename, and the pasted text ON THE PART THE TEMPLATE ACTUALLY READS.
@@ -212,7 +212,7 @@ let createTemplateApi (handleError: HandleErrorBuilder) (databaseContext: Databa
                 databaseContext.GetSuppliers
                 databaseContext.GetSupplierMatchers
                 ()
-            |> Result.mapError (fun ex -> TemplateStoreFailed ex.Message)
+            |> Result.mapError (fun caughtException -> TemplateStoreFailed caughtException.Message)
 
     // Outbound: the workflow's domain error becomes the exception the UI renders.
     let toException = TemplateApiMappers.toMyDogsbodyException

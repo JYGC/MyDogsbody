@@ -38,10 +38,10 @@ let toGoogleAccountUiType (account: RegisteredGoogleAccount) : GoogleAccountUiTy
 /// context beyond the exception - `NotAuthorised` - never comes from here: authorise/reauthorise
 /// only ever run for an account whose identity is being established or re-established, so
 /// "not authorised" for THIS call has no separate meaning from the call simply failing.
-let toAuthorisationError (ex: MyDogsbodyException) : CalendarError =
-    match ex.Message with
+let toAuthorisationError (caughtException: MyDogsbodyException) : CalendarError =
+    match caughtException.Message with
     | "The consent flow was cancelled or denied." -> AuthorisationCancelled
-    | "The stored Google client secret is malformed." -> ClientSecretInvalid ex.Message
+    | "The stored Google client secret is malformed." -> ClientSecretInvalid caughtException.Message
     | "The authorised account's email address could not be read." -> AccountEmailUnavailable
     // The two failures GoogleAuthorization names for itself keep the sentence it chose. The
     // catch-all below prefers the inner exception because "Authorisation failed." carries
@@ -52,37 +52,37 @@ let toAuthorisationError (ex: MyDogsbodyException) : CalendarError =
     // specifically and with a reason, so neither may be replaced by the exception underneath.
     // The full exception is still logged by the adapter's own handleError.
     | "The loopback port is already in use."
-    | "The consent flow timed out." -> AuthorisationFailed ex.Message
+    | "The consent flow timed out." -> AuthorisationFailed caughtException.Message
     // A consent completed without the calendar scope. Same reasoning: the sentence carries the
     // remedy, while the inner exception only lists the scopes that were granted.
     | "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again." ->
-        AuthorisationFailed ex.Message
+        AuthorisationFailed caughtException.Message
     | _ ->
-        let reason = match ex.InnerException with null -> ex.Message | inner -> inner.Message
+        let reason = match caughtException.InnerException with null -> caughtException.Message | inner -> inner.Message
         AuthorisationFailed reason
 
 /// `GoogleCalendarClient.listCalendars` failures for a specific account. `NotAuthorised` needs
 /// the account id, which only this call site has in scope - `GoogleAuthorization.loadCredential`
 /// also reports "no stored credential" through the same message, ahead of ever reaching Google.
-let toListCalendarsError (accountId: GoogleAccountId) (ex: MyDogsbodyException) : CalendarError =
+let toListCalendarsError (accountId: GoogleAccountId) (caughtException: MyDogsbodyException) : CalendarError =
     // The two messages that carry Google's own text are matched by their stable opening rather
     // than in full - see GoogleCalendarClient's `apiNotEnabledPrefix` / `unreachablePrefix`.
-    if ex.Message.StartsWith GoogleCalendarClient.apiNotEnabledPrefix then
-        CalendarApiNotEnabled ex.Message
+    if caughtException.Message.StartsWith GoogleCalendarClient.apiNotEnabledPrefix then
+        CalendarApiNotEnabled caughtException.Message
     else
-        match ex.Message with
+        match caughtException.Message with
         | "The stored Google credential is no longer authorised."
         | "No stored credential for this account." -> NotAuthorised accountId
-        | "Google is rate-limiting this account; try again shortly." -> CalendarRateLimited ex.Message
+        | "Google is rate-limiting this account; try again shortly." -> CalendarRateLimited caughtException.Message
         // `loadCredential` parses the stored client secret before anything is sent to Google, so
         // a malformed one is neither "unreachable" nor "not authorised" - and it is the user's to
         // fix by re-pasting, which is advice neither of the other two cases would give them.
-        | "The stored Google client secret is malformed." -> ClientSecretInvalid ex.Message
-        | _ -> CalendarUnreachable ex.Message
+        | "The stored Google client secret is malformed." -> ClientSecretInvalid caughtException.Message
+        | _ -> CalendarUnreachable caughtException.Message
 
 /// `GoogleAccountStore` failures (the client secret and the account rows) - always
 /// infrastructure, never something a user did.
-let toStoreError (ex: MyDogsbodyException) : CalendarError = GoogleStoreFailed ex.Message
+let toStoreError (caughtException: MyDogsbodyException) : CalendarError = GoogleStoreFailed caughtException.Message
 
 // ---------- outbound: CalendarError -> MyDogsbodyException ----------
 

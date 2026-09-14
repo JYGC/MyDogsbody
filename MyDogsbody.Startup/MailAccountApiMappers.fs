@@ -50,7 +50,7 @@ let toDiscoveryResultUiType (result: DiscoveryResult) : DiscoveryResultUiType =
 
 /// Inbound: an adapter's exception becomes the one domain case that stands for infrastructure
 /// failure. The adapter's own handleError has already logged it, so nothing logs again here.
-let toMailAccountError (ex: MyDogsbodyException) : MailAccountError = MailStoreFailed ex.Message
+let toMailAccountError (caughtException: MyDogsbodyException) : MailAccountError = MailStoreFailed caughtException.Message
 
 /// Outbound: a domain error case becomes the exception the UI renders as a sentence.
 ///

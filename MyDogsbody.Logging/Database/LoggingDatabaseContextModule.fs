@@ -15,11 +15,11 @@ let getDatabaseContext databasePath connectionType : LoggingDatabaseContext =
     BsonMapper.Global.ToDocument(ExceptionLog()) |> ignore
 
     let liteDatabaseConnectionString = $"Filename={databasePath};connection={connectionType}"
-    let dbConnection = new LiteDatabase(liteDatabaseConnectionString)
+    let databaseConnection = new LiteDatabase(liteDatabaseConnectionString)
 
     {
         GetExceptionCollection =
-            fun () -> dbConnection.GetCollection<ExceptionLog>(exceptionCollectionName)
+            fun () -> databaseConnection.GetCollection<ExceptionLog>(exceptionCollectionName)
 
-        Dispose = fun () -> dbConnection.Dispose()
+        Dispose = fun () -> databaseConnection.Dispose()
     }

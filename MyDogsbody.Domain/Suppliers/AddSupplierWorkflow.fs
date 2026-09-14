@@ -8,12 +8,12 @@ open MyDogsbody.Domain.Suppliers
 let private validateMatchers
     (matchers: (MatcherKind * string) list)
     : Result<SupplierMatcher list, SupplierError> =
-    let rec loop remaining acc =
+    let rec loop remaining accumulatedMatchers =
         match remaining with
-        | [] -> Ok (List.rev acc)
+        | [] -> Ok (List.rev accumulatedMatchers)
         | (kind, value) :: rest ->
             match SupplierMatcher.create kind value with
-            | Ok matcher -> loop rest (matcher :: acc)
+            | Ok matcher -> loop rest (matcher :: accumulatedMatchers)
             | Error reason -> Error (MatcherInvalid reason)
 
     loop matchers []

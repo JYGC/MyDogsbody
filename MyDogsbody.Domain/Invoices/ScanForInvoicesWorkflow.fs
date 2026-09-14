@@ -116,7 +116,7 @@ let private processMessage
             // matchSupplier only ever returns SupplierNotRecognised here.
             return Recorded(orAttachmentCause NoSupplierMatched)
         | Ok supplierId ->
-            let supplier = suppliers |> List.find (fun s -> s.Id = supplierId)
+            let supplier = suppliers |> List.find (fun candidateSupplier -> candidateSupplier.Id = supplierId)
 
             let! templates =
                 loadTemplatesForSupplier supplierId |> Result.mapError fromTemplateError
@@ -160,7 +160,7 @@ let private resettingWatermarksOnError
 
 /// The running total across messages. `Fatal` short-circuits: once set, no further message is
 /// processed and the scan returns that error rather than a partial result.
-type private ScanAcc =
+type private ScanAccumulator =
     { Stored: StoredInvoice list
       Recorded: ScanProblem list
       Succeeded: SourceMessageId list
@@ -204,7 +204,7 @@ let scanForInvoices
         let! messages = readMailFolder accountId cutoff |> Result.mapError fromMailAccountError
 
         // Past this line every folder's watermark is at EOF, so every abort below has to reset
-        // them - not only the ScanAcc.Fatal one. See resettingWatermarksOnError.
+        // them - not only the ScanAccumulator.Fatal one. See resettingWatermarksOnError.
         let onAbortResetWatermarks outcome =
             resettingWatermarksOnError clearWatermarks accountId outcome
 
@@ -215,7 +215,7 @@ let scanForInvoices
 
         let tombstonedKeys =
             tombstones
-            |> List.map (fun t -> SupplierId.value t.SupplierId, InvoiceReference.value t.Reference)
+            |> List.map (fun tombstone -> SupplierId.value tombstone.SupplierId, InvoiceReference.value tombstone.Reference)
             |> Set.ofList
 
         let problemFor (scanned: ScannedMessage) (cause: ScanProblemCause) : ScanProblem =
@@ -226,26 +226,26 @@ let scanForInvoices
               Cause = cause
               RecordedAt = getCurrentTime () }
 
-        let step (acc: ScanAcc) (message: MailMessage) : ScanAcc =
-            match acc.Fatal with
-            | Some _ -> acc
+        let step (accumulator: ScanAccumulator) (message: MailMessage) : ScanAccumulator =
+            match accumulator.Fatal with
+            | Some _ -> accumulator
             | None ->
                 let scanned, attachmentCauses = ScanMessageWorkflow.scanMessage readDocumentText message
 
                 match processMessage suppliers loadTemplatesForSupplier tombstonedKeys scanned attachmentCauses with
-                | Error error -> { acc with Fatal = Some error }
-                | Ok Skipped -> acc
+                | Error error -> { accumulator with Fatal = Some error }
+                | Ok Skipped -> accumulator
                 | Ok(Recorded cause) ->
-                    { acc with Recorded = problemFor scanned cause :: acc.Recorded }
+                    { accumulator with Recorded = problemFor scanned cause :: accumulator.Recorded }
                 | Ok(Extracted invoice) ->
                     match upsertInvoice invoice with
                     | Ok storedInvoice ->
-                        { acc with
-                            Stored = storedInvoice :: acc.Stored
-                            Succeeded = scanned.SourceMessageId :: acc.Succeeded }
+                        { accumulator with
+                            Stored = storedInvoice :: accumulator.Stored
+                            Succeeded = scanned.SourceMessageId :: accumulator.Succeeded }
                     | Error(SupplierGone _) ->
-                        { acc with Recorded = problemFor scanned NoSupplierMatched :: acc.Recorded }
-                    | Error error -> { acc with Fatal = Some error }
+                        { accumulator with Recorded = problemFor scanned NoSupplierMatched :: accumulator.Recorded }
+                    | Error error -> { accumulator with Fatal = Some error }
 
         let final =
             messages

@@ -76,7 +76,7 @@ let private ForeignKeyViolation = 787
 /// The chain is walked rather than probed at a fixed depth - `runSync` (Async.AwaitTask) wraps the
 /// SqliteException in an AggregateException, so the real one sits two levels down today, and
 /// nothing should depend on it staying there.
-let isMissingSupplier (ex: MyDogsbodyException) : bool =
+let isMissingSupplier (exceptionToExamine: MyDogsbodyException) : bool =
     let rec search (candidate: exn) : bool =
         match candidate with
         | null -> false
@@ -84,14 +84,14 @@ let isMissingSupplier (ex: MyDogsbodyException) : bool =
         | :? AggregateException as aggregate -> aggregate.InnerExceptions |> Seq.exists search
         | other -> search other.InnerException
 
-    search ex
+    search exceptionToExamine
 
 // ---------------- invoices ----------------
 
 let getInvoices
     (handleError: HandleErrorBuilder)
     (getConnection: unit -> SqliteConnection)
-    (getInvoicesQ: unit -> QuerySource<InvoiceRecord>)
+    (getInvoiceRecordsQuerySource: unit -> QuerySource<InvoiceRecord>)
     (cutoff: ScanCutoff option)
     : Result<StoredInvoice list, MyDogsbodyException> =
     let action = ActionNames.MyDogsbody.Database.InvoiceStore.getInvoices
@@ -103,7 +103,7 @@ let getInvoices
             let rows =
                 withConnection connection (fun () ->
                     select {
-                        for i in getInvoicesQ () do
+                        for invoiceRow in getInvoiceRecordsQuerySource () do
                         selectAll
                     }
                     |> connection.SelectAsync<InvoiceRecord>
@@ -115,11 +115,11 @@ let getInvoices
             return
                 match cutoff with
                 | None -> stored
-                | Some c ->
-                    let from = ScanCutoff.value c
-                    stored |> List.filter (fun invoice -> invoice.Invoice.MessageReceivedAt >= from)
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve invoices.", ex)
+                | Some cutoffValue ->
+                    let cutoffTime = ScanCutoff.value cutoffValue
+                    stored |> List.filter (fun invoice -> invoice.Invoice.MessageReceivedAt >= cutoffTime)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve invoices.", caughtException)
     }
 
 let upsertInvoice
@@ -136,7 +136,7 @@ let upsertInvoice
             let record = InvoiceRecordMappers.toNewInvoiceRecord invoice
             let scannedAt = (getCurrentTime ()).ToString("o", invariant)
 
-            let toObj (v: string option) = match v with Some s -> box s | None -> box DBNull.Value
+            let toObj (value: string option) = match value with Some stringValue -> box stringValue | None -> box DBNull.Value
 
             let parameters: obj =
                 {| SupplierId = record.SupplierId
@@ -181,14 +181,14 @@ let upsertInvoice
                 { record with Id = int assignedId; ScannedAt = scannedAt }
                 |> InvoiceRecordMappers.toStoredInvoice
                 |> orRaise "invoice"
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to store invoice.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to store invoice.", caughtException)
     }
 
 let deleteInvoice
     (handleError: HandleErrorBuilder)
     (getConnection: unit -> SqliteConnection)
-    (getInvoicesQ: unit -> QuerySource<InvoiceRecord>)
+    (getInvoiceRecordsQuerySource: unit -> QuerySource<InvoiceRecord>)
     (invoiceId: InvoiceId)
     : Result<StoredInvoice option, MyDogsbodyException> =
     let action = ActionNames.MyDogsbody.Database.InvoiceStore.deleteInvoice
@@ -219,8 +219,8 @@ let deleteInvoice
                         Some row)
 
             return deleted |> Option.map (InvoiceRecordMappers.toStoredInvoice >> orRaise "invoice")
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to delete invoice.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to delete invoice.", caughtException)
     }
 
 // ---------------- tombstones ----------------
@@ -228,7 +228,7 @@ let deleteInvoice
 let getTombstones
     (handleError: HandleErrorBuilder)
     (getConnection: unit -> SqliteConnection)
-    (getTombstonesQ: unit -> QuerySource<InvoiceTombstoneRecord>)
+    (getInvoiceTombstoneRecordsQuerySource: unit -> QuerySource<InvoiceTombstoneRecord>)
     ()
     : Result<InvoiceTombstone list, MyDogsbodyException> =
     let action = ActionNames.MyDogsbody.Database.InvoiceStore.getTombstones
@@ -240,7 +240,7 @@ let getTombstones
             let rows =
                 withConnection connection (fun () ->
                     select {
-                        for t in getTombstonesQ () do
+                        for tombstoneRow in getInvoiceTombstoneRecordsQuerySource () do
                         selectAll
                     }
                     |> connection.SelectAsync<InvoiceTombstoneRecord>
@@ -248,8 +248,8 @@ let getTombstones
                     |> Seq.toList)
 
             return rows |> List.map (InvoiceRecordMappers.toInvoiceTombstone >> orRaise "tombstone")
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve invoice tombstones.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve invoice tombstones.", caughtException)
     }
 
 let saveTombstone
@@ -276,8 +276,8 @@ let saveTombstone
                 |> ignore)
 
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to write invoice tombstone.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to write invoice tombstone.", caughtException)
     }
 
 let removeTombstone
@@ -302,8 +302,8 @@ let removeTombstone
                     |> runSync)
 
             return affected > 0
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to remove invoice tombstone.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to remove invoice tombstone.", caughtException)
     }
 
 // ---------------- scan problems ----------------
@@ -311,7 +311,7 @@ let removeTombstone
 let getScanProblems
     (handleError: HandleErrorBuilder)
     (getConnection: unit -> SqliteConnection)
-    (getScanProblemsQ: unit -> QuerySource<ScanProblemRecord>)
+    (getScanProblemRecordsQuerySource: unit -> QuerySource<ScanProblemRecord>)
     ()
     : Result<ScanProblem list, MyDogsbodyException> =
     let action = ActionNames.MyDogsbody.Database.InvoiceStore.getScanProblems
@@ -323,7 +323,7 @@ let getScanProblems
             let rows =
                 withConnection connection (fun () ->
                     select {
-                        for p in getScanProblemsQ () do
+                        for scanProblemRow in getScanProblemRecordsQuerySource () do
                         selectAll
                     }
                     |> connection.SelectAsync<ScanProblemRecord>
@@ -331,13 +331,13 @@ let getScanProblems
                     |> Seq.toList)
 
             return rows |> List.map (InvoiceRecordMappers.toScanProblem >> orRaise "scan problem")
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve scan problems.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve scan problems.", caughtException)
     }
 
 let private toObj (value: string option) : obj =
     match value with
-    | Some s -> box s
+    | Some stringValue -> box stringValue
     | None -> box DBNull.Value
 
 let private deleteProblemsFor (connection: SqliteConnection) (transaction: SqliteTransaction) (messageId: string) : unit =
@@ -356,7 +356,7 @@ let private insertProblem (connection: SqliteConnection) (transaction: SqliteTra
          VALUES
             (@SourceMessageId, @SupplierId, @Sender, @Subject, @ReceivedAt, @Cause, @Detail, @RecordedAt);",
         {| SourceMessageId = record.SourceMessageId
-           SupplierId = (match record.SupplierId with Some s -> box s | None -> box DBNull.Value)
+           SupplierId = (match record.SupplierId with Some supplierRowIdValue -> box supplierRowIdValue | None -> box DBNull.Value)
            Sender = record.Sender
            Subject = record.Subject
            ReceivedAt = record.ReceivedAt
@@ -391,8 +391,8 @@ let saveScanProblems
 
             let _ = (if List.isEmpty problems then () else write ())
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save scan problems.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save scan problems.", caughtException)
     }
 
 let clearScanProblems
@@ -414,6 +414,6 @@ let clearScanProblems
 
             let _ = (if List.isEmpty sourceMessageIds then () else clear ())
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to clear scan problems.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to clear scan problems.", caughtException)
     }

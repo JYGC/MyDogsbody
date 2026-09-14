@@ -52,8 +52,8 @@ let private unreachableCollection () : Database.Types.GoogleCredentialsCollectio
 /// real consent failure arrives in. A fake that `raise`s synchronously never produces it - which
 /// is how every typed catch in `authoriseWith` passed its test while being unreachable in
 /// production, where the exception came through wrapped in an `AggregateException`.
-let private faultedConsent (ex: exn) : string -> string -> IDataStore -> Task<UserCredential> =
-    fun _ _ _ -> Task.FromException<UserCredential> ex
+let private faultedConsent (caughtException: exn) : string -> string -> IDataStore -> Task<UserCredential> =
+    fun _ _ _ -> Task.FromException<UserCredential> caughtException
 
 /// A consent flow that does what the real one does before it returns: exchanges the code and
 /// persists the token through the `IDataStore` it was handed (`AuthorizationCodeFlow`'s
@@ -78,7 +78,7 @@ let private withCredentialStore (test: Database.Types.GoogleDatabaseContext -> u
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 /// A minimally well-formed client secret JSON - `loadCredential`'s tests exercise the real
 /// `GoogleClientSecrets.FromStream` parse, unlike `authoriseWith`'s tests where the consent flow
@@ -130,10 +130,10 @@ let ``authoriseWith reports a cancelled or denied consent flow, unlogged`` () =
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("The consent flow was cancelled or denied.", ex.Message)
-        Assert.IsType<TokenResponseException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("The consent flow was cancelled or denied.", caughtException.Message)
+        Assert.IsType<TokenResponseException>(caughtException.InnerException) |> ignore
         Assert.Empty logged
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -156,9 +156,9 @@ let ``authoriseWith reports a malformed client secret, unlogged`` () =
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("The stored Google client secret is malformed.", ex.Message)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("The stored Google client secret is malformed.", caughtException.Message)
         Assert.Empty logged
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -181,9 +181,9 @@ let ``authoriseWith reports an unavailable email, unlogged`` (emailValue: string
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("The authorised account's email address could not be read.", ex.Message)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("The authorised account's email address could not be read.", caughtException.Message)
         Assert.Empty logged
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -206,10 +206,10 @@ let ``authoriseWith reports the loopback port already being in use, logged`` () 
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("The loopback port is already in use.", ex.Message)
-        Assert.IsType<HttpListenerException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("The loopback port is already in use.", caughtException.Message)
+        Assert.IsType<HttpListenerException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -233,9 +233,9 @@ let ``authoriseWith reports a timed-out consent flow, logged`` () =
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("The consent flow timed out.", ex.Message)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("The consent flow timed out.", caughtException.Message)
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -247,11 +247,11 @@ let ``loadCredential reports that an account has no stored credential, unlogged`
 
     try
         match GoogleAuthorization.loadCredential (HandleErrorBuilder logged.Add) context.GetCredentialCollection sampleClientSecretJson "never-authorised" with
-        | Error ex ->
-            Assert.Equal("No stored credential for this account.", ex.Message)
+        | Error caughtException ->
+            Assert.Equal("No stored credential for this account.", caughtException.Message)
             // Its own action, not `authorise`'s - a failure loading a stored token has nothing to
             // do with the consent flow, and the exception log is where that distinction is read.
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential, ex.ActionName)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential, caughtException.ActionName)
             Assert.Empty logged
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
     finally
@@ -273,7 +273,7 @@ let ``loadCredential returns a credential carrying the stored access token`` () 
 
         match GoogleAuthorization.loadCredential (HandleErrorBuilder(fun _ -> ())) context.GetCredentialCollection sampleClientSecretJson "account-1" with
         | Ok credential -> Assert.Equal("the-access-token", credential.Token.AccessToken)
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+        | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
     finally
         context.Dispose()
         try System.IO.File.Delete databasePath with _ -> ()
@@ -302,10 +302,10 @@ let ``loadCredential reports a malformed stored client secret, not a bare author
         |> Async.RunSynchronously
 
         match GoogleAuthorization.loadCredential (HandleErrorBuilder logged.Add) context.GetCredentialCollection storedSecret "account-1" with
-        | Error ex ->
-            Assert.Equal("The stored Google client secret is malformed.", ex.Message)
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential, ex.ActionName)
-            Assert.NotNull ex.InnerException
+        | Error caughtException ->
+            Assert.Equal("The stored Google client secret is malformed.", caughtException.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.loadCredential, caughtException.ActionName)
+            Assert.NotNull caughtException.InnerException
             // A secret the user pasted wrongly is a state they can fix, not a defect worth a stack
             // trace - the same unlogged treatment `authoriseWith` gives the identical failure.
             Assert.Empty logged
@@ -333,10 +333,10 @@ let ``authoriseWith reports any other failure generically, logged, with the inne
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("Authorisation failed.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("Authorisation failed.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -374,7 +374,7 @@ let ``removeStoredToken deletes the account's stored token`` () =
         Assert.Equal("at2", remaining.Token.AccessToken)
 
         match GoogleAuthorization.loadCredential (HandleErrorBuilder(fun _ -> ())) context.GetCredentialCollection sampleClientSecretJson "account-1" with
-        | Error ex -> Assert.Equal("No stored credential for this account.", ex.Message)
+        | Error caughtException -> Assert.Equal("No stored credential for this account.", caughtException.Message)
         | Ok _ -> Assert.Fail("Expected the deleted account's credential to be gone")
     finally
         context.Dispose()
@@ -404,10 +404,10 @@ let ``removeStoredToken reports an unreachable credential store as a Result, rat
     let logged = ResizeArray<MyDogsbodyException>()
 
     match GoogleAuthorization.removeStoredToken (HandleErrorBuilder logged.Add) unreachableCollection "account-1" with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.removeStoredToken, ex.ActionName)
-        Assert.Equal("Failed to delete the stored Google credential.", ex.Message)
-        Assert.NotNull ex.InnerException
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.removeStoredToken, caughtException.ActionName)
+        Assert.Equal("Failed to delete the stored Google credential.", caughtException.Message)
+        Assert.NotNull caughtException.InnerException
         Assert.NotEmpty logged
     | Ok () -> Assert.Fail("Expected Error, but got Ok")
 
@@ -438,10 +438,10 @@ let ``authoriseWith over the REAL consent flow reports a malformed client secret
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("The stored Google client secret is malformed.", ex.Message)
-        Assert.NotNull ex.InnerException
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("The stored Google client secret is malformed.", caughtException.Message)
+        Assert.NotNull caughtException.InnerException
         Assert.Empty logged
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -468,10 +468,10 @@ let ``authoriseWith does not report a failed code exchange as a cancelled consen
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal("Authorisation failed.", ex.Message)
-        let inner = Assert.IsType<TokenResponseException>(ex.InnerException)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal("Authorisation failed.", caughtException.Message)
+        let inner = Assert.IsType<TokenResponseException>(caughtException.InnerException)
         Assert.Equal("invalid_client", inner.Error.Error)
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
@@ -494,9 +494,9 @@ let ``authoriseNewAccountWith hands back the token consent wrote when the email 
                 "minted-id"
                 ()
         with
-        | Error ex ->
-            Assert.Equal("The authorised account's email address could not be read.", ex.Message)
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
+        | Error caughtException ->
+            Assert.Equal("The authorised account's email address could not be read.", caughtException.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
             Assert.Empty logged
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -520,10 +520,10 @@ let ``authoriseNewAccountWith hands back the token consent wrote when reading th
                 "minted-id"
                 ()
         with
-        | Error ex ->
-            Assert.Equal("Authorisation failed.", ex.Message)
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-            Assert.IsType<HttpRequestException>(ex.InnerException) |> ignore
+        | Error caughtException ->
+            Assert.Equal("Authorisation failed.", caughtException.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+            Assert.IsType<HttpRequestException>(caughtException.InnerException) |> ignore
             // The failure itself, once - the cleanup that followed it succeeded and logs nothing.
             Assert.Single logged |> ignore
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
@@ -571,8 +571,8 @@ let ``authoriseNewAccountWith reports a failure before consent wrote anything ex
                 "minted-id"
                 ()
         with
-        | Error ex ->
-            Assert.Equal("The consent flow was cancelled or denied.", ex.Message)
+        | Error caughtException ->
+            Assert.Equal("The consent flow was cancelled or denied.", caughtException.Message)
             Assert.Empty logged
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -637,10 +637,10 @@ let ``authoriseWith refuses a consent that did not grant Calendar access, unlogg
             "account-1"
             ()
     with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
-        Assert.Equal(calendarAccessNotGranted, ex.Message)
-        let inner = Assert.IsType<ApplicationException>(ex.InnerException)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
+        Assert.Equal(calendarAccessNotGranted, caughtException.Message)
+        let inner = Assert.IsType<ApplicationException>(caughtException.InnerException)
         Assert.Equal($"Granted scopes: {grantedScope}", inner.Message)
         Assert.Empty logged
         Assert.Empty emailReads
@@ -686,9 +686,9 @@ let ``authoriseNewAccountWith hands back the token consent wrote when Calendar a
                 "minted-id"
                 ()
         with
-        | Error ex ->
-            Assert.Equal(calendarAccessNotGranted, ex.Message)
-            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, ex.ActionName)
+        | Error caughtException ->
+            Assert.Equal(calendarAccessNotGranted, caughtException.Message)
+            Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleAuthorization.authorise, caughtException.ActionName)
             Assert.Empty logged
         | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 

@@ -43,9 +43,9 @@ let ``toUnvalidatedTemplate carries every field of the UI record`` () =
     Assert.Equal("Monthly statement", actual.Name)
     Assert.Equal<DocumentPart>(AnyPart, actual.Part)
     Assert.Equal(2, actual.Position)
-    Assert.Equal<TargetField list>([ Reference; Amount; Currency ], actual.Rules |> List.map (fun r -> r.Field))
-    Assert.Equal(AfterLabel "Invoice:", (actual.Rules |> List.find (fun r -> r.Field = Reference)).Rule)
-    Assert.Equal(AsMoney '.', (actual.Rules |> List.find (fun r -> r.Field = Amount)).Hint)
+    Assert.Equal<TargetField list>([ Reference; Amount; Currency ], actual.Rules |> List.map (fun rule -> rule.Field))
+    Assert.Equal(AfterLabel "Invoice:", (actual.Rules |> List.find (fun rule -> rule.Field = Reference)).Rule)
+    Assert.Equal(AsMoney '.', (actual.Rules |> List.find (fun rule -> rule.Field = Amount)).Hint)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toUnvalidatedTemplate maps an Attachment document part carrying its format`` () =
@@ -68,7 +68,7 @@ let ``toUnvalidatedTemplate maps a DateFromField rule carrying its source field`
 
     let actual = TemplateApiMappers.toUnvalidatedTemplate entered |> mappedOrFail
 
-    Assert.Equal(DateFromField IssueDate, (actual.Rules |> List.find (fun r -> r.Field = DueDate)).Rule)
+    Assert.Equal(DateFromField IssueDate, (actual.Rules |> List.find (fun rule -> rule.Field = DueDate)).Rule)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toUnvalidatedTemplateEdit carries every field of the UI record including the id`` () =
@@ -80,7 +80,7 @@ let ``toUnvalidatedTemplateEdit carries every field of the UI record including t
     Assert.Equal("7", id)
     Assert.Equal("1", actual.SupplierId)
     Assert.Equal("Monthly statement", actual.Name)
-    Assert.Equal<TargetField list>([ Reference; Amount; Currency ], actual.Rules |> List.map (fun r -> r.Field))
+    Assert.Equal<TargetField list>([ Reference; Amount; Currency ], actual.Rules |> List.map (fun rule -> rule.Field))
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toUnvalidatedTemplate rejects an unrecognised rule kind as TemplateRuleShapeInvalid`` () =
@@ -154,7 +154,7 @@ let ``toUnvalidatedTemplate reads a cleared FixedValue box as an empty fixed val
 
     let actual = TemplateApiMappers.toUnvalidatedTemplate entered |> mappedOrFail
 
-    Assert.Equal(FixedValue "", (actual.Rules |> List.find (fun r -> r.Field = Currency)).Rule)
+    Assert.Equal(FixedValue "", (actual.Rules |> List.find (fun rule -> rule.Field = Currency)).Rule)
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toUiType and toUnvalidatedTemplate round trip a stored template unchanged`` () =
@@ -185,10 +185,10 @@ let ``toUiType and toUnvalidatedTemplate round trip a stored template unchanged`
     Assert.Equal("Monthly statement", uiType.Name)
     Assert.Equal(2, uiType.Position)
     Assert.Equal("7", roundTrippedId)
-    Assert.Equal<TargetField list>([ Reference; Amount; Currency; IssueDate; DueDate ], roundTripped.Rules |> List.map (fun r -> r.Field))
-    Assert.Equal(LinesAfterLabel("Total", 1), (roundTripped.Rules |> List.find (fun r -> r.Field = Amount)).Rule)
-    Assert.Equal(AsMoney ',', (roundTripped.Rules |> List.find (fun r -> r.Field = Amount)).Hint)
-    Assert.Equal(DateFromField IssueDate, (roundTripped.Rules |> List.find (fun r -> r.Field = DueDate)).Rule)
+    Assert.Equal<TargetField list>([ Reference; Amount; Currency; IssueDate; DueDate ], roundTripped.Rules |> List.map (fun rule -> rule.Field))
+    Assert.Equal(LinesAfterLabel("Total", 1), (roundTripped.Rules |> List.find (fun rule -> rule.Field = Amount)).Rule)
+    Assert.Equal(AsMoney ',', (roundTripped.Rules |> List.find (fun rule -> rule.Field = Amount)).Hint)
+    Assert.Equal(DateFromField IssueDate, (roundTripped.Rules |> List.find (fun rule -> rule.Field = DueDate)).Rule)
 
 // ---------- every union case, both directions ----------
 

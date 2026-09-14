@@ -82,9 +82,9 @@ module NormalizedMessage =
     // Read-only accessors; no constructor is exposed. MessageNormalization.normalizeMessage is
     // the only function that builds the private record literal, the same arrangement
     // ValidTemplate and ValidateTemplateWorkflow have.
-    let sourceMessageId (m: NormalizedMessage) = m.SourceMessageId'
-    let subject (m: NormalizedMessage) = m.Subject'
-    let parts (m: NormalizedMessage) = m.Parts'
+    let sourceMessageId (normalizedMessage: NormalizedMessage) = normalizedMessage.SourceMessageId'
+    let subject (normalizedMessage: NormalizedMessage) = normalizedMessage.Subject'
+    let parts (normalizedMessage: NormalizedMessage) = normalizedMessage.Parts'
 
 /// What a template pulled out and parsed with its own hints.
 ///
@@ -191,8 +191,8 @@ module Money =
         else
             Ok(Money(amount, trimmed.ToUpperInvariant()))
 
-    let amount (Money(a, _)) = a
-    let currency (Money(_, c)) = c
+    let amount (Money(rawAmount, _)) = rawAmount
+    let currency (Money(_, currencyCode)) = currencyCode
 
 /// The date a document states it was issued. A year guard keeps a date read as 31 Dec 9999 -
 /// which DateFromField arithmetic would overflow on - out of the ledger.

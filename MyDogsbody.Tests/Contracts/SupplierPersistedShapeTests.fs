@@ -88,7 +88,7 @@ let ``a SupplierName survives the round trip through its TEXT column unchanged, 
 
         match inserted with
         | Ok stored -> Assert.Equal(awkward, SupplierName.value stored.Name)
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+        | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
     )
 
 [<Fact; Trait("Level", "Contract")>]
@@ -108,7 +108,7 @@ let ``a SupplierName at the maximum length survives the round trip unchanged`` (
         | Ok stored ->
             Assert.Equal(atLimit, SupplierName.value stored.Name)
             Assert.Equal(SupplierName.MaximumLength, (SupplierName.value stored.Name).Length)
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+        | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
     )
 
 [<Fact; Trait("Level", "Contract")>]
@@ -138,6 +138,6 @@ let ``every MatcherKind value survives the round trip through its TEXT column un
             Assert.Equal(allCases.Length, List.length stored.Matchers)
 
             for kind in allCases do
-                Assert.Contains(stored.Matchers, fun m -> SupplierMatcher.kind m = kind)
-        | Error ex -> Assert.Fail($"Expected Ok, but got Error: {ex.Message}")
+                Assert.Contains(stored.Matchers, fun matcher -> SupplierMatcher.kind matcher = kind)
+        | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
     )

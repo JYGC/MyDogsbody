@@ -47,7 +47,7 @@ let ``scanMessage flattens the subject, body and each attachment to parts`` () =
     )
 
     let subjectLines = scanned.Parts |> List.find (fun (p, _) -> p = SubjectPart) |> snd
-    Assert.Equal<string list>([ "Your invoice INV-1" ], subjectLines |> List.map (fun l -> l.Text))
+    Assert.Equal<string list>([ "Your invoice INV-1" ], subjectLines |> List.map (fun line -> line.Text))
 
     let bodyLines = scanned.Parts |> List.find (fun (p, _) -> p = BodyPart) |> snd
     Assert.Equal("text of body.html", (List.head bodyLines).Text) // HTML preferred (Finding 5)

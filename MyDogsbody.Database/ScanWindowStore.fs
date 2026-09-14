@@ -29,7 +29,7 @@ let private withConnection (connection: SqliteConnection) (work: unit -> 'T) : '
 let getScanWindows
     (handleError: HandleErrorBuilder)
     (getConnection: unit -> SqliteConnection)
-    (getScanWindowsQ: unit -> QuerySource<ScanWindowRecord>)
+    (getScanWindowRecordsQuerySource: unit -> QuerySource<ScanWindowRecord>)
     ()
     : Result<StoredScanWindow list, MyDogsbodyException> =
     let action = ActionNames.MyDogsbody.Database.ScanWindowStore.getScanWindows
@@ -41,7 +41,7 @@ let getScanWindows
             let rows =
                 withConnection connection (fun () ->
                     select {
-                        for w in getScanWindowsQ () do
+                        for scanWindowRow in getScanWindowRecordsQuerySource () do
                         selectAll
                     }
                     |> connection.SelectAsync<ScanWindowRecord>
@@ -49,8 +49,8 @@ let getScanWindows
                     |> Seq.toList)
 
             return rows |> List.map (InvoiceRecordMappers.toStoredScanWindow >> orRaise "scan window")
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to retrieve scan windows.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to retrieve scan windows.", caughtException)
     }
 
 let saveScanWindow
@@ -77,8 +77,8 @@ let saveScanWindow
                 { Id = int assignedId; Days = dayCount }
                 |> InvoiceRecordMappers.toStoredScanWindow
                 |> orRaise "scan window"
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to add scan window.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to add scan window.", caughtException)
     }
 
 let deleteScanWindow
@@ -99,8 +99,8 @@ let deleteScanWindow
                     |> runSync)
 
             return affected > 0
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to delete scan window.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to delete scan window.", caughtException)
     }
 
 let getSelectedScanWindow
@@ -129,8 +129,8 @@ let getSelectedScanWindow
                     | Ok window -> Some window
                     | Error reason -> raise (InvalidOperationException $"Stored selected scan window is unusable: {reason}")
                 | _ -> None
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to read the selected scan window.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to read the selected scan window.", caughtException)
     }
 
 let saveSelectedScanWindow
@@ -154,6 +154,6 @@ let saveSelectedScanWindow
                 |> ignore)
 
             return ()
-        with ex ->
-            return! MyDogsbodyException(action, "Failed to save the selected scan window.", ex)
+        with caughtException ->
+            return! MyDogsbodyException(action, "Failed to save the selected scan window.", caughtException)
     }

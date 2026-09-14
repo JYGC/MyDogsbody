@@ -57,7 +57,8 @@ let rec private enumerateMaildirLevel
     (displayNameOverride: string option)
     : MailFolder list =
     let hasAllThree =
-        [ "cur"; "new"; "tmp" ] |> List.forall (fun sub -> Directory.Exists(Path.Combine(directory, sub)))
+        [ "cur"; "new"; "tmp" ]
+        |> List.forall (fun subdirectoryName -> Directory.Exists(Path.Combine(directory, subdirectoryName)))
 
     let ownFolder =
         if hasAllThree then
@@ -66,8 +67,9 @@ let rec private enumerateMaildirLevel
 
             let sizeBytes =
                 [ "cur"; "new" ]
-                |> List.sumBy (fun sub ->
-                    Directory.GetFiles(Path.Combine(directory, sub)) |> Array.sumBy (fun f -> FileInfo(f).Length))
+                |> List.sumBy (fun subdirectoryName ->
+                    Directory.GetFiles(Path.Combine(directory, subdirectoryName))
+                    |> Array.sumBy (fun filePath -> FileInfo(filePath).Length))
 
             [
                 {
@@ -82,14 +84,14 @@ let rec private enumerateMaildirLevel
 
     let childFolders =
         Directory.GetDirectories directory
-        |> Array.filter (fun d ->
-            let name = Path.GetFileName d
+        |> Array.filter (fun subdirectoryPath ->
+            let name = Path.GetFileName subdirectoryPath
             name <> "cur" && name <> "new" && name <> "tmp")
         |> Array.toList
-        |> List.collect (fun d ->
-            let name = Path.GetFileName d
+        |> List.collect (fun subdirectoryPath ->
+            let name = Path.GetFileName subdirectoryPath
             let relativePath = if relativePrefix = "" then name else relativePrefix + "/" + name
-            enumerateMaildirLevel d relativePath (Some name))
+            enumerateMaildirLevel subdirectoryPath relativePath (Some name))
 
     ownFolder @ childFolders
 
@@ -119,7 +121,10 @@ let resolvePath (storeDirectory: string) (format: StoreFormat) (relativePath: st
         let segments = relativePath.Split('/')
 
         let sbdDirectories =
-            if segments.Length <= 1 then [||] else segments.[.. segments.Length - 2] |> Array.map (fun s -> s + ".sbd")
+            if segments.Length <= 1 then
+                [||]
+            else
+                segments.[.. segments.Length - 2] |> Array.map (fun segment -> segment + ".sbd")
 
         let allParts = Array.append sbdDirectories [| segments.[segments.Length - 1] |]
-        Array.fold (fun acc part -> Path.Combine(acc, part)) storeDirectory allParts
+        Array.fold (fun combinedPath part -> Path.Combine(combinedPath, part)) storeDirectory allParts

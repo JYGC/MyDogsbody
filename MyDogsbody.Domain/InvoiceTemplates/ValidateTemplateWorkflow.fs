@@ -41,10 +41,10 @@ let compilePattern (pattern: string) : Result<Regex, string> =
         | :? NotSupportedException ->
             try
                 Ok (Regex(pattern, caseFolding, timeout))
-            with :? RegexParseException as ex ->
-                Error ex.Message
-        | :? RegexParseException as ex ->
-            Error ex.Message
+            with :? RegexParseException as caughtException ->
+                Error caughtException.Message
+        | :? RegexParseException as caughtException ->
+            Error caughtException.Message
 
 let private hasCaptureGroup (regex: Regex) : bool =
     regex.GetGroupNumbers() |> Array.exists (fun number -> number > 0)

@@ -40,7 +40,7 @@ let private recordingUpdate (existing: StoredTemplate list) () =
         fun templateId template ->
             received.Add(templateId, template)
 
-            if existing |> List.exists (fun t -> t.Id = templateId) then
+            if existing |> List.exists (fun existingTemplate -> existingTemplate.Id = templateId) then
                 Ok (Some { Id = templateId; Template = template })
             else
                 Ok None
@@ -82,7 +82,7 @@ let ``editTemplate replaces the rule set rather than merging it with what was st
     | Ok stored ->
         Assert.Equal<TargetField list>(
             [ Reference; Amount; Currency ],
-            (ValidTemplate.rules stored.Template) |> List.map (fun r -> r.Field)
+            (ValidTemplate.rules stored.Template) |> List.map (fun rule -> rule.Field)
         )
     | Error error -> Assert.Fail($"Expected Ok, but got Error: {error}")
 

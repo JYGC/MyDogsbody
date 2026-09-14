@@ -115,7 +115,7 @@ let ``the exhaustive cause list covers every ScanProblemCause union case`` () =
 
     let covered =
         allCauses
-        |> List.map (fun c -> (fst (FSharpValue.GetUnionFields(c, typeof<ScanProblemCause>))).Tag)
+        |> List.map (fun cause -> (fst (FSharpValue.GetUnionFields(cause, typeof<ScanProblemCause>))).Tag)
         |> List.distinct
         |> List.length
 

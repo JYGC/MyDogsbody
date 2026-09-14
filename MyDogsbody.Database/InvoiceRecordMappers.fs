@@ -94,29 +94,29 @@ let toStoredInvoice (row: InvoiceRecord) : Result<StoredInvoice, string> =
 /// The field separator inside Detail. ASCII Unit Separator - it does not occur in a filename, a
 /// reference, a reason string or a stringified field name, so a split on it is unambiguous.
 [<Literal>]
-let private US = '\u001f'
+let private unitSeparator = '\u001f'
 
-/// Domain -> persistence. EXHAUSTIVE over ScanProblemCause: a ninth case breaks this build.
+/// Domain -> persistence. EXHAunitSeparatorTIVE over ScanProblemCause: a ninth case breaks this build.
 let encodeCause (cause: ScanProblemCause) : string * string option * int option =
     match cause with
     | NoSupplierMatched -> "NoSupplierMatched", None, None
     | SeveralSuppliersMatched ids ->
         "SeveralSuppliersMatched",
-        Some(ids |> List.map SupplierId.value |> String.concat (string US)),
+        Some(ids |> List.map SupplierId.value |> String.concat (string unitSeparator)),
         None
     | NoTemplateMatched supplierId -> "NoTemplateMatched", None, Some(supplierRowId supplierId)
     | RuleFoundNothing(supplierId, templateId, field) ->
-        "RuleFoundNothing", Some $"{TemplateId.value templateId}{US}{field}", Some(supplierRowId supplierId)
-    | AttachmentUnreadable(fileName, reason) -> "AttachmentUnreadable", Some $"{fileName}{US}{reason}", None
-    | FormatUnsupported(fileName, format) -> "FormatUnsupported", Some $"{fileName}{US}{format}", None
-    | ValueUnparseable(field, raw) -> "ValueUnparseable", Some $"{field}{US}{raw}", None
+        "RuleFoundNothing", Some $"{TemplateId.value templateId}{unitSeparator}{field}", Some(supplierRowId supplierId)
+    | AttachmentUnreadable(fileName, reason) -> "AttachmentUnreadable", Some $"{fileName}{unitSeparator}{reason}", None
+    | FormatUnsupported(fileName, format) -> "FormatUnsupported", Some $"{fileName}{unitSeparator}{format}", None
+    | ValueUnparseable(field, raw) -> "ValueUnparseable", Some $"{field}{unitSeparator}{raw}", None
     | RuleTimedOutCause(supplierId, templateId, field) ->
-        "RuleTimedOutCause", Some $"{TemplateId.value templateId}{US}{field}", Some(supplierRowId supplierId)
+        "RuleTimedOutCause", Some $"{TemplateId.value templateId}{unitSeparator}{field}", Some(supplierRowId supplierId)
 
 let private parts (detail: string option) : string list =
     match detail with
     | None -> []
-    | Some value -> value.Split(US) |> Array.toList
+    | Some value -> value.Split(unitSeparator) |> Array.toList
 
 /// Persistence -> domain. Returns Result: a row from an older build, or edited by hand, can carry
 /// a Cause string or a Detail shape no current build declares.
@@ -134,28 +134,28 @@ let decodeCause (causeName: string) (detail: string option) (supplierRowId: int 
         ids
         |> List.map SupplierId.create
         |> List.fold
-            (fun acc next ->
-                match acc, next with
+            (fun accumulatedResult next ->
+                match accumulatedResult, next with
                 | Ok list, Ok id -> Ok(id :: list)
-                | Error e, _ -> Error e
-                | _, Error e -> Error e)
+                | Error error, _ -> Error error
+                | _, Error error -> Error error)
             (Ok [])
         |> Result.map (List.rev >> SeveralSuppliersMatched)
     | "NoTemplateMatched", _ -> supplierId () |> Result.map NoTemplateMatched
-    | "RuleFoundNothing", [ tid; field ] ->
+    | "RuleFoundNothing", [ templateIdText; field ] ->
         result {
-            let! s = supplierId ()
-            let! t = templateId tid
-            return RuleFoundNothing(s, t, field)
+            let! parsedSupplierId = supplierId ()
+            let! parsedTemplateId = templateId templateIdText
+            return RuleFoundNothing(parsedSupplierId, parsedTemplateId, field)
         }
     | "AttachmentUnreadable", [ fileName; reason ] -> Ok(AttachmentUnreadable(fileName, reason))
     | "FormatUnsupported", [ fileName; format ] -> Ok(FormatUnsupported(fileName, format))
     | "ValueUnparseable", [ field; raw ] -> Ok(ValueUnparseable(field, raw))
-    | "RuleTimedOutCause", [ tid; field ] ->
+    | "RuleTimedOutCause", [ templateIdText; field ] ->
         result {
-            let! s = supplierId ()
-            let! t = templateId tid
-            return RuleTimedOutCause(s, t, field)
+            let! parsedSupplierId = supplierId ()
+            let! parsedTemplateId = templateId templateIdText
+            return RuleTimedOutCause(parsedSupplierId, parsedTemplateId, field)
         }
     | unknown, _ -> Error $"Stored scan-problem cause '{unknown}' with detail {detail} has no domain equivalent."
 

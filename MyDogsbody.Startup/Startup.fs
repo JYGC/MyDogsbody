@@ -39,12 +39,12 @@ let private logWriteHandleError = HandleErrorBuilder ignore
 /// domain error is translated for the UI without ever entering a handleError block.
 let handleError =
     HandleErrorBuilder
-        (fun ex ->
+        (fun caughtException ->
             let logEntry: ExceptionLogEntry =
                 {
-                    Message = ex.Message
-                    ActionName = ex.ActionName
-                    ExceptionDetails = ex.ToString()
+                    Message = caughtException.Message
+                    ActionName = caughtException.ActionName
+                    ExceptionDetails = caughtException.ToString()
                     CreatedDate = DateTime.Now
                 }
 

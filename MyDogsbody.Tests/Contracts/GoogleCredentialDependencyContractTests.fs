@@ -52,8 +52,8 @@ let private withRealDependencies (test: GoogleCredentialDependencies -> unit) =
         test
             {
                 Load = fun () -> GoogleCredentialStore.getAll handleError getCollection ()
-                Save = fun c -> GoogleCredentialStore.insertOne handleError getCollection c
-                Update = fun e -> GoogleCredentialStore.updateOne handleError getCollection e
+                Save = fun validCredential -> GoogleCredentialStore.insertOne handleError getCollection validCredential
+                Update = fun credentialEdit -> GoogleCredentialStore.updateOne handleError getCollection credentialEdit
             }
     finally
         context.Dispose()
@@ -74,17 +74,17 @@ let private withFakeDependencies (test: GoogleCredentialDependencies -> unit) =
             Load = fun () -> Ok (List.ofSeq rows)
 
             Save =
-                fun c ->
-                    let stored = { Id = newId (); Secret = c.Secret; Username = c.Username }
+                fun validCredential ->
+                    let stored = { Id = newId (); Secret = validCredential.Secret; Username = validCredential.Username }
                     rows.Add stored
                     Ok stored
 
             Update =
-                fun e ->
-                    match rows |> Seq.tryFindIndex (fun row -> row.Id = e.Id) with
+                fun credentialEdit ->
+                    match rows |> Seq.tryFindIndex (fun row -> row.Id = credentialEdit.Id) with
                     | None -> Ok None
                     | Some index ->
-                        let updated = { Id = e.Id; Secret = e.Secret; Username = e.Username }
+                        let updated = { Id = credentialEdit.Id; Secret = credentialEdit.Secret; Username = credentialEdit.Username }
                         rows.[index] <- updated
                         Ok (Some updated)
         }
@@ -105,7 +105,7 @@ let private withImplementation (name: string) (test: GoogleCredentialDependencie
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 // ---------- the shared suite ----------
 

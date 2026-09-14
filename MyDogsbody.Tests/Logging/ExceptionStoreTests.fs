@@ -37,7 +37,7 @@ let private anEntry: ExceptionLogEntry =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 [<Fact; Trait("Level", "Integration")>]
 let ``addException then getAllExceptions returns the entry with every field`` () =
@@ -101,10 +101,10 @@ let ``insertOne reports its declared action when the collection cannot be reache
 
     // Assert
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne, ex.ActionName)
-        Assert.Equal("Failed to write an exception log entry.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne, caughtException.ActionName)
+        Assert.Equal("Failed to write an exception log entry.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
     | Ok () -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -121,10 +121,10 @@ let ``getAll reports its declared action when the collection cannot be reached``
 
     // Assert
     match actual with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.getAll, ex.ActionName)
-        Assert.Equal("Failed to read the exception log.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.getAll, caughtException.ActionName)
+        Assert.Equal("Failed to read the exception log.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -140,7 +140,7 @@ let ``addException reports its declared action when the store fails`` () =
 
     // Assert - the use case surfaces the repository's failure rather than swallowing it
     match actual with
-    | Error ex -> Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne, ex.ActionName)
+    | Error caughtException -> Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne, caughtException.ActionName)
     | Ok () -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]

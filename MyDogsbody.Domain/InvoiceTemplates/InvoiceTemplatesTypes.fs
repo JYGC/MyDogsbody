@@ -91,12 +91,12 @@ module ValidTemplate =
 
     // Read-only accessors; no constructor is exposed. ValidateTemplateWorkflow is the only
     // function in this area allowed to build the private record literal.
-    let supplierId (t: ValidTemplate) = t.SupplierId'
-    let name (t: ValidTemplate) = t.Name'
-    let part (t: ValidTemplate) = t.Part'
-    let position (t: ValidTemplate) = t.Position'
-    let rules (t: ValidTemplate) = t.Rules'
-    let compiledPatterns (t: ValidTemplate) = t.CompiledPatterns'
+    let supplierId (validTemplate: ValidTemplate) = validTemplate.SupplierId'
+    let name (validTemplate: ValidTemplate) = validTemplate.Name'
+    let part (validTemplate: ValidTemplate) = validTemplate.Part'
+    let position (validTemplate: ValidTemplate) = validTemplate.Position'
+    let rules (validTemplate: ValidTemplate) = validTemplate.Rules'
+    let compiledPatterns (validTemplate: ValidTemplate) = validTemplate.CompiledPatterns'
 
 /// Been through the store.
 type StoredTemplate =

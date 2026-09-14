@@ -19,7 +19,7 @@ let reauthoriseGoogleAccount
         let! accounts = listGoogleAccounts ()
 
         let! account =
-            match accounts |> List.tryFind (fun a -> a.Id = id) with
+            match accounts |> List.tryFind (fun account -> account.Id = id) with
             | Some account -> Ok account
             | None -> Error(AccountNotRegistered id)
 

@@ -32,11 +32,11 @@ let private withApi (test: MailAccountApi -> unit) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error(ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error(caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 let private errorOrFail label result =
     match result with
-    | Error(ex: MyDogsbodyException) -> ex
+    | Error(caughtException: MyDogsbodyException) -> caughtException
     | Ok _ -> failwith $"{label} expected Error, but got Ok"
 
 let private alphaAccountId = $"{measuredShapeProfile}|account1"
@@ -56,10 +56,10 @@ let ``SetProfileRoot then GetProfileRoot round trips the chosen folder`` () =
 [<Fact; Trait("Level", "Integration")>]
 let ``SetProfileRoot rejects a relative path as an unlogged exception`` () =
     withApi (fun api ->
-        let ex = api.SetProfileRoot "relative\\path" |> errorOrFail "SetProfileRoot"
+        let caughtException = api.SetProfileRoot "relative\\path" |> errorOrFail "SetProfileRoot"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.setProfileRoot, ex.ActionName))
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.setProfileRoot, caughtException.ActionName))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``ScanForAccounts finds exactly the ten accounts prefs.js declares against the measured-shape fixture`` () =
@@ -72,7 +72,7 @@ let ``ScanForAccounts finds exactly the ten accounts prefs.js declares against t
         Assert.Equal<string list>([ measuredShapeProfile ], result.ProfilesFound)
         Assert.Empty result.Unreadable
 
-        let alpha = result.Accounts |> List.find (fun a -> a.Id = alphaAccountId)
+        let alpha = result.Accounts |> List.find (fun account -> account.Id = alphaAccountId)
         Assert.Equal("Alpha Mail", alpha.DisplayName)
         Assert.NotEmpty alpha.Folders)
 
@@ -85,10 +85,10 @@ let ``ScanForAccounts reports NoProfileFound as an unlogged exception when the f
         try
             api.SetProfileRoot emptyFolder |> okOrFail "SetProfileRoot"
 
-            let ex = api.ScanForAccounts() |> errorOrFail "ScanForAccounts"
+            let caughtException = api.ScanForAccounts() |> errorOrFail "ScanForAccounts"
 
-            Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-            Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.scanForAccounts, ex.ActionName)
+            Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+            Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.scanForAccounts, caughtException.ActionName)
         finally
             Directory.Delete(emptyFolder, true))
 
@@ -158,10 +158,10 @@ let ``SelectAccount rejects an id not among the discovered accounts as an unlogg
         api.SetProfileRoot measuredShapeProfile |> okOrFail "SetProfileRoot"
         api.ScanForAccounts() |> okOrFail "ScanForAccounts" |> ignore
 
-        let ex = api.SelectAccount "unknown-account" |> errorOrFail "SelectAccount"
+        let caughtException = api.SelectAccount "unknown-account" |> errorOrFail "SelectAccount"
 
-        Assert.IsType<ApplicationException>(ex.InnerException) |> ignore
-        Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.selectAccount, ex.ActionName))
+        Assert.IsType<ApplicationException>(caughtException.InnerException) |> ignore
+        Assert.Equal(ActionNames.MyDogsbody.Startup.MailAccountApi.selectAccount, caughtException.ActionName))
 
 [<Fact; Trait("Level", "Integration")>]
 let ``CountMessages runs a headers-only pass and caches the result, visible on the next GetAccounts`` () =
@@ -173,7 +173,7 @@ let ``CountMessages runs a headers-only pass and caches the result, visible on t
         Assert.Equal(4, count)
 
         let accounts, _ = api.GetAccounts() |> okOrFail "GetAccounts"
-        let alpha = accounts |> List.find (fun a -> a.Id = alphaAccountId)
+        let alpha = accounts |> List.find (fun account -> account.Id = alphaAccountId)
 
         match alpha.CachedMessageCount with
         | Some(cachedCount, _takenAt) -> Assert.Equal(4, cachedCount)
@@ -196,7 +196,7 @@ let ``a rescan keeps the cached count of an account it finds again`` () =
         Assert.Equal(4, api.CountMessages alphaAccountId |> okOrFail "CountMessages")
 
         let accountsBefore, _ = api.GetAccounts() |> okOrFail "GetAccounts before"
-        let alphaBefore = accountsBefore |> List.find (fun a -> a.Id = alphaAccountId)
+        let alphaBefore = accountsBefore |> List.find (fun account -> account.Id = alphaAccountId)
 
         let takenAt =
             match alphaBefore.CachedMessageCount with
@@ -206,7 +206,7 @@ let ``a rescan keeps the cached count of an account it finds again`` () =
         api.ScanForAccounts() |> okOrFail "ScanForAccounts 2" |> ignore
 
         let accountsAfter, _ = api.GetAccounts() |> okOrFail "GetAccounts after"
-        let alphaAfter = accountsAfter |> List.find (fun a -> a.Id = alphaAccountId)
+        let alphaAfter = accountsAfter |> List.find (fun account -> account.Id = alphaAccountId)
 
         match alphaAfter.CachedMessageCount with
         | Some(count, stillTakenAt) ->

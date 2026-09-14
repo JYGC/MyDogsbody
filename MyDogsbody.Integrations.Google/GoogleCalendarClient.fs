@@ -30,13 +30,13 @@ let unreachablePrefix = "Could not reach Google Calendar."
 /// Google reports *why* a 403 happened in `error.errors[].reason`; `accessNotConfigured` (the API
 /// is switched off for the project) and `insufficientPermissions` (the granted scopes are too
 /// narrow) both arrive as a bare 403 and need opposite responses from the user.
-let private hasReason (reason: string) (ex: Google.GoogleApiException) =
-    match ex.Error with
+let private hasReason (reason: string) (googleApiException: Google.GoogleApiException) =
+    match googleApiException.Error with
     | null -> false
     | error ->
         match error.Errors with
         | null -> false
-        | errors -> errors |> Seq.exists (fun e -> e.Reason = reason)
+        | errors -> errors |> Seq.exists (fun apiErrorEntry -> apiErrorEntry.Reason = reason)
 
 /// Google's documented usage-limit reasons (the Calendar API's "Handle API errors" guide). Each can
 /// arrive as a 403, not only as a 429 - and a 403 is otherwise read as a permission failure. The
@@ -44,13 +44,13 @@ let private hasReason (reason: string) (ex: Google.GoogleApiException) =
 let private usageLimitReasons =
     [ "rateLimitExceeded"; "userRateLimitExceeded"; "quotaExceeded"; "dailyLimitExceeded" ]
 
-let private isUsageLimit (ex: Google.GoogleApiException) =
-    usageLimitReasons |> List.exists (fun reason -> hasReason reason ex)
+let private isUsageLimit (googleApiException: Google.GoogleApiException) =
+    usageLimitReasons |> List.exists (fun reason -> hasReason reason googleApiException)
 
-let private googleMessage (ex: Google.GoogleApiException) =
-    match ex.Error with
-    | null -> ex.Message
-    | error when String.IsNullOrWhiteSpace error.Message -> ex.Message
+let private googleMessage (googleApiException: Google.GoogleApiException) =
+    match googleApiException.Error with
+    | null -> googleApiException.Message
+    | error when String.IsNullOrWhiteSpace error.Message -> googleApiException.Message
     | error -> error.Message
 
 /// A calendar entry the domain's rules reject (an empty id or name, which Google never actually
@@ -81,7 +81,7 @@ let private toAvailableCalendar (entry: Data.CalendarListEntry) : AvailableCalen
 /// would show the account Ready with a calendar no invoice event can ever be written to: the
 /// mid-sync discovery design decision 6 checks at choosing time to prevent.
 let private listAllPages (service: CalendarService) : Data.CalendarListEntry list =
-    let rec loop (pageToken: string) (acc: Data.CalendarListEntry list) =
+    let rec loop (pageToken: string) (accumulatedEntries: Data.CalendarListEntry list) =
         let request = service.CalendarList.List()
         request.MinAccessRole <- CalendarListResource.ListRequest.MinAccessRoleEnum.Writer
 
@@ -90,7 +90,7 @@ let private listAllPages (service: CalendarService) : Data.CalendarListEntry lis
 
         let page = request.Execute()
         let items = if isNull page.Items then [] else List.ofSeq page.Items
-        let combined = acc @ items
+        let combined = accumulatedEntries @ items
 
         if String.IsNullOrEmpty page.NextPageToken then
             combined
@@ -120,23 +120,37 @@ let listCalendarsVia
 
             return listAllPages service |> List.choose toAvailableCalendar
         with
-        | :? Google.GoogleApiException as ex when hasReason "accessNotConfigured" ex ->
+        | :? Google.GoogleApiException as caughtApiNotEnabledException when
+            hasReason "accessNotConfigured" caughtApiNotEnabledException
+            ->
             // A 403 that re-authorising can never fix: the Cloud project behind the client secret
             // has the Calendar API switched off. Google's own sentence names the project and the
             // URL that enables it, so it is carried through verbatim rather than replaced by a
             // message of ours that would send the user to do the wrong thing.
-            return! MyDogsbodyException(action, $"{apiNotEnabledPrefix} {googleMessage ex}", ex)
+            return!
+                MyDogsbodyException(
+                    action,
+                    $"{apiNotEnabledPrefix} {googleMessage caughtApiNotEnabledException}",
+                    caughtApiNotEnabledException
+                )
         // Ahead of the 401/403 clause below, which would otherwise take a usage-limit 403 and tell a
         // rate-limited user to re-authorise - the instruction design decision 7 exists to prevent.
-        | :? Google.GoogleApiException as ex when
-            ex.HttpStatusCode = HttpStatusCode.TooManyRequests
-            || (ex.HttpStatusCode = HttpStatusCode.Forbidden && isUsageLimit ex)
+        | :? Google.GoogleApiException as caughtUsageLimitException when
+            caughtUsageLimitException.HttpStatusCode = HttpStatusCode.TooManyRequests
+            || (caughtUsageLimitException.HttpStatusCode = HttpStatusCode.Forbidden && isUsageLimit caughtUsageLimitException)
             ->
-            return! MyDogsbodyException(action, "Google is rate-limiting this account; try again shortly.", ex)
-        | :? Google.GoogleApiException as ex when
-            ex.HttpStatusCode = HttpStatusCode.Unauthorized || ex.HttpStatusCode = HttpStatusCode.Forbidden
+            return!
+                MyDogsbodyException(action, "Google is rate-limiting this account; try again shortly.", caughtUsageLimitException)
+        | :? Google.GoogleApiException as caughtUnauthorizedException when
+            caughtUnauthorizedException.HttpStatusCode = HttpStatusCode.Unauthorized
+            || caughtUnauthorizedException.HttpStatusCode = HttpStatusCode.Forbidden
             ->
-            return! MyDogsbodyException(action, "The stored Google credential is no longer authorised.", ex)
+            return!
+                MyDogsbodyException(
+                    action,
+                    "The stored Google credential is no longer authorised.",
+                    caughtUnauthorizedException
+                )
         // Not an answer from the Calendar API at all: the credential tried to refresh its access
         // token and Google's token endpoint refused the refresh token - "invalid_grant", "Token has
         // been expired or revoked." That is requirements.md's "a stored token has expired or been
@@ -150,12 +164,19 @@ let listCalendarsVia
         // Only invalid_grant: the token endpoint's other refusals (invalid_client,
         // unauthorized_client) implicate the client secret rather than this account's grant, and
         // keep the catch-all with Google's code appended.
-        | :? TokenResponseException as ex when not (isNull ex.Error) && ex.Error.Error = "invalid_grant" ->
-            return! MyDogsbodyException(action, "The stored Google credential is no longer authorised.", ex)
-        | ex ->
+        | :? TokenResponseException as caughtInvalidGrantException when
+            not (isNull caughtInvalidGrantException.Error) && caughtInvalidGrantException.Error.Error = "invalid_grant"
+            ->
+            return!
+                MyDogsbodyException(
+                    action,
+                    "The stored Google credential is no longer authorised.",
+                    caughtInvalidGrantException
+                )
+        | caughtException ->
             // Google's own text appended, because "could not reach" on its own leaves a user with
             // nothing to act on - the real reason was thrown away before it reached the screen.
-            return! MyDogsbodyException(action, $"{unreachablePrefix} {ex.Message}", ex)
+            return! MyDogsbodyException(action, $"{unreachablePrefix} {caughtException.Message}", caughtException)
     }
 
 /// The composition root's entry point - the default `HttpClientFactory`.

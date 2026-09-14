@@ -8,8 +8,8 @@ open MyDogsbody.Domain.Invoices
 
 let private orFail =
     function
-    | Ok v -> v
-    | Error e -> failwith $"test setup: {e}"
+    | Ok value -> value
+    | Error error -> failwith $"test setup: {error}"
 
 let private storedInvoice: StoredInvoice =
     { Id = InvoiceId.create "row-1" |> orFail
@@ -37,8 +37,8 @@ let ``delete removes the row and then writes a tombstone on the natural key`` ()
             Ok(Some storedInvoice)
 
     let saveTombstone: SaveTombstone =
-        fun t ->
-            tombstone <- Some t
+        fun savedTombstone ->
+            tombstone <- Some savedTombstone
             Ok()
 
     match DeleteInvoiceWorkflow.deleteInvoice deleteFromLedger saveTombstone clock "row-1" with
@@ -46,10 +46,10 @@ let ``delete removes the row and then writes a tombstone on the natural key`` ()
         Assert.Equal(Some(InvoiceId.create "row-1" |> orFail), deletedId)
 
         match tombstone with
-        | Some t ->
-            Assert.Equal("acme", SupplierId.value t.SupplierId)
-            Assert.Equal("INV-1042", InvoiceReference.value t.Reference)
-            Assert.Equal(DateTime(2026, 7, 1, 9, 0, 0), t.DeletedAt)
+        | Some savedTombstone ->
+            Assert.Equal("acme", SupplierId.value savedTombstone.SupplierId)
+            Assert.Equal("INV-1042", InvoiceReference.value savedTombstone.Reference)
+            Assert.Equal(DateTime(2026, 7, 1, 9, 0, 0), savedTombstone.DeletedAt)
         | None -> Assert.Fail("no tombstone written")
     | Error e -> Assert.Fail($"Expected Ok, got Error {e}")
 

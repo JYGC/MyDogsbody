@@ -69,22 +69,22 @@ let private listCalendarsAction = ActionNames.MyDogsbody.Integrations.Google.Goo
 [<Theory; Trait("Level", "Contract")>]
 [<InlineData("The consent flow was cancelled or denied.")>]
 let ``toAuthorisationError maps a cancelled consent flow`` (message: string) =
-    let ex = MyDogsbodyException(authoriseAction, message, ApplicationException message)
-    Assert.Equal(AuthorisationCancelled, GoogleAccountApiMappers.toAuthorisationError ex)
+    let caughtException = MyDogsbodyException(authoriseAction, message, ApplicationException message)
+    Assert.Equal(AuthorisationCancelled, GoogleAccountApiMappers.toAuthorisationError caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError maps a malformed client secret, carrying the message`` () =
     let message = "The stored Google client secret is malformed."
-    let ex = MyDogsbodyException(authoriseAction, message, ApplicationException message)
+    let caughtException = MyDogsbodyException(authoriseAction, message, ApplicationException message)
 
-    Assert.Equal(ClientSecretInvalid message, GoogleAccountApiMappers.toAuthorisationError ex)
+    Assert.Equal(ClientSecretInvalid message, GoogleAccountApiMappers.toAuthorisationError caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError maps an unavailable email`` () =
     let message = "The authorised account's email address could not be read."
-    let ex = MyDogsbodyException(authoriseAction, message, ApplicationException message)
+    let caughtException = MyDogsbodyException(authoriseAction, message, ApplicationException message)
 
-    Assert.Equal(AccountEmailUnavailable, GoogleAccountApiMappers.toAuthorisationError ex)
+    Assert.Equal(AccountEmailUnavailable, GoogleAccountApiMappers.toAuthorisationError caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError keeps the loopback-port sentence rather than the listener exception's`` () =
@@ -92,7 +92,7 @@ let ``toAuthorisationError keeps the loopback-port sentence rather than the list
     // specifically". GoogleAuthorization chose that sentence deliberately; preferring the inner
     // exception's message here would replace it with HttpListenerException's own text, in which
     // the words "loopback" and "port" never appear.
-    let ex =
+    let caughtException =
         MyDogsbodyException(
             authoriseAction,
             "The loopback port is already in use.",
@@ -102,7 +102,7 @@ let ``toAuthorisationError keeps the loopback-port sentence rather than the list
             )
         )
 
-    Assert.Equal(AuthorisationFailed "The loopback port is already in use.", GoogleAccountApiMappers.toAuthorisationError ex)
+    Assert.Equal(AuthorisationFailed "The loopback port is already in use.", GoogleAccountApiMappers.toAuthorisationError caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError keeps the timed-out sentence rather than the cancellation's bare message`` () =
@@ -126,7 +126,7 @@ let ``the message a user is shown for the two named authorisation failures is th
         MyDogsbodyException(authoriseAction, adapterMessage, inner)
         |> GoogleAccountApiMappers.toAuthorisationError
         |> GoogleAccountApiMappers.toMyDogsbodyException anAction
-        |> fun ex -> ex.Message
+        |> fun caughtException -> caughtException.Message
 
     Assert.Equal(
         "The loopback port is already in use.",
@@ -143,18 +143,18 @@ let ``toAuthorisationError keeps the calendar-access-not-granted sentence, which
     let sentence =
         "Google Calendar access was not granted - tick the calendar permission on Google's consent screen and try again."
 
-    let ex =
+    let caughtException =
         MyDogsbodyException(
             authoriseAction,
             sentence,
             ApplicationException "Granted scopes: https://www.googleapis.com/auth/userinfo.email openid"
         )
 
-    Assert.Equal(AuthorisationFailed sentence, GoogleAccountApiMappers.toAuthorisationError ex)
+    Assert.Equal(AuthorisationFailed sentence, GoogleAccountApiMappers.toAuthorisationError caughtException)
 
     // And the whole inbound-then-outbound chain, which is what the MudAlert renders.
     let userSees =
-        ex
+        caughtException
         |> GoogleAccountApiMappers.toAuthorisationError
         |> GoogleAccountApiMappers.toMyDogsbodyException anAction
 
@@ -165,45 +165,45 @@ let ``toAuthorisationError keeps the calendar-access-not-granted sentence, which
 let ``toAuthorisationError maps anything else to AuthorisationFailed, preferring the inner exception's message`` () =
     // Unchanged: "Authorisation failed." is the adapter's catch-all and carries nothing, so the
     // inner exception is the only place the real reason lives.
-    let ex = MyDogsbodyException(authoriseAction, "Authorisation failed.", InvalidOperationException "the real reason")
+    let caughtException = MyDogsbodyException(authoriseAction, "Authorisation failed.", InvalidOperationException "the real reason")
 
-    Assert.Equal(AuthorisationFailed "the real reason", GoogleAccountApiMappers.toAuthorisationError ex)
+    Assert.Equal(AuthorisationFailed "the real reason", GoogleAccountApiMappers.toAuthorisationError caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toAuthorisationError falls back to the exception's own message when there is no inner exception`` () =
-    let ex = MyDogsbodyException(authoriseAction, "Authorisation failed.")
+    let caughtException = MyDogsbodyException(authoriseAction, "Authorisation failed.")
 
-    Assert.Equal(AuthorisationFailed "Authorisation failed.", GoogleAccountApiMappers.toAuthorisationError ex)
+    Assert.Equal(AuthorisationFailed "Authorisation failed.", GoogleAccountApiMappers.toAuthorisationError caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toListCalendarsError maps a 401/403-shaped message to NotAuthorised, carrying the account id`` () =
     let id = accountId "acc-1"
-    let ex = MyDogsbodyException(listCalendarsAction, "The stored Google credential is no longer authorised.")
+    let caughtException = MyDogsbodyException(listCalendarsAction, "The stored Google credential is no longer authorised.")
 
-    Assert.Equal(NotAuthorised id, GoogleAccountApiMappers.toListCalendarsError id ex)
+    Assert.Equal(NotAuthorised id, GoogleAccountApiMappers.toListCalendarsError id caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toListCalendarsError maps a missing stored credential to NotAuthorised too`` () =
     let id = accountId "acc-1"
-    let ex = MyDogsbodyException(authoriseAction, "No stored credential for this account.")
+    let caughtException = MyDogsbodyException(authoriseAction, "No stored credential for this account.")
 
-    Assert.Equal(NotAuthorised id, GoogleAccountApiMappers.toListCalendarsError id ex)
+    Assert.Equal(NotAuthorised id, GoogleAccountApiMappers.toListCalendarsError id caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toListCalendarsError maps a 429-shaped message to CalendarRateLimited, distinct from NotAuthorised`` () =
     let id = accountId "acc-1"
     let message = "Google is rate-limiting this account; try again shortly."
-    let ex = MyDogsbodyException(listCalendarsAction, message)
+    let caughtException = MyDogsbodyException(listCalendarsAction, message)
 
-    Assert.Equal(CalendarRateLimited message, GoogleAccountApiMappers.toListCalendarsError id ex)
+    Assert.Equal(CalendarRateLimited message, GoogleAccountApiMappers.toListCalendarsError id caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toListCalendarsError maps anything else to CalendarUnreachable`` () =
     let id = accountId "acc-1"
     let message = "Could not reach Google Calendar."
-    let ex = MyDogsbodyException(listCalendarsAction, message)
+    let caughtException = MyDogsbodyException(listCalendarsAction, message)
 
-    Assert.Equal(CalendarUnreachable message, GoogleAccountApiMappers.toListCalendarsError id ex)
+    Assert.Equal(CalendarUnreachable message, GoogleAccountApiMappers.toListCalendarsError id caughtException)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toListCalendarsError maps the API-not-enabled 403 to its own case, NOT to NotAuthorised`` () =
@@ -254,14 +254,14 @@ let ``the message a user is shown for a malformed stored client secret names the
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toStoreError wraps any store failure as GoogleStoreFailed carrying the message`` () =
-    let ex =
+    let caughtException =
         MyDogsbodyException(
             ActionNames.MyDogsbody.Integrations.Google.GoogleAccountStore.getAll,
             "Failed to retrieve all Google accounts.",
             InvalidOperationException "disk gone"
         )
 
-    Assert.Equal(GoogleStoreFailed "Failed to retrieve all Google accounts.", GoogleAccountApiMappers.toStoreError ex)
+    Assert.Equal(GoogleStoreFailed "Failed to retrieve all Google accounts.", GoogleAccountApiMappers.toStoreError caughtException)
 
 // ---------- outbound: CalendarError -> MyDogsbodyException ----------
 

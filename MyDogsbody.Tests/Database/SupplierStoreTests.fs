@@ -51,8 +51,8 @@ let private withSuppliers (test: DatabaseContext -> unit) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
-        failwith $"{label} expected Ok, but got Error: {ex.Message} (inner: {ex.InnerException})"
+    | Error (caughtException: MyDogsbody.Exceptions.Types.MyDogsbodyException) ->
+        failwith $"{label} expected Ok, but got Error: {caughtException.Message} (inner: {caughtException.InnerException})"
 
 // ---------- integration: round trips against a real SQLite file ----------
 
@@ -241,13 +241,13 @@ let ``getAll reports a MyDogsbodyException carrying its declared action when the
         SupplierStore.getAll recordingHandleError failingConnection failingSuppliers failingMatchers ()
 
     match actual with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.SupplierStore.getAll,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to retrieve all suppliers.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to retrieve all suppliers.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -260,13 +260,13 @@ let ``insertOne reports a MyDogsbodyException carrying its declared action when 
         SupplierStore.insertOne recordingHandleError failingConnection failingSuppliers failingMatchers aValidSupplier
 
     match actual with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.SupplierStore.insertOne,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to insert new supplier.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to insert new supplier.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -279,13 +279,13 @@ let ``updateOne reports a MyDogsbodyException carrying its declared action when 
         SupplierStore.updateOne recordingHandleError failingConnection failingSuppliers failingMatchers aValidEdit
 
     match actual with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.SupplierStore.updateOne,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to update existing supplier.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to update existing supplier.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -298,12 +298,12 @@ let ``deleteOne reports a MyDogsbodyException carrying its declared action when 
         SupplierStore.deleteOne recordingHandleError failingConnection failingSuppliers (SupplierId.create "1" |> valueOrFail)
 
     match actual with
-    | Error ex ->
+    | Error caughtException ->
         Assert.Equal(
             MyDogsbody.Exceptions.Types.ActionNames.MyDogsbody.Database.SupplierStore.deleteOne,
-            ex.ActionName
+            caughtException.ActionName
         )
-        Assert.Equal("Failed to delete existing supplier.", ex.Message)
-        Assert.IsType<InvalidOperationException>(ex.InnerException) |> ignore
+        Assert.Equal("Failed to delete existing supplier.", caughtException.Message)
+        Assert.IsType<InvalidOperationException>(caughtException.InnerException) |> ignore
         Assert.Single logged |> ignore
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")

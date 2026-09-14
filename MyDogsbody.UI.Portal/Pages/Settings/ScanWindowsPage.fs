@@ -11,13 +11,13 @@ let private startWork (work: unit -> unit) = Async.Start(async { work () })
 
 let getView () =
     html.inject (fun (scanWindowApi: ScanWindowApi) ->
-        let m =
+        let scanWindowsBrowserModule =
             InvoicesModuleCreators.getScanWindowsBrowserModule startWork scanWindowApi
 
         let newDaysCval = cval 60
 
         fragment {
-            ScanWindowsComponents.scanWindowsBrowser m newDaysCval
+            ScanWindowsComponents.scanWindowsBrowser scanWindowsBrowserModule newDaysCval
         })
     |> SettingsComponents.settingsNavMenu
 

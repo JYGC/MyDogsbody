@@ -66,7 +66,7 @@ let private listCalendars (respond: HttpRequestMessage -> HttpResponseMessage) =
 let private okOrFail label result =
     match result with
     | Ok value -> value
-    | Error (ex: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {ex.Message}"
+    | Error (caughtException: MyDogsbodyException) -> failwith $"{label} expected Ok, but got Error: {caughtException.Message}"
 
 [<Fact; Trait("Level", "Integration")>]
 let ``listCalendars returns every calendar in a single page`` () =
@@ -80,8 +80,8 @@ let ``listCalendars returns every calendar in a single page`` () =
     let actual = listCalendars respond |> okOrFail "listCalendars"
 
     Assert.Equal(2, List.length actual)
-    Assert.Contains(actual, fun c -> CalendarId.value c.Id = "primary" && c.IsPrimary)
-    Assert.Contains(actual, fun c -> CalendarId.value c.Id = "cal-2" && not c.IsPrimary)
+    Assert.Contains(actual, fun calendar -> CalendarId.value calendar.Id = "primary" && calendar.IsPrimary)
+    Assert.Contains(actual, fun calendar -> CalendarId.value calendar.Id = "cal-2" && not calendar.IsPrimary)
 
 [<Fact; Trait("Level", "Integration")>]
 let ``listCalendars follows nextPageToken and returns items from every page`` () =
@@ -97,7 +97,7 @@ let ``listCalendars follows nextPageToken and returns items from every page`` ()
 
     let actual = listCalendars respond |> okOrFail "listCalendars"
 
-    let ids = actual |> List.map (fun c -> CalendarId.value c.Id) |> List.sort
+    let ids = actual |> List.map (fun calendar -> CalendarId.value calendar.Id) |> List.sort
     Assert.Equal<string list>([ "cal-1"; "cal-2" ], ids)
 
 [<Fact; Trait("Level", "Integration")>]
@@ -113,9 +113,9 @@ let ``listCalendars maps a 401 to a not-authorised message`` () =
     let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.Unauthorized (errorBody 401 "Invalid Credentials")
 
     match listCalendars respond with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, ex.ActionName)
-        Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, caughtException.ActionName)
+        Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -123,7 +123,7 @@ let ``listCalendars maps a 403 to the same not-authorised message as a 401`` () 
     let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.Forbidden (errorBody 403 "Permission denied")
 
     match listCalendars respond with
-    | Error ex -> Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
+    | Error caughtException -> Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -139,12 +139,12 @@ let ``listCalendars tells a project with the Calendar API switched off apart fro
         jsonResponse HttpStatusCode.Forbidden (errorBodyWithReason 403 "accessNotConfigured" googleSentence)
 
     match listCalendars respond with
-    | Error ex ->
-        Assert.StartsWith("The Google Calendar API is not enabled for this project.", ex.Message)
-        Assert.NotEqual<string>("The stored Google credential is no longer authorised.", ex.Message)
+    | Error caughtException ->
+        Assert.StartsWith("The Google Calendar API is not enabled for this project.", caughtException.Message)
+        Assert.NotEqual<string>("The stored Google credential is no longer authorised.", caughtException.Message)
         // Google's own sentence survives, because it names the project and the URL that fixes it.
-        Assert.Contains("000000000000", ex.Message)
-        Assert.Contains("console.developers.google.com", ex.Message)
+        Assert.Contains("000000000000", caughtException.Message)
+        Assert.Contains("console.developers.google.com", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -153,7 +153,7 @@ let ``listCalendars maps a 429 to a distinct rate-limit message, not the not-aut
         jsonResponse HttpStatusCode.TooManyRequests (errorBody 429 "Rate Limit Exceeded")
 
     match listCalendars respond with
-    | Error ex -> Assert.Equal("Google is rate-limiting this account; try again shortly.", ex.Message)
+    | Error caughtException -> Assert.Equal("Google is rate-limiting this account; try again shortly.", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
@@ -162,11 +162,11 @@ let ``listCalendars maps a 500 to an unreachable message`` () =
         jsonResponse HttpStatusCode.InternalServerError (errorBody 500 "Backend Error")
 
     match listCalendars respond with
-    | Error ex ->
+    | Error caughtException ->
         // The opening is stable (the mapper matches on it); Google's own text is appended, so a
         // user is not left with a bare "could not reach" and nothing to act on.
-        Assert.StartsWith("Could not reach Google Calendar.", ex.Message)
-        Assert.Contains("Backend Error", ex.Message)
+        Assert.StartsWith("Could not reach Google Calendar.", caughtException.Message)
+        Assert.Contains("Backend Error", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Theory; Trait("Level", "Integration")>]
@@ -185,10 +185,10 @@ let ``listCalendars maps a usage-limit 403 to the rate-limit message, not the no
         jsonResponse HttpStatusCode.Forbidden (errorBodyWithReason 403 reason googleMessage)
 
     match listCalendars respond with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, ex.ActionName)
-        Assert.Equal("Google is rate-limiting this account; try again shortly.", ex.Message)
-        let inner = Assert.IsType<Google.GoogleApiException>(ex.InnerException)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, caughtException.ActionName)
+        Assert.Equal("Google is rate-limiting this account; try again shortly.", caughtException.Message)
+        let inner = Assert.IsType<Google.GoogleApiException>(caughtException.InnerException)
         Assert.Equal(HttpStatusCode.Forbidden, inner.HttpStatusCode)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -202,7 +202,7 @@ let ``listCalendars still maps a 403 for too-narrow scopes to the not-authorised
             """{ "error": { "code": 403, "message": "Insufficient Permission", "errors": [ { "domain": "global", "reason": "insufficientPermissions", "message": "Insufficient Permission" } ] } }"""
 
     match listCalendars respond with
-    | Error ex -> Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
+    | Error caughtException -> Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 /// Somewhere for the library to delete a token from: Google.Apis.Auth deletes the stored token
@@ -277,10 +277,10 @@ let ``listCalendars maps a refresh token Google has expired or revoked to the no
         jsonResponse HttpStatusCode.Unauthorized (errorBody 401 "Invalid Credentials")
 
     match listCalendarsAs credential respond with
-    | Error ex ->
-        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, ex.ActionName)
-        Assert.Equal("The stored Google credential is no longer authorised.", ex.Message)
-        let inner = Assert.IsType<Google.Apis.Auth.OAuth2.Responses.TokenResponseException>(ex.InnerException)
+    | Error caughtException ->
+        Assert.Equal(ActionNames.MyDogsbody.Integrations.Google.GoogleCalendarClient.listCalendars, caughtException.ActionName)
+        Assert.Equal("The stored Google credential is no longer authorised.", caughtException.Message)
+        let inner = Assert.IsType<Google.Apis.Auth.OAuth2.Responses.TokenResponseException>(caughtException.InnerException)
         Assert.Equal("invalid_grant", inner.Error.Error)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
@@ -312,7 +312,7 @@ let ``listCalendars offers only calendars the account can add events to, on ever
 
     let actual = listCalendars respond |> okOrFail "listCalendars"
 
-    let ids = actual |> List.map (fun c -> CalendarId.value c.Id) |> List.sort
+    let ids = actual |> List.map (fun calendar -> CalendarId.value calendar.Id) |> List.sort
     Assert.Equal<string list>([ "primary"; "team@group.calendar.google.com" ], ids)
 
 let private calendarEntryRenamed id summary summaryOverride isPrimary =
@@ -339,7 +339,7 @@ let ``listCalendars names each calendar the way the account's own calendar list 
     let actual =
         listCalendars respond
         |> okOrFail "listCalendars"
-        |> List.map (fun c -> CalendarId.value c.Id, CalendarName.value c.Name, c.IsPrimary)
+        |> List.map (fun calendar -> CalendarId.value calendar.Id, CalendarName.value calendar.Name, calendar.IsPrimary)
 
     Assert.Equal<(string * string * bool) list>(
         [

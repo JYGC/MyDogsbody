@@ -65,7 +65,7 @@ let ``normalizeMessage normalizes each part's lines and drops the empty ones`` (
 
     match NormalizedMessage.parts actual with
     | [ { Part = BodyPart; Lines = lines } ] ->
-        Assert.Equal<string list>([ "Total: 100.00"; "AUD" ], lines |> List.map (fun l -> l.Line.Text))
+        Assert.Equal<string list>([ "Total: 100.00"; "AUD" ], lines |> List.map (fun groupedLine -> groupedLine.Line.Text))
     | other -> Assert.Fail($"Expected one body part, but got {other}")
 
 [<Fact; Trait("Level", "Unit")>]
@@ -83,7 +83,7 @@ let ``normalizeMessage never joins a wrapped continuation across two parts`` () 
 
     let allLines =
         NormalizedMessage.parts actual
-        |> List.collect (fun part -> part.Lines |> List.map (fun l -> l.Line.Text))
+        |> List.collect (fun part -> part.Lines |> List.map (fun groupedLine -> groupedLine.Line.Text))
 
     Assert.Equal<string list>([ "Invoice for"; "continued overleaf" ], allLines)
 
@@ -119,6 +119,6 @@ let ``normalizing an already-normalized message changes nothing`` () =
                 Subject = NormalizedMessage.subject once
                 Parts =
                     NormalizedMessage.parts once
-                    |> List.map (fun part -> part.Part, part.Lines |> List.collect (fun l -> l.Segments)) }
+                    |> List.map (fun part -> part.Part, part.Lines |> List.collect (fun groupedLine -> groupedLine.Segments)) }
 
     Assert.Equal<NormalizedMessage>(once, twice)
