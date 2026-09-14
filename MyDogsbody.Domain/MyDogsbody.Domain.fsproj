@@ -58,6 +58,7 @@
     <Compile Include="Calendar\InvoiceSyncKey.fs" />
     <Compile Include="Calendar\CalendarTypes.fs" />
     <Compile Include="Calendar\CalendarDateRangeWorkflow.fs" />
+    <Compile Include="Calendar\DiffInvoicesAgainstCalendarWorkflow.fs" />
     <Compile Include="Calendar\RegisterGoogleAccountWorkflow.fs" />
     <Compile Include="Calendar\ListGoogleAccountsWorkflow.fs" />
     <Compile Include="Calendar\SetDefaultInvoiceCalendarWorkflow.fs" />

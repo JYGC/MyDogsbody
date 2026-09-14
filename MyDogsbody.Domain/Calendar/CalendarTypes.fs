@@ -152,6 +152,11 @@ type CalendarError =
     /// already agrees with the target state, so the caller treats this as AlreadyGone, a
     /// success, rather than as a batch-stopping error.
     | EventNoLongerExists of CalendarEventId
+    /// Change #7: `buildPlan` reads the invoice ledger itself (`LoadInvoices`,
+    /// `LoadAllLedgerKeys`) as well as Google - this wraps an `InvoiceError` from either, so the
+    /// plan-building pipeline speaks one error type throughout rather than two. Named to match
+    /// design.md's error-handling table, which lists it alongside the Google-facing cases.
+    | InvoiceStoreFailed of message: string
 
 // Dependencies as function types - not interfaces, not classes, not a collection getter. A
 // workflow receives a function value, so a test supplies a lambda and the composition root

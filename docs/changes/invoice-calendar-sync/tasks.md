@@ -58,20 +58,20 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 2 — The two guards (required) — write these before the diff
 
-- [ ] **2.1** *(test-first)* **`diff produces no delete for an invoice merely outside the window`.**
+- [x] **2.1** *(test-first)* **`diff produces no delete for an invoice merely outside the window`.**
       180 days of invoices in `AllLedgerKeys`, one in `InWindow`, events present for all of them.
       Assert **zero** delete actions.
       *This is the single most important test in the change. Get it wrong and narrowing the picker
       from 180 days to 7 deletes six months of calendar entries* (friction #18a).
-- [ ] **2.2** *(test-first)* **`a failed calendar read produces no plan`.**
+- [x] **2.2** *(test-first)* **`a failed calendar read produces no plan`.**
       Bind `listCalendarEvents` to a lambda returning `Error`. Assert the result is `Error` — **not
       an empty plan, not a plan of deletes** (friction #18b).
-- [ ] **2.3** A check that **`Result.defaultValue` appears nowhere** in the sync workflow files.
+- [x] **2.3** A check that **`Result.defaultValue` appears nowhere** in the sync workflow files.
       *Hazard (b) has exactly one way in, and this closes it at one line.*
 
 ## Phase 3 — The diff (required)
 
-- [ ] **3.1** *(test-first)* `DiffInvoicesAgainstCalendarWorkflow.diff` — **pure**, table-driven over
+- [x] **3.1** *(test-first)* `DiffInvoicesAgainstCalendarWorkflow.diff` — **pure**, table-driven over
       `(ledger, events) → expected plan`, every action's payload asserted.
       Tests: an invoice with no matching event → `CreateEvent`; a matching event with a different
       **title** → `UpdateEvent`; a different **date** → `UpdateEvent`; both agreeing →
@@ -80,13 +80,13 @@ type; every test binds a lambda or a stubbed HTTP handler.
       create; and 2.1 and 2.2 both pass.
       *Outcome:* the workflow has **no dependency parameters** — no network, no clock, no store.
       *Depends on:* 2.1, 2.2, 1.3.
-- [ ] **3.2** *(test-first)* Orphans and duplicates.
+- [x] **3.2** *(test-first)* Orphans and duplicates.
       Tests: an event with **no** sync key is reported as an orphan and is **never** a deletion
       candidate; an event with an **unparseable** key likewise; two events for one invoice →
       the first is updated and the second is **reported as a duplicate, not deleted**.
       *Rationale:* the app deletes only what it can prove it created; reporting is recoverable,
       deleting is not.
-- [ ] **3.3** *(test-first)* `buildPlan` — the pipeline that binds the read before the pure diff.
+- [x] **3.3** *(test-first)* `buildPlan` — the pipeline that binds the read before the pure diff.
       Tests: `NoDefaultCalendar` when the account has none, **with `listCalendarEvents` never
       called**; the range handed to the read is the one 1.4 derives; a failed read short-circuits
       (2.2 again, now through the real pipeline).
