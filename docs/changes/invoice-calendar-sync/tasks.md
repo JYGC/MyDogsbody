@@ -225,10 +225,10 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 12 — Documentation (required)
 
-- [ ] **12.1** `CLAUDE-project.md`: the new migration, the new workflows, and a note that the invoices
+- [x] **12.1** `CLAUDE-project.md`: the new migration, the new workflows, and a note that the invoices
       page now writes to an external calendar. *(No totals: CLAUDE-project.md no longer records
       them. 12.2 puts them in `outcome.md`.)*
-- [ ] **12.2** `outcome.md`: totals per level; the manual verification from 11.4 **including the
+- [x] **12.2** `outcome.md`: totals per level; the manual verification from 11.4 **including the
       delete**; the series acceptance checks from 11.6; and **the real due-date coverage achieved**,
       against the 12% → 39% the measurement predicted (friction #19) — this is the number that says
       whether the calendar this change builds is actually full.
