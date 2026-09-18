@@ -212,24 +212,31 @@ let createInvoiceSyncApiWith
             | None -> return! Error(MyDogsbodyException(action, notReadyMessage, ApplicationException notReadyMessage))
             | Some(account, calendarId, _, fullPlan, _) ->
                 // Q2.7: the selection when there is one, everything outstanding when there is not.
-                // Selected by Reference - the one field every plan-row kind carries - rather than
-                // by re-trusting an event id or invoice id the preview handed back, so a plan that
-                // has moved on since the preview (a rescan, a due-date change) still selects the
-                // right CURRENT action for that invoice rather than a stale one.
-                let selectedReferences = selectedRows |> List.map (fun row -> row.Reference) |> Set.ofList
+                // Selected by SyncKey (supplier + reference, InvoiceSyncKey.value) - the one field
+                // every plan-row kind carries that is actually unique - rather than by re-trusting
+                // an event id or invoice id the preview handed back, so a plan that has moved on
+                // since the preview (a rescan, a due-date change) still selects the right CURRENT
+                // action for that invoice rather than a stale one.
+                //
+                // NOT Reference alone (PR #23 review round 1): the ledger's unique index is on
+                // (supplier, reference), not on reference alone, so two different suppliers can
+                // share the same reference text. Matching on bare Reference let a tick on one
+                // supplier's row also select a different supplier's action for the same text -
+                // including, in the worst case, a DeleteEvent nobody ticked.
+                let selectedSyncKeys = selectedRows |> List.map (fun row -> row.SyncKey) |> Set.ofList
 
-                let referenceOf =
+                let syncKeyOf =
                     function
                     | CreateEvent invoice
-                    | UpdateEvent(_, invoice) -> InvoiceReference.value invoice.Reference
-                    | DeleteEvent(_, key) -> InvoiceSyncKey.parts key |> Option.map snd |> Option.defaultValue ""
+                    | UpdateEvent(_, invoice) -> InvoiceSyncKey.derive invoice.SupplierId invoice.Reference |> InvoiceSyncKey.value
+                    | DeleteEvent(_, key) -> InvoiceSyncKey.value key
                     | LeaveAlone _ -> ""
 
                 let actionsToRun =
                     fullPlan
                     |> List.filter (function
                         | LeaveAlone _ -> false
-                        | planAction -> List.isEmpty selectedRows || Set.contains (referenceOf planAction) selectedReferences)
+                        | planAction -> List.isEmpty selectedRows || Set.contains (syncKeyOf planAction) selectedSyncKeys)
 
                 let! outcomes =
                     executePlan

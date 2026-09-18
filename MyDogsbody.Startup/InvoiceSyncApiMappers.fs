@@ -27,6 +27,12 @@ let private nameAndReferenceFromKey (namesById: Map<string, string>) (key: Invoi
         name, reference
     | None -> "(unknown supplier)", "(unknown reference)"
 
+/// The raw InvoiceSyncKey string for an invoice still in the ledger - the one unambiguous key a
+/// create or update row can carry (PR #23 review round 1). Derived, never hand-built, so it agrees
+/// with the key `diff` itself keyed the action by.
+let private invoiceSyncKeyValue (invoice: UploadableInvoice) : string =
+    InvoiceSyncKey.derive invoice.SupplierId invoice.Reference |> InvoiceSyncKey.value
+
 /// A SyncAction -> a UI plan row, naming the invoice rather than just an event id (design
 /// decision 3). `None` for `LeaveAlone`: an up-to-date row has nothing to preview, and its status
 /// is carried on `InvoiceUiType.SyncStatus` instead - see `toSyncStatusByInvoiceId` below.
@@ -38,6 +44,7 @@ let toSyncPlanRowUiType (namesById: Map<string, string>) (action: SyncAction) : 
                 InvoiceId = Some(InvoiceId.value invoice.Id)
                 SupplierName = supplierName namesById invoice.SupplierId
                 Reference = InvoiceReference.value invoice.Reference
+                SyncKey = invoiceSyncKeyValue invoice
                 DueDate = Some(InvoiceDueDate.value invoice.DueDate)
                 Action = CreateSyncAction
             }
@@ -47,6 +54,7 @@ let toSyncPlanRowUiType (namesById: Map<string, string>) (action: SyncAction) : 
                 InvoiceId = Some(InvoiceId.value invoice.Id)
                 SupplierName = supplierName namesById invoice.SupplierId
                 Reference = InvoiceReference.value invoice.Reference
+                SyncKey = invoiceSyncKeyValue invoice
                 DueDate = Some(InvoiceDueDate.value invoice.DueDate)
                 Action = UpdateSyncAction
             }
@@ -58,6 +66,7 @@ let toSyncPlanRowUiType (namesById: Map<string, string>) (action: SyncAction) : 
                 InvoiceId = None
                 SupplierName = name
                 Reference = reference
+                SyncKey = InvoiceSyncKey.value key
                 DueDate = None
                 Action = DeleteSyncAction
             }

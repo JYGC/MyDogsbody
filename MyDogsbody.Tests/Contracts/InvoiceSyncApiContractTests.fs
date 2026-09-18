@@ -175,20 +175,24 @@ let private withFakeApi
         | None -> Error(MyDogsbodyException("InvoiceSyncApiContractTests.fake", notReadyMessage, ApplicationException notReadyMessage))
         | Some(accId, calId) ->
             let fullPlan = buildPlanNow ()
-            let selectedReferences = selectedRows |> List.map (fun row -> row.Reference) |> Set.ofList
+            // Matches InvoiceSyncApiFactory.executeSyncPlan's own selection logic exactly - a
+            // dependency-type/API fake must not drift from the real implementation (CLAUDE.md's
+            // contract rule). Keyed by SyncKey, not bare Reference: two different suppliers can
+            // share the same reference text, so Reference alone is not unique (PR #23 review round 1).
+            let selectedSyncKeys = selectedRows |> List.map (fun row -> row.SyncKey) |> Set.ofList
 
-            let referenceOf =
+            let syncKeyOf =
                 function
                 | CreateEvent invoice
-                | UpdateEvent(_, invoice) -> InvoiceReference.value invoice.Reference
-                | DeleteEvent(_, key) -> InvoiceSyncKey.parts key |> Option.map snd |> Option.defaultValue ""
+                | UpdateEvent(_, invoice) -> InvoiceSyncKey.derive invoice.SupplierId invoice.Reference |> InvoiceSyncKey.value
+                | DeleteEvent(_, key) -> InvoiceSyncKey.value key
                 | LeaveAlone _ -> ""
 
             let actionsToRun =
                 fullPlan
                 |> List.filter (function
                     | LeaveAlone _ -> false
-                    | planAction -> List.isEmpty selectedRows || Set.contains (referenceOf planAction) selectedReferences)
+                    | planAction -> List.isEmpty selectedRows || Set.contains (syncKeyOf planAction) selectedSyncKeys)
 
             let outcomes =
                 executePlan createCalendarEvent updateCalendarEvent deleteCalendarEvent markSynced clearSyncRecord accId calId actionsToRun
@@ -318,7 +322,7 @@ let ``fake api: ExecuteSyncPlan with an empty list runs everything outstanding``
         Assert.Contains(outcomes, fun row -> row.Reference = "INV-200" && row.Result = SyncSucceeded))
 
 [<Fact; Trait("Level", "Contract")>]
-let ``fake api: ExecuteSyncPlan with a non-empty list runs only the rows matching by Reference`` () =
+let ``fake api: ExecuteSyncPlan with a non-empty list runs only the rows matching by SyncKey`` () =
     let firstInvoice = anUploadableInvoice "1" "INV-100" (DateTime(2026, 9, 20))
     let secondInvoice = anUploadableInvoice "2" "INV-200" (DateTime(2026, 9, 25))
 
@@ -327,6 +331,7 @@ let ``fake api: ExecuteSyncPlan with a non-empty list runs only the rows matchin
             { InvoiceId = Some(InvoiceId.value firstInvoice.Id)
               SupplierName = "Acme"
               Reference = "INV-100"
+              SyncKey = InvoiceSyncKey.derive firstInvoice.SupplierId firstInvoice.Reference |> InvoiceSyncKey.value
               DueDate = Some(InvoiceDueDate.value firstInvoice.DueDate)
               Action = CreateSyncAction }
 
@@ -335,3 +340,100 @@ let ``fake api: ExecuteSyncPlan with a non-empty list runs only the rows matchin
         let outcome = Assert.Single outcomes
         Assert.Equal("INV-100", outcome.Reference)
         Assert.Equal(SyncSucceeded, outcome.Result))
+
+[<Fact; Trait("Level", "Contract")>]
+let ``fake api: ExecuteSyncPlan does not act on a different supplier's invoice sharing the same reference text`` () =
+    // Two different suppliers, same invoice reference text ("INV-100") - a realistic collision:
+    // the ledger's unique index is on (supplier, reference), not on reference alone, so nothing
+    // stops two different suppliers from using the same invoice numbering. Regression test for
+    // PR #23 review round 1: selecting by bare Reference let a tick on one supplier's row also
+    // fire a different supplier's action for the same reference text.
+    let otherSupplierId = SupplierId.create "2" |> valueOrFail
+    let namesById = Map.ofList [ "1", "Acme"; "2", "Widgets Inc" ]
+
+    let tickedInvoice = anUploadableInvoice "1" "INV-100" (DateTime(2026, 9, 20))
+
+    let otherSuppliersInvoice: UploadableInvoice =
+        { Id = InvoiceId.create "2" |> valueOrFail
+          SupplierId = otherSupplierId
+          Reference = InvoiceReference.create "INV-100" |> valueOrFail
+          Amount = Money.create 250m "AUD" |> valueOrFail
+          DueDate = InvoiceDueDate.create (DateTime(2026, 9, 25)) |> valueOrFail }
+
+    withFakeApi (Some(accountId, calendarId)) [ tickedInvoice; otherSuppliersInvoice ] namesById [] (fun api ->
+        // The user ticks only tickedInvoice's row (Supplier "Acme") - never the other supplier's.
+        let selectedRow: SyncPlanRowUiType =
+            { InvoiceId = Some(InvoiceId.value tickedInvoice.Id)
+              SupplierName = "Acme"
+              Reference = "INV-100"
+              SyncKey = InvoiceSyncKey.derive tickedInvoice.SupplierId tickedInvoice.Reference |> InvoiceSyncKey.value
+              DueDate = Some(InvoiceDueDate.value tickedInvoice.DueDate)
+              Action = CreateSyncAction }
+
+        let outcomes = api.ExecuteSyncPlan [ selectedRow ] |> okOrFail "ExecuteSyncPlan"
+
+        // Only the ticked invoice should have been acted on - the other supplier's same-numbered
+        // invoice was never selected and must be left alone.
+        Assert.Equal(1, outcomes.Length)
+
+        // Which one actually ran, not just how many: re-derive the plan and confirm the ticked
+        // invoice is now up to date (its create ran) while the untouched supplier's is still
+        // reported missing (its create did NOT run).
+        let viewAfter = api.GetSyncPlan() |> okOrFail "GetSyncPlan"
+        Assert.Equal(Some UpToDateSync, viewAfter.StatusByInvoiceId |> Map.tryFind (InvoiceId.value tickedInvoice.Id))
+
+        Assert.Equal(
+            Some MissingSync,
+            viewAfter.StatusByInvoiceId |> Map.tryFind (InvoiceId.value otherSuppliersInvoice.Id)
+        ))
+
+[<Fact; Trait("Level", "Contract")>]
+let ``fake api: ExecuteSyncPlan does not delete an orphaned event whose reference text collides with a ticked invoice``
+    ()
+    =
+    // The severe form of the same collision (PR #23 review round 1): an outstanding DELETE (its
+    // invoice already gone from the ledger) has no InvoiceId of its own, so
+    // InvoicesComponents.rowsPendingSync / InvoicesModuleCreators.rowsMatchingSelection both
+    // exclude every delete row the moment ANY invoice is ticked (they filter on InvoiceId, and a
+    // delete's is always None). That means the page's Q2.13 confirmation dialog - which only ever
+    // inspects rowsPendingSync's result - could never even see this delete to ask about it. Before
+    // the fix, ExecuteSyncPlan's own Reference-based matching would still have run it anyway if its
+    // reference text collided with the ticked invoice: a delete executed with NO confirmation ever
+    // shown, on an invoice the user never selected.
+    let tickedInvoice = anUploadableInvoice "1" "INV-100" (DateTime(2026, 9, 20))
+    let namesById = Map.ofList [ "1", "Acme"; "2", "Widgets Inc" ]
+
+    let otherSupplierId = SupplierId.create "2" |> valueOrFail
+    let otherSupplierReference = InvoiceReference.create "INV-100" |> valueOrFail
+    let orphanedEventKey = InvoiceSyncKey.derive otherSupplierId otherSupplierReference
+
+    let orphanedEvent: CalendarEvent =
+        { Id = CalendarEventId.create "evt-orphaned" |> valueOrFail
+          Event = { Date = DateTime(2026, 8, 1); Title = "Invoice due: INV-100"; Description = "" }
+          SyncKey = Some orphanedEventKey }
+
+    // tickedInvoice is the only invoice in the ledger/window - the other supplier's invoice has
+    // already left the ledger entirely, which is what makes its event's action a DeleteEvent.
+    withFakeApi (Some(accountId, calendarId)) [ tickedInvoice ] namesById [ orphanedEvent ] (fun api ->
+        let selectedRow: SyncPlanRowUiType =
+            { InvoiceId = Some(InvoiceId.value tickedInvoice.Id)
+              SupplierName = "Acme"
+              Reference = "INV-100"
+              SyncKey = InvoiceSyncKey.derive tickedInvoice.SupplierId tickedInvoice.Reference |> InvoiceSyncKey.value
+              DueDate = Some(InvoiceDueDate.value tickedInvoice.DueDate)
+              Action = CreateSyncAction }
+
+        let outcomes = api.ExecuteSyncPlan [ selectedRow ] |> okOrFail "ExecuteSyncPlan"
+
+        // Only the ticked create ran.
+        let outcome = Assert.Single outcomes
+        Assert.Equal(CreateSyncAction, outcome.Action)
+
+        // The orphaned event must still be outstanding as a delete - never executed, and never
+        // even offered for confirmation, since nobody selected it.
+        let viewAfter = api.GetSyncPlan() |> okOrFail "GetSyncPlan"
+
+        Assert.Contains(
+            viewAfter.Plan,
+            fun row -> row.Action = DeleteSyncAction && row.Reference = "INV-100" && row.SupplierName = "Widgets Inc"
+        ))

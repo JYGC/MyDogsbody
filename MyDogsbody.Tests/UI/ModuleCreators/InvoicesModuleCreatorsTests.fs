@@ -49,6 +49,9 @@ let private aSyncPlanRow (invoiceId: string option) (reference: string) (action:
     { InvoiceId = invoiceId
       SupplierName = "Acme"
       Reference = reference
+      // Not exercised by these module-creator tests, which select by InvoiceId - a distinct
+      // placeholder is enough to keep this record shape valid.
+      SyncKey = $"sync-key-{reference}"
       DueDate = None
       Action = action }
 
