@@ -209,14 +209,14 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 11 — Gate (required)
 
-- [ ] **11.1** `dotnet build MyDogsbody.sln` — zero errors.
-- [ ] **11.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
-- [ ] **11.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass.
+- [x] **11.1** `dotnet build MyDogsbody.sln` — zero errors.
+- [x] **11.2** `dotnet test` — zero failures, **zero skips**, all four levels. Record totals per level.
+- [x] **11.3** `Contracts/DomainIsolationTests.fs` and `AssertDomainReferencesNothing` still pass.
 - [ ] **11.4** **Manual verification against a real Google calendar — and it must include a delete.**
       Create, update, delete, then a second sync making **no calls**. The delete is the one operation
       whose failure mode the suite cannot fully model. Record what was run and what was observed.
-- [ ] **11.5** Confirm `MainWindow.xaml.cs` is untouched.
-- [ ] **11.6** **Series acceptance checks** — the end-state list in the decision record:
+- [x] **11.5** Confirm `MainWindow.xaml.cs` is untouched.
+- [x] **11.6** **Series acceptance checks** — the end-state list in the decision record:
       still exactly two mapping points per feature;
       `UI.Portal` references only `UI.Types` and `Exceptions.Types`;
       no `Credentials.db`, no `MyDogsbody.Enums`, no `MyDogsbody.Domain/Credentials/`;
