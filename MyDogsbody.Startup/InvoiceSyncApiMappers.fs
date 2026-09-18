@@ -104,8 +104,17 @@ let toSyncStatusByInvoiceId (inWindow: UploadableInvoice list) (plan: SyncAction
         id, status)
     |> Map.ofList
 
-/// Events the plan does not fully explain: no sync key at all (an orphan needing attention), or
-/// one whose invoice has left the ledger (a pending delete, already shown in the plan too).
+/// Events the plan does not fully explain: no sync key at all (an orphan needing attention), one
+/// whose invoice has left the ledger (a pending delete, already shown in the plan too), or a
+/// second event sharing another event's key (a duplicate needing attention - requirements.md's
+/// "the same invoice has two events on the calendar" edge case).
+///
+/// `DiffInvoicesAgainstCalendarWorkflow.diff` compares only the first-seen keyed event against
+/// the ledger for a shared key and leaves every other one untouched - neither updated, left
+/// alone, nor deleted (its own "Duplicates" comment) - so a duplicate is never the target of any
+/// SyncAction and so never appears in `matchedEventIds` below. Left out of this function, such an
+/// event was invisible everywhere in the view: not in the plan, not among orphans, PR #23 review
+/// round 2.
 let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : OrphanedEventUiType list =
     let deletedEventIds =
         plan
@@ -114,12 +123,27 @@ let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : Orph
             | _ -> None)
         |> Set.ofList
 
+    /// Every event id the plan names as the target of an update, a leave-alone or a delete - the
+    /// canonical (first-seen) event for its key, whichever action `diff` gave it. A CreateEvent
+    /// names no event id at all, since none exists yet.
+    let matchedEventIds =
+        plan
+        |> List.choose (function
+            | UpdateEvent(eventId, _)
+            | LeaveAlone eventId
+            | DeleteEvent(eventId, _) -> Some eventId
+            | CreateEvent _ -> None)
+        |> Set.ofList
+
     events
     |> List.choose (fun event ->
         match event.SyncKey with
         | None -> Some { Title = event.Event.Title; Date = event.Event.Date; NeedsAttention = true }
         | Some _ when Set.contains event.Id deletedEventIds ->
             Some { Title = event.Event.Title; Date = event.Event.Date; NeedsAttention = false }
+        | Some _ when not (Set.contains event.Id matchedEventIds) ->
+            // Keyed, but not the one `diff` matched to its invoice - a duplicate.
+            Some { Title = event.Event.Title; Date = event.Event.Date; NeedsAttention = true }
         | Some _ -> None)
 
 /// One executed SyncAction and its SyncOutcome -> a UI outcome row, naming the invoice the same

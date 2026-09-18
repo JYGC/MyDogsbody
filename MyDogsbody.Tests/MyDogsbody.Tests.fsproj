@@ -104,6 +104,7 @@
     <Compile Include="Startup\InvoiceApiFactoryTests.fs" />
     <Compile Include="Startup\GoogleAccountApiMappersTests.fs" />
     <Compile Include="Startup\GoogleAccountApiFactoryTests.fs" />
+    <Compile Include="Startup\InvoiceSyncApiMappersTests.fs" />
     <Compile Include="Contracts\GoogleCredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\GoogleCredentialPersistedShapeTests.fs" />
     <Compile Include="Contracts\GoogleCredentialBoundaryMapperTests.fs" />

@@ -48,13 +48,30 @@ let ``derive stretches the range forward to cover a due date beyond the mirrored
     Assert.Equal(DateTime(2026, 5, 9), CalendarDateRange.endDate range)
 
 [<Fact; Trait("Level", "Unit")>]
+let ``derive stretches the range backward to cover a due date before the mirrored start`` () =
+    // An invoice already overdue by the time it was scanned: due 2026-02-01, well before the
+    // mirrored start of 2026-02-24 (today - 14). Requirements.md's date-range section states this
+    // unconditionally ("THE SYSTEM SHALL never produce a range that excludes an invoice currently
+    // in view") - not only for a due date beyond the mirrored END. An event already on the
+    // calendar for this invoice, dated 2026-02-01, would sit outside a forward-only-stretched
+    // range and read as absent - producing a duplicate CreateEvent for an invoice that already
+    // has one, exactly the harm this requirement exists to prevent.
+    let overdue = uploadableDue (DateTime(2026, 2, 1))
+
+    let range = derive getCurrentTime window [ overdue ]
+
+    Assert.Equal(DateTime(2026, 2, 1), CalendarDateRange.startDate range)
+    Assert.Equal(today.AddDays(14.0), CalendarDateRange.endDate range)
+
+[<Fact; Trait("Level", "Unit")>]
 let ``derive never produces a range that excludes an invoice in view`` () =
+    let overdue = uploadableDue (DateTime(2026, 1, 5))
     let nearby = uploadableDue (DateTime(2026, 3, 15))
     let farOut = uploadableDue (DateTime(2026, 6, 1))
 
-    let range = derive getCurrentTime window [ nearby; farOut ]
+    let range = derive getCurrentTime window [ overdue; nearby; farOut ]
 
-    [ nearby; farOut ]
+    [ overdue; nearby; farOut ]
     |> List.iter (fun invoice ->
         let dueDate = InvoiceDueDate.value invoice.DueDate
         Assert.True(dueDate >= CalendarDateRange.startDate range && dueDate <= CalendarDateRange.endDate range))
