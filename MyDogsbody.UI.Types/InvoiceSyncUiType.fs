@@ -52,16 +52,31 @@ type SyncOutcomeRowUiType =
         Result: SyncOutcomeResultUiType
     }
 
+/// Why an event the sync plan does not fully explain is being shown (PR #23 review round 3). A
+/// bare bool could not tell these three apart, and telling the user "no recognisable sync key" for
+/// the third case was actively false - it has one, just not the one `diff` matched to an invoice.
+/// requirements.md's own wording for that case is specific: "report the second as a duplicate".
+type OrphanedEventReasonUiType =
+    /// No sync key at all, or one that failed to parse - added by hand, or corrupted. Never a
+    /// deletion candidate: the app deletes only what it can prove it created.
+    | NoRecognisableSyncKey
+    /// A second event sharing another event's sync key (requirements.md: "the same invoice has two
+    /// events on the calendar"). `diff` updates the first and leaves this one untouched - neither
+    /// updated nor deleted - so a person still has to decide what to do with it, but for a reason
+    /// worth naming accurately rather than folding into the keyless case above.
+    | DuplicateOfAnotherEventsSyncKey
+    /// Its invoice has already left the ledger - already shown as a pending delete in the plan
+    /// above. Nothing for a person to decide here.
+    | InvoiceAlreadyLeftTheLedger
+
 /// An event on the calendar the plan does not fully explain: either its invoice has left the
-/// ledger (also shown as a pending delete in the plan) or it carries no sync key, or an
-/// unparseable one - added by hand, or corrupted. NeedsAttention is true only for the latter:
-/// the app deletes only what it can prove it created, so a keyless event is never a deletion
-/// candidate and a person has to decide what to do with it.
+/// ledger (also shown as a pending delete in the plan), it carries no sync key or an unparseable
+/// one - added by hand, or corrupted - or it duplicates another event's sync key.
 type OrphanedEventUiType =
     {
         Title: string
         Date: DateTime
-        NeedsAttention: bool
+        Reason: OrphanedEventReasonUiType
     }
 
 /// The whole picture the invoices page needs to render calendar sync: every ready invoice's

@@ -138,12 +138,13 @@ let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : Orph
     events
     |> List.choose (fun event ->
         match event.SyncKey with
-        | None -> Some { Title = event.Event.Title; Date = event.Event.Date; NeedsAttention = true }
+        | None -> Some { Title = event.Event.Title; Date = event.Event.Date; Reason = NoRecognisableSyncKey }
         | Some _ when Set.contains event.Id deletedEventIds ->
-            Some { Title = event.Event.Title; Date = event.Event.Date; NeedsAttention = false }
+            Some { Title = event.Event.Title; Date = event.Event.Date; Reason = InvoiceAlreadyLeftTheLedger }
         | Some _ when not (Set.contains event.Id matchedEventIds) ->
-            // Keyed, but not the one `diff` matched to its invoice - a duplicate.
-            Some { Title = event.Event.Title; Date = event.Event.Date; NeedsAttention = true }
+            // Keyed, but not the one `diff` matched to its invoice - a duplicate, per
+            // requirements.md's own wording for this edge case (PR #23 review round 3).
+            Some { Title = event.Event.Title; Date = event.Event.Date; Reason = DuplicateOfAnotherEventsSyncKey }
         | Some _ -> None)
 
 /// One executed SyncAction and its SyncOutcome -> a UI outcome row, naming the invoice the same

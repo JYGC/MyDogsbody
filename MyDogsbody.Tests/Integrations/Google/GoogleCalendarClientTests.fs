@@ -642,6 +642,38 @@ let ``updateEvent maps a 403 to the not-authorised message`` () =
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
+let ``updateEvent sends the request as a PATCH rather than a PUT, so fields it does not set are left alone rather than cleared`` () =
+    // Google Calendar's events.update is a full-resource PUT: any field the request body does not
+    // set is CLEARED server-side, not left untouched - contrast events.patch, which
+    // Google.Apis.Calendar.v3's own XML doc calls out as supporting "patch semantics", wording it
+    // uses for no other Events method. buildAllDayGoogleEvent only ever sets Summary, Description,
+    // Start and End (Q2.14's "title and date"), so issuing this as a PUT would silently wipe
+    // extendedProperties - the InvoiceSyncKey createEvent stamped on the event - and its reminders
+    // override, on the event's very first update. The next sync would then read the event back as
+    // keyless (an unresolvable orphan, per InvoiceSyncApiMappers.toOrphanedEvents) and read the
+    // invoice as unsynced (a fresh, duplicate CreateEvent) - exactly the duplicate requirements.md
+    // says the extended property exists to prevent ("the extended property was chosen so a rename
+    // would not cause a duplicate"). PATCH sends the same fields but merges rather than replaces,
+    // so extendedProperties and reminders survive untouched.
+    let mutable capturedRequestMethod = System.Net.Http.HttpMethod.Get
+
+    let allDayEvent =
+        { Date = System.DateTime(2026, 9, 21)
+          Title = "Acme Corp - INV-100 (updated)"
+          Description = "" }
+
+    let respond (request: HttpRequestMessage) =
+        capturedRequestMethod <- request.Method
+
+        jsonResponse
+            HttpStatusCode.OK
+            """{ "kind": "calendar#event", "id": "event-1", "start": { "date": "2026-09-21" }, "end": { "date": "2026-09-22" } }"""
+
+    updateEvent respond testEventId allDayEvent |> okOrFail "updateEvent" |> ignore
+
+    Assert.Equal(System.Net.Http.HttpMethod.Patch, capturedRequestMethod)
+
+[<Fact; Trait("Level", "Integration")>]
 let ``deleteEvent succeeds and returns unit`` () =
     let respond (_: HttpRequestMessage) = jsonResponse HttpStatusCode.OK "\"\""
 

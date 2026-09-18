@@ -42,7 +42,7 @@ let private keyedEvent (id: string) (syncKey: InvoiceSyncKey option) : CalendarE
 // invisible everywhere in the view before this round's fix.
 
 [<Fact; Trait("Level", "Unit")>]
-let ``toOrphanedEvents reports a keyless event as needing attention`` () =
+let ``toOrphanedEvents reports a keyless event as having no recognisable sync key`` () =
     let event = keyedEvent "evt-1" None
 
     let actual = InvoiceSyncApiMappers.toOrphanedEvents [ event ] []
@@ -51,11 +51,11 @@ let ``toOrphanedEvents reports a keyless event as needing attention`` () =
     | [ row ] ->
         Assert.Equal(event.Event.Title, row.Title)
         Assert.Equal(event.Event.Date, row.Date)
-        Assert.True row.NeedsAttention
+        Assert.Equal(NoRecognisableSyncKey, row.Reason)
     | other -> Assert.Fail($"Expected exactly one orphaned event, got {List.length other}")
 
 [<Fact; Trait("Level", "Unit")>]
-let ``toOrphanedEvents reports a pending-delete event without needing attention`` () =
+let ``toOrphanedEvents reports a pending-delete event as its invoice having left the ledger`` () =
     let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
     let key = keyFor invoice
     let event = keyedEvent "evt-1" (Some key)
@@ -67,7 +67,7 @@ let ``toOrphanedEvents reports a pending-delete event without needing attention`
     | [ row ] ->
         Assert.Equal(event.Event.Title, row.Title)
         Assert.Equal(event.Event.Date, row.Date)
-        Assert.False row.NeedsAttention
+        Assert.Equal(InvoiceAlreadyLeftTheLedger, row.Reason)
     | other -> Assert.Fail($"Expected exactly one orphaned event, got {List.length other}")
 
 [<Fact; Trait("Level", "Unit")>]
@@ -83,14 +83,17 @@ let ``toOrphanedEvents does not report an event the plan already accounts for`` 
         Assert.Empty actual)
 
 [<Fact; Trait("Level", "Unit")>]
-let ``toOrphanedEvents reports a second event sharing a key as a duplicate needing attention`` () =
+let ``toOrphanedEvents reports a second event sharing a key as a duplicate, not as keyless`` () =
     // requirements.md's edge case: "WHEN the same invoice has two events on the calendar THE
     // SYSTEM SHALL update the first and report the second as a duplicate, and SHALL NOT delete it
     // without confirmation." `diff` compares only the first-seen event for a shared key against
     // the ledger (its own "Duplicates" comment) and leaves every other event untouched - neither
-    // updated nor deleted, so it is never the target of any SyncAction. Before this round's fix,
-    // that made the second event invisible here too: not a keyless orphan, not a pending delete,
-    // so it fell through to `None` and was never reported anywhere in the view.
+    // updated nor deleted, so it is never the target of any SyncAction. Before round 2's fix, that
+    // made the second event invisible here too. Before round 3's fix, it was visible but
+    // mislabelled: OrphanedEventUiType's old bare `NeedsAttention: bool` could not tell this case
+    // apart from a genuinely keyless event, so the screen told the user "no recognisable sync key"
+    // for an event that had one - just not the one `diff` matched. This asserts the exact reason,
+    // not merely that the row is flagged.
     let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
     let key = keyFor invoice
     let firstEvent = keyedEvent "evt-1" (Some key)
@@ -105,5 +108,5 @@ let ``toOrphanedEvents reports a second event sharing a key as a duplicate needi
     | [ row ] ->
         Assert.Equal(duplicateEvent.Event.Title, row.Title)
         Assert.Equal(duplicateEvent.Event.Date, row.Date)
-        Assert.True row.NeedsAttention
+        Assert.Equal(DuplicateOfAnotherEventsSyncKey, row.Reason)
     | other -> Assert.Fail($"Expected exactly one orphaned (duplicate) event, got {List.length other}")

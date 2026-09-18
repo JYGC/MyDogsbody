@@ -282,10 +282,13 @@ let private syncPlanPreview (plan: SyncPlanRowUiType list) =
             })
     }
 
-/// The orphaned-events view (task 8.6): events the plan does not fully explain. A keyless or
-/// unparseable-key event NEEDS ATTENTION - it is never a deletion candidate, because the app
-/// deletes only what it can prove it created. A pending-delete orphan (its invoice already left the
-/// ledger) is shown too, distinctly, even though the same row already appears in the plan above.
+/// The orphaned-events view (task 8.6): events the plan does not fully explain, labelled with why
+/// (PR #23 review round 3's OrphanedEventReasonUiType). A keyless or unparseable-key event, and a
+/// duplicate of another event's sync key, both NEED ATTENTION - neither is ever a deletion
+/// candidate, because the app deletes only what it can prove it created, and requirements.md asks
+/// the duplicate be reported "as a duplicate" rather than folded into the keyless case. A
+/// pending-delete orphan (its invoice already left the ledger) is shown too, distinctly, even
+/// though the same row already appears in the plan above.
 let private orphanedEventsView (invoicesModule: InvoicesModule) =
     adapt {
         let! syncView = invoicesModule.SyncViewAval
@@ -315,12 +318,18 @@ let private orphanedEventsView (invoicesModule: InvoicesModule) =
                             MudTd'' { orphan.Date.ToString("d MMM yyyy") }
 
                             MudTd'' {
-                                if orphan.NeedsAttention then
+                                match orphan.Reason with
+                                | NoRecognisableSyncKey ->
                                     MudChip'' {
                                         Color Color.Warning
                                         "Needs attention - no recognisable sync key"
                                     }
-                                else
+                                | DuplicateOfAnotherEventsSyncKey ->
+                                    MudChip'' {
+                                        Color Color.Warning
+                                        "Needs attention - duplicate event for the same invoice"
+                                    }
+                                | InvoiceAlreadyLeftTheLedger ->
                                     MudChip'' {
                                         Color Color.Default
                                         "Its invoice has left the ledger - pending delete, above"

@@ -113,7 +113,10 @@ type FakeGoogleCalendar() =
 
             jsonResponse HttpStatusCode.OK $"""{{ "id": "{id}", "summary": "{title}", "start": {{ "date": "{dateText}" }} }}"""
 
-        elif request.Method = HttpMethod.Put && path.Contains "/events/" then
+        // PATCH, not Put: GoogleCalendarClient.updateEventVia issues a PATCH so fields it does not
+        // set - extendedProperties among them - survive server-side rather than being cleared by a
+        // full-resource PUT (PR #23 review round 3).
+        elif request.Method = HttpMethod.Patch && path.Contains "/events/" then
             let id = path.Substring(path.LastIndexOf '/' + 1)
 
             if events.ContainsKey id then

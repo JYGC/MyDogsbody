@@ -520,7 +520,18 @@ let updateEventVia
 
             let googleEvent = buildAllDayGoogleEvent allDayEvent
 
-            service.Events.Update(googleEvent, CalendarId.value calendarId, CalendarEventId.value eventId).Execute()
+            // PATCH, not Update (PUT): events.update replaces the whole event resource, so any
+            // field the request body does not set - extendedProperties (the InvoiceSyncKey
+            // createEvent stamped on this event) and reminders among them - is CLEARED
+            // server-side, not left alone. buildAllDayGoogleEvent only ever sets Summary,
+            // Description, Start and End (Q2.14's "title and date"), so an Update here would
+            // silently wipe the sync key on the event's very first update: the next sync would
+            // read the event back as keyless (an orphan) and the invoice as unsynced (a fresh,
+            // duplicate CreateEvent) - precisely the duplicate requirements.md says the extended
+            // property exists to prevent ("the extended property was chosen so a rename would not
+            // cause a duplicate"). Patch sends the same fields but merges rather than replaces, so
+            // extendedProperties and reminders survive untouched (PR #23 review round 3).
+            service.Events.Patch(googleEvent, CalendarId.value calendarId, CalendarEventId.value eventId).Execute()
             |> ignore
 
             return ()
