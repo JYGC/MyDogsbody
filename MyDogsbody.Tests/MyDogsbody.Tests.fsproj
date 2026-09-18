@@ -144,6 +144,8 @@
     <Compile Include="E2E\MailAccountsFlowTests.fs" />
     <Compile Include="E2E\InvoicesTestHarness.fs" />
     <Compile Include="E2E\InvoicesFlowTests.fs" />
+    <Compile Include="E2E\InvoiceSyncTestHarness.fs" />
+    <Compile Include="E2E\InvoiceSyncFlowTests.fs" />
     <Compile Include="E2E\GoogleAccountsTestHarness.fs" />
     <Compile Include="E2E\GoogleAccountsFlowTests.fs" />
     <Compile Include="Program.fs" />

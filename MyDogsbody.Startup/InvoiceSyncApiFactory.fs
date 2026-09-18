@@ -29,11 +29,44 @@ open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database.Types
 open MyDogsbody.UI.Types
 
-let createInvoiceSyncApi
+/// Takes the four Google-facing calls as explicit parameters - the same seam
+/// `GoogleAccountApiFactory.bindListCalendars` and its siblings already give every other
+/// Google-touching binding in this codebase - so a test can substitute a stubbed
+/// `HttpMessageHandler` (a real `GoogleCalendarClient.xVia (Some factory)`) or a plain fake,
+/// and exercise the REST of this composition (credential loading, the SQLite store, the domain
+/// workflows, both mappers) for real. `createInvoiceSyncApi` below is this with the production
+/// defaults, which is what `Startup.fs` calls.
+let createInvoiceSyncApiWith
     (handleError: HandleErrorBuilder)
     (getCurrentTime: unit -> DateTime)
     (databaseContext: DatabaseContext)
     (googleContext: GoogleDatabaseContext)
+    (listEventsWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> CalendarDateRange
+            -> Result<CalendarEvent list, MyDogsbodyException>)
+    (createEventWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> InvoiceSyncKey
+            -> AllDayEvent
+            -> Result<CalendarEventId, MyDogsbodyException>)
+    (updateEventWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> CalendarEventId
+            -> AllDayEvent
+            -> Result<unit, MyDogsbodyException>)
+    (deleteEventWith:
+        HandleErrorBuilder
+            -> Google.Apis.Http.IConfigurableHttpClientInitializer
+            -> CalendarId
+            -> CalendarEventId
+            -> Result<unit, MyDogsbodyException>)
     : InvoiceSyncApi =
 
     let databaseConnection = databaseContext.GetDatabaseConnection
@@ -90,16 +123,16 @@ let createInvoiceSyncApi
         GoogleAccountApiFactory.bindListGoogleAccounts handleError googleContext
 
     let listCalendarEvents: ListCalendarEvents =
-        GoogleAccountApiFactory.bindListCalendarEvents handleError googleContext GoogleCalendarClient.listEvents
+        GoogleAccountApiFactory.bindListCalendarEvents handleError googleContext listEventsWith
 
     let createCalendarEvent: CreateCalendarEvent =
-        GoogleAccountApiFactory.bindCreateCalendarEvent handleError googleContext GoogleCalendarClient.createEvent
+        GoogleAccountApiFactory.bindCreateCalendarEvent handleError googleContext createEventWith
 
     let updateCalendarEvent: UpdateCalendarEvent =
-        GoogleAccountApiFactory.bindUpdateCalendarEvent handleError googleContext GoogleCalendarClient.updateEvent
+        GoogleAccountApiFactory.bindUpdateCalendarEvent handleError googleContext updateEventWith
 
     let deleteCalendarEvent: DeleteCalendarEvent =
-        GoogleAccountApiFactory.bindDeleteCalendarEvent handleError googleContext GoogleCalendarClient.deleteEvent
+        GoogleAccountApiFactory.bindDeleteCalendarEvent handleError googleContext deleteEventWith
 
     /// The account this change syncs to: the first registered account with a default invoice
     /// calendar chosen (Q2.11's READY state). Syncing to more than one ready account at once is
@@ -220,3 +253,21 @@ let createInvoiceSyncApi
 
     { GetSyncPlan = getSyncPlan
       ExecuteSyncPlan = executeSyncPlan }
+
+/// The composition root's entry point - the production Google calendar client, exactly the way
+/// `Startup.fs` calls it.
+let createInvoiceSyncApi
+    (handleError: HandleErrorBuilder)
+    (getCurrentTime: unit -> DateTime)
+    (databaseContext: DatabaseContext)
+    (googleContext: GoogleDatabaseContext)
+    : InvoiceSyncApi =
+    createInvoiceSyncApiWith
+        handleError
+        getCurrentTime
+        databaseContext
+        googleContext
+        GoogleCalendarClient.listEvents
+        GoogleCalendarClient.createEvent
+        GoogleCalendarClient.updateEvent
+        GoogleCalendarClient.deleteEvent

@@ -197,7 +197,7 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 10 — End to end (required)
 
-- [ ] **10.1** `E2E/InvoiceSyncFlowTests.fs` against a real temp SQLite file and stubbed HTTP:
+- [x] **10.1** `E2E/InvoiceSyncFlowTests.fs` against a real temp SQLite file and stubbed HTTP:
       a create appears in the plan, executes, and the row shows up to date;
       an update shows the row as changed beforehand;
       **a delete requires confirmation before executing**;
@@ -205,7 +205,7 @@ type; every test binds a lambda or a stubbed HTTP handler.
       a partial failure reports per row;
       a not-ready account disables the button with its reason;
       ticking rows limits the plan and a rescan clears the selection.
-- [ ] **10.2** Confirm no test makes a real Google call or reaches `Startup.Startup`.
+- [x] **10.2** Confirm no test makes a real Google call or reaches `Startup.Startup`.
 
 ## Phase 11 — Gate (required)
 
