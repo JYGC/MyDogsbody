@@ -13,7 +13,7 @@ open MyDogsbody.Database.Migrations
 
 let private withSchema (test: string -> unit) =
     let path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={path}"
+    let connectionString = $"Data Source={path};Pooling=False"
     MigrationSetup.setupMigrations connectionString
 
     try

@@ -23,6 +23,41 @@ let private firstFailure (results: Result<unit, MyDogsbodyException> list) : str
         | Error(caughtException: MyDogsbodyException) -> Some caughtException.Message
         | Ok() -> None)
 
+/// The empty picture: no account ready to check yet, nothing outstanding, nothing orphaned. What
+/// SyncViewAval holds before the first LoadSyncPlan completes - NOT the same as "up to date", which
+/// is this same shape but reached only after a real read.
+let private emptySyncView: SyncViewUiType =
+    { StatusByInvoiceId = Map.empty
+      Plan = []
+      OrphanedEvents = []
+      NotReadyReason = None }
+
+/// The plan rows a "sync now" press would act on right now: everything outstanding when nothing is
+/// ticked (Q2.7 - and passed to ExecuteSyncPlan as `[]`, letting the API re-derive it rather than
+/// trusting a possibly-stale preview), or the ticked subset when something is. A delete row carries
+/// no InvoiceId (its invoice has already left the ledger), so it can never be individually ticked by
+/// invoice id - the simplest compliant design named in this change's brief: a delete only ever rides
+/// along in "everything outstanding" mode.
+let private rowsMatchingSelection (selectedInvoiceIds: Set<string>) (syncView: SyncViewUiType) : SyncPlanRowUiType list =
+    if Set.isEmpty selectedInvoiceIds then
+        syncView.Plan
+    else
+        syncView.Plan
+        |> List.filter (fun planRow ->
+            match planRow.InvoiceId with
+            | Some invoiceId -> Set.contains invoiceId selectedInvoiceIds
+            | None -> false)
+
+/// Overlays change #7's per-row calendar status onto a ledger row (task 8.3). An invoice that
+/// cannot become a calendar event carries no sync status regardless of what the map says - it won't
+/// have an entry anyway (`UploadableInvoice.ofStored` already excludes it), but staying explicit
+/// here means that stays true even if the map's population ever changes.
+let private overlaySyncStatus (syncView: SyncViewUiType) (invoice: InvoiceUiType) : InvoiceUiType =
+    if invoice.CanBecomeCalendarEvent then
+        { invoice with SyncStatus = Map.tryFind invoice.Id syncView.StatusByInvoiceId }
+    else
+        { invoice with SyncStatus = None }
+
 /// Builds the invoices page state.
 ///
 /// startWork is how the module gets off the render thread; a test passes `fun work -> work ()`.
@@ -31,8 +66,12 @@ let getInvoicesModule
     (startWork: (unit -> unit) -> unit)
     (invoiceApi: InvoiceApi)
     (scanWindowApi: ScanWindowApi)
+    (invoiceSyncApi: InvoiceSyncApi)
     : InvoicesModule =
-    let invoicesCval = cval<InvoiceUiType list> []
+    // Holds whatever InvoiceApi.GetInvoices returned, with no sync status - the public InvoicesAval
+    // below overlays syncViewCval onto this every time either changes, so the two never drift out of
+    // step by hand.
+    let rawInvoicesCval = cval<InvoiceUiType list> []
     let problemsCval = cval<ScanProblemUiType list> []
     let tombstonesCval = cval<TombstoneUiType list> []
     let windowsCval = cval<ScanWindowUiType list> []
@@ -40,6 +79,19 @@ let getInvoicesModule
     let selectedDaysCval = cval 0
     let isScanningCval = cval false
     let errorCval = cval<string option> None
+
+    // --- change #7: calendar sync ---
+    let syncViewCval = cval<SyncViewUiType> emptySyncView
+    let isSyncingCval = cval false
+    // View state only (task 8.2) - never read from or written to any API, so a rescan can just
+    // reset it without undoing anything persisted.
+    let selectedInvoiceIdsCval = cval<Set<string>> Set.empty
+    let lastSyncOutcomesCval = cval<SyncOutcomeRowUiType list> []
+
+    let invoicesAval = AVal.map2 (fun (invoices: InvoiceUiType list) syncView -> invoices |> List.map (overlaySyncStatus syncView)) rawInvoicesCval syncViewCval
+
+    let pendingActionCountAval =
+        AVal.map2 (fun selectedInvoiceIds syncView -> List.length (rowsMatchingSelection selectedInvoiceIds syncView)) selectedInvoiceIdsCval syncViewCval
 
     let setError (result: Result<_, MyDogsbodyException>) =
         match result with
@@ -52,12 +104,17 @@ let getInvoicesModule
     /// is dropped for the explicit `rescan` below. "Narrowing hides, it does not forget" - the
     /// store keeps every invoice; the window only decides which are shown.
     let loadLedger (days: int) =
-        transact (fun _ -> isScanningCval.Value <- true)
+        transact (fun _ ->
+            isScanningCval.Value <- true
+            // A window change re-queries the ledger, so a tick against a row that may no longer be
+            // in the result is worse than no tick at all (task 8.2).
+            selectedInvoiceIdsCval.Value <- Set.empty)
 
         startWork (fun () ->
             let windows = scanWindowApi.GetScanWindows()
             let ledger = invoiceApi.GetInvoices days
             let problems = invoiceApi.GetProblems()
+            let syncPlan = invoiceSyncApi.GetSyncPlan()
 
             transact (fun _ ->
                 match windows with
@@ -65,18 +122,23 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 match ledger with
-                | Ok invoices -> invoicesCval.Value <- invoices
+                | Ok invoices -> rawInvoicesCval.Value <- invoices
                 | Error _ -> ()
 
                 match problems with
                 | Ok scanProblems -> problemsCval.Value <- scanProblems
                 | Error _ -> ()
 
+                match syncPlan with
+                | Ok syncView -> syncViewCval.Value <- syncView
+                | Error _ -> ()
+
                 errorCval.Value <-
                     firstFailure
                         [ ledger |> Result.map ignore
                           problems |> Result.map ignore
-                          windows |> Result.map ignore ]
+                          windows |> Result.map ignore
+                          syncPlan |> Result.map ignore ]
 
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
@@ -93,13 +155,17 @@ let getInvoicesModule
     /// persisted precisely "so incremental scanning does not empty the diagnostic list before it
     /// is looked at". Read AFTER the scan, so whatever it just stored is included.
     let scanUsing (scanOperation: int -> Result<ScanResultUiType, MyDogsbodyException>) (days: int) =
-        transact (fun _ -> isScanningCval.Value <- true)
+        transact (fun _ ->
+            isScanningCval.Value <- true
+            // Same reasoning as loadLedger: freshly-scanned mail can change which rows exist at all.
+            selectedInvoiceIdsCval.Value <- Set.empty)
 
         startWork (fun () ->
             let windows = scanWindowApi.GetScanWindows()
             let scanResult = scanOperation days
             let ledger = invoiceApi.GetInvoices days
             let problems = invoiceApi.GetProblems()
+            let syncPlan = invoiceSyncApi.GetSyncPlan()
 
             transact (fun _ ->
                 match windows with
@@ -107,22 +173,27 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 match ledger with
-                | Ok invoices -> invoicesCval.Value <- invoices
+                | Ok invoices -> rawInvoicesCval.Value <- invoices
                 | Error _ -> ()
 
                 match problems with
                 | Ok scanProblems -> problemsCval.Value <- scanProblems
                 | Error _ -> ()
 
+                match syncPlan with
+                | Ok syncView -> syncViewCval.Value <- syncView
+                | Error _ -> ()
+
                 // The scan comes first: when the mailbox read failed that is the news, and the
                 // stored ledger read alongside it is still on screen. When it SUCCEEDED, a failed
-                // ledger or problems read is the only thing that can report itself.
+                // ledger, problems or sync-plan read is the only thing that can report itself.
                 errorCval.Value <-
                     firstFailure
                         [ scanResult |> Result.map ignore
                           ledger |> Result.map ignore
                           problems |> Result.map ignore
-                          windows |> Result.map ignore ]
+                          windows |> Result.map ignore
+                          syncPlan |> Result.map ignore ]
 
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
@@ -166,8 +237,12 @@ let getInvoicesModule
             transact (fun _ -> setError result)
 
             match result with
-            // the row is hard-deleted, so a reload is enough - no need to re-read the mailbox
-            | Ok() -> loadLedger selectedDaysCval.Value
+            // the row is hard-deleted, so a reload is enough - no need to re-read the mailbox. Drop
+            // it from the selection too: a tick against a row that no longer exists is worse than
+            // no tick at all (task 8.2's rationale, applied here as well as to a rescan).
+            | Ok() ->
+                transact (fun _ -> selectedInvoiceIdsCval.Value <- Set.remove id selectedInvoiceIdsCval.Value)
+                loadLedger selectedDaysCval.Value
             | Error _ -> ())
 
     let undeleteInvoice (supplierId: string) (reference: string) =
@@ -203,9 +278,80 @@ let getInvoicesModule
                     errorCval.Value <- None
                 | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message))
 
+    // --- change #7: calendar sync ---
+
+    /// A standalone reload of the sync plan, in the same shape as `loadProblems` / `loadTombstones`:
+    /// its own alert, set or cleared on its own result. `loadLedger` and `scanUsing` also fold a
+    /// sync-plan read into their own composite picture (lowest priority in their `firstFailure`
+    /// list), so this exists for a caller that wants the plan refreshed on its own - after
+    /// `executeSync`, in particular.
+    let loadSyncPlan () =
+        transact (fun _ -> isSyncingCval.Value <- true)
+
+        startWork (fun () ->
+            let result = invoiceSyncApi.GetSyncPlan()
+
+            transact (fun _ ->
+                match result with
+                | Ok syncView ->
+                    syncViewCval.Value <- syncView
+                    errorCval.Value <- None
+                | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message
+
+                isSyncingCval.Value <- false))
+
+    let toggleInvoice (invoiceId: string) =
+        transact (fun _ ->
+            let currentSelection = selectedInvoiceIdsCval.Value
+
+            selectedInvoiceIdsCval.Value <-
+                if Set.contains invoiceId currentSelection then
+                    Set.remove invoiceId currentSelection
+                else
+                    Set.add invoiceId currentSelection)
+
+    let clearSelection () =
+        transact (fun _ -> selectedInvoiceIdsCval.Value <- Set.empty)
+
+    /// Runs ExecuteSyncPlan over the current selection, or `[]` for "everything outstanding" when
+    /// nothing is ticked (Q2.7) - `[]` rather than the locally-held plan, so the API re-derives a
+    /// fresh plan instead of trusting a preview the ledger or calendar may have since moved past.
+    /// A write reloads (CLAUDE-project.md: "every command that changes stored data calls the load
+    /// function on success") - ON SUCCESS ONLY. Reloading unconditionally would run `loadSyncPlan`
+    /// even after a failed execute, and its own success overwrites the alert this function just set
+    /// with None before the user ever sees it.
+    let executeSync () =
+        transact (fun _ -> isSyncingCval.Value <- true)
+
+        startWork (fun () ->
+            let selectedInvoiceIds = AVal.force selectedInvoiceIdsCval
+
+            let rowsToRun =
+                if Set.isEmpty selectedInvoiceIds then
+                    []
+                else
+                    rowsMatchingSelection selectedInvoiceIds (AVal.force syncViewCval)
+
+            let result = invoiceSyncApi.ExecuteSyncPlan rowsToRun
+
+            match result with
+            | Ok outcomes ->
+                transact (fun _ ->
+                    lastSyncOutcomesCval.Value <- outcomes
+                    errorCval.Value <- None
+                    // only clear on success - a failed run leaves the ticks so the user can retry
+                    selectedInvoiceIdsCval.Value <- Set.empty
+                    isSyncingCval.Value <- false)
+
+                loadSyncPlan ()
+            | Error(caughtException: MyDogsbodyException) ->
+                transact (fun _ ->
+                    errorCval.Value <- Some caughtException.Message
+                    isSyncingCval.Value <- false))
+
     start ()
 
-    { InvoicesAval = invoicesCval
+    { InvoicesAval = invoicesAval
       ProblemsAval = problemsCval
       TombstonesAval = tombstonesCval
       ScanWindowsAval = windowsCval
@@ -218,7 +364,16 @@ let getInvoicesModule
       DeleteInvoice = deleteInvoice
       UndeleteInvoice = undeleteInvoice
       LoadProblems = loadProblems
-      LoadTombstones = loadTombstones }
+      LoadTombstones = loadTombstones
+      SyncViewAval = syncViewCval
+      IsSyncingAval = isSyncingCval
+      LoadSyncPlan = loadSyncPlan
+      SelectedInvoiceIdsAval = selectedInvoiceIdsCval
+      ToggleInvoice = toggleInvoice
+      ClearSelection = clearSelection
+      PendingActionCountAval = pendingActionCountAval
+      ExecuteSync = executeSync
+      LastSyncOutcomesAval = lastSyncOutcomesCval }
 
 /// Builds the /settings/scan-windows page state.
 let getScanWindowsBrowserModule

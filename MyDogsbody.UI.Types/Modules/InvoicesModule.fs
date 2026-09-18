@@ -47,7 +47,12 @@ type InvoicesModule =
       PendingActionCountAval: aval<int>
       /// Runs ExecuteSyncPlan over the current selection (or everything outstanding, if none is
       /// selected) and reloads the plan on completion.
-      ExecuteSync: unit -> unit }
+      ExecuteSync: unit -> unit
+      /// The per-row result of the most recent ExecuteSync run (task 8.7) - empty before the first
+      /// run. ExecuteSync is `unit -> unit`, so this is the only channel back to the screen for what
+      /// happened; added alongside the rest of the change #7 UI state rather than left out, since
+      /// without it a partial failure (Q2.8) would run with no way to show which rows failed and why.
+      LastSyncOutcomesAval: aval<SyncOutcomeRowUiType list> }
 
 /// The /settings/scan-windows page's adaptive state.
 type ScanWindowsBrowserModule =

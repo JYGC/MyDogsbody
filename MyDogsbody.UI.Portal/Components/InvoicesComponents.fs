@@ -12,6 +12,27 @@ let private formatDate (value: DateTime option) =
     | Some date -> date.ToString("d MMM yyyy")
     | None -> "-"
 
+/// The plan rows a "sync now" press would act on right now, mirroring
+/// `InvoicesModuleCreators.rowsMatchingSelection` exactly (that module compiles before this one, so
+/// it cannot be reused from here - the function is five lines and kept identical by inspection
+/// rather than worth a shared module for). Used by the page to decide whether the confirmation in
+/// task 8.5 is needed and what to list in it.
+let rowsPendingSync (selectedInvoiceIds: Set<string>) (syncView: SyncViewUiType) : SyncPlanRowUiType list =
+    if Set.isEmpty selectedInvoiceIds then
+        syncView.Plan
+    else
+        syncView.Plan
+        |> List.filter (fun planRow ->
+            match planRow.InvoiceId with
+            | Some invoiceId -> Set.contains invoiceId selectedInvoiceIds
+            | None -> false)
+
+let private formatSyncAction (action: SyncPlanActionUiType) =
+    match action with
+    | CreateSyncAction -> "Create"
+    | UpdateSyncAction -> "Update"
+    | DeleteSyncAction -> "Delete"
+
 /// The window picker. A MudSelect, NOT a fixed MudToggleGroup - the number of windows is unknown
 /// at build time and the labels come from the store. The label says what it measures (Q1.6).
 let private windowSelect (windows: ScanWindowUiType list) (selectedDays: int) (onSelect: int -> unit) =
@@ -108,6 +129,7 @@ let invoicesTable (invoicesModule: InvoicesModule) (confirmAndDelete: InvoiceUiT
         adapt {
             let! invoices = invoicesModule.InvoicesAval
             let! isScanning = invoicesModule.IsScanningAval
+            let! selectedInvoiceIds = invoicesModule.SelectedInvoiceIdsAval
 
             MudTable'' {
                 Items invoices
@@ -129,17 +151,31 @@ let invoicesTable (invoicesModule: InvoicesModule) (confirmAndDelete: InvoiceUiT
 
                 HeaderContent(
                     fragment {
+                        MudTh'' { "" }
                         MudTh'' { "Supplier" }
                         MudTh'' { "Reference" }
                         MudTh'' { "Amount" }
                         MudTh'' { "Issued" }
                         MudTh'' { "Due" }
+                        MudTh'' { "Calendar sync" }
                         MudTh'' { "" }
                     }
                 )
 
                 RowTemplate(fun (invoice: InvoiceUiType) ->
                     fragment {
+                        MudTd'' {
+                            // Task 8.2/8.8: only a row that can become a calendar event is ever
+                            // selectable - a delete has no InvoiceId and so can never be ticked by
+                            // invoice id (it rides along in "everything outstanding" instead).
+                            if invoice.CanBecomeCalendarEvent then
+                                MudCheckBox'' {
+                                    Value(Set.contains invoice.Id selectedInvoiceIds)
+                                    Color Color.Primary
+                                    ValueChanged(fun (_: bool) -> invoicesModule.ToggleInvoice invoice.Id)
+                                }
+                        }
+
                         MudTd'' { invoice.SupplierName }
                         MudTd'' { invoice.Reference }
                         MudTd'' { $"{invoice.Currency} {invoice.Amount}" }
@@ -160,6 +196,38 @@ let invoicesTable (invoicesModule: InvoicesModule) (confirmAndDelete: InvoiceUiT
                         }
 
                         MudTd'' {
+                            // Task 8.3: three per-row states when ready; an invoice that cannot
+                            // become a calendar event shows no status of its own - its reason is
+                            // already the "Due" cell above, not repeated here.
+                            match invoice.CanBecomeCalendarEvent, invoice.SyncStatus with
+                            | false, _ ->
+                                MudText'' {
+                                    Typo Typo.caption
+                                    "not uploadable"
+                                }
+                            | true, Some UpToDateSync ->
+                                MudChip'' {
+                                    Color Color.Success
+                                    "Up to date"
+                                }
+                            | true, Some MissingSync ->
+                                MudChip'' {
+                                    Color Color.Warning
+                                    "Missing"
+                                }
+                            | true, Some ChangedSync ->
+                                MudChip'' {
+                                    Color Color.Info
+                                    "Changed"
+                                }
+                            | true, None ->
+                                MudText'' {
+                                    Typo Typo.caption
+                                    "-"
+                                }
+                        }
+
+                        MudTd'' {
                             MudIconButton'' {
                                 Icon Icons.Material.Filled.Delete
                                 Color Color.Error
@@ -169,6 +237,232 @@ let invoicesTable (invoicesModule: InvoicesModule) (confirmAndDelete: InvoiceUiT
                     })
             }
         }
+    }
+
+/// The plan preview (task 8.4): every outstanding action, naming the invoice, shown before anything
+/// runs (Q2.13).
+let private syncPlanPreview (plan: SyncPlanRowUiType list) =
+    MudTable'' {
+        Items plan
+        Dense true
+
+        HeaderContent(
+            fragment {
+                MudTh'' { "Supplier" }
+                MudTh'' { "Reference" }
+                MudTh'' { "Due" }
+                MudTh'' { "Action" }
+            }
+        )
+
+        RowTemplate(fun (row: SyncPlanRowUiType) ->
+            fragment {
+                MudTd'' { row.SupplierName }
+                MudTd'' { row.Reference }
+                MudTd'' { formatDate row.DueDate }
+
+                MudTd'' {
+                    match row.Action with
+                    | CreateSyncAction ->
+                        MudChip'' {
+                            Color Color.Success
+                            "Create"
+                        }
+                    | UpdateSyncAction ->
+                        MudChip'' {
+                            Color Color.Info
+                            "Update"
+                        }
+                    | DeleteSyncAction ->
+                        MudChip'' {
+                            Color Color.Error
+                            "Delete"
+                        }
+                }
+            })
+    }
+
+/// The orphaned-events view (task 8.6): events the plan does not fully explain. A keyless or
+/// unparseable-key event NEEDS ATTENTION - it is never a deletion candidate, because the app
+/// deletes only what it can prove it created. A pending-delete orphan (its invoice already left the
+/// ledger) is shown too, distinctly, even though the same row already appears in the plan above.
+let private orphanedEventsView (invoicesModule: InvoicesModule) =
+    adapt {
+        let! syncView = invoicesModule.SyncViewAval
+
+        if not (List.isEmpty syncView.OrphanedEvents) then
+            fragment {
+                MudText'' {
+                    Typo Typo.subtitle2
+                    "Calendar events the plan does not fully explain"
+                }
+
+                MudTable'' {
+                    Items syncView.OrphanedEvents
+                    Dense true
+
+                    HeaderContent(
+                        fragment {
+                            MudTh'' { "Title" }
+                            MudTh'' { "Date" }
+                            MudTh'' { "Status" }
+                        }
+                    )
+
+                    RowTemplate(fun (orphan: OrphanedEventUiType) ->
+                        fragment {
+                            MudTd'' { orphan.Title }
+                            MudTd'' { orphan.Date.ToString("d MMM yyyy") }
+
+                            MudTd'' {
+                                if orphan.NeedsAttention then
+                                    MudChip'' {
+                                        Color Color.Warning
+                                        "Needs attention - no recognisable sync key"
+                                    }
+                                else
+                                    MudChip'' {
+                                        Color Color.Default
+                                        "Its invoice has left the ledger - pending delete, above"
+                                    }
+                            }
+                        })
+                }
+            }
+    }
+
+/// Per-row results of the most recent sync run (task 8.7, Q2.8's partial-failure reporting).
+let private lastSyncOutcomesView (invoicesModule: InvoicesModule) =
+    adapt {
+        let! outcomes = invoicesModule.LastSyncOutcomesAval
+
+        if not (List.isEmpty outcomes) then
+            fragment {
+                MudText'' {
+                    Typo Typo.subtitle2
+                    "Result of the last sync"
+                }
+
+                MudTable'' {
+                    Items outcomes
+                    Dense true
+
+                    HeaderContent(
+                        fragment {
+                            MudTh'' { "Reference" }
+                            MudTh'' { "Action" }
+                            MudTh'' { "Result" }
+                        }
+                    )
+
+                    RowTemplate(fun (outcome: SyncOutcomeRowUiType) ->
+                        fragment {
+                            MudTd'' { outcome.Reference }
+                            MudTd'' { formatSyncAction outcome.Action }
+
+                            MudTd'' {
+                                match outcome.Result with
+                                | SyncSucceeded ->
+                                    MudChip'' {
+                                        Color Color.Success
+                                        "Succeeded"
+                                    }
+                                // EventNoLongerExists: the calendar already agreed with the target
+                                // state, so this is a success, not a failure.
+                                | SyncAlreadyGone ->
+                                    MudChip'' {
+                                        Color Color.Success
+                                        "Already up to date"
+                                    }
+                                | SyncFailed message ->
+                                    MudChip'' {
+                                        Color Color.Error
+                                        $"Failed: {message}"
+                                    }
+                            }
+                        })
+                }
+            }
+    }
+
+/// The calendar sync controls and plan, shown alongside the invoices table: the app-owned notice
+/// (task 8.9, Q2.14), the bulk button naming the count it will act on and disabled with its reason
+/// when nothing can run (task 8.8), the plan itself before anything runs (task 8.4), the orphaned
+/// events (task 8.6) and the last run's per-row outcomes (task 8.7).
+///
+/// onSyncRequested is a page-supplied callback (task 8.5's delete confirmation needs
+/// IDialogService, which this component does not have - components never call the API or open
+/// dialogs directly, the page passes callbacks in).
+let calendarSyncSection (invoicesModule: InvoicesModule) (onSyncRequested: unit -> unit) =
+    fragment {
+        MudText'' {
+            Typo Typo.h6
+            "Calendar sync"
+        }
+
+        MudAlert'' {
+            Severity Severity.Info
+            Variant Variant.Text
+            Dense true
+            "Calendar events this app creates are app-owned: syncing overwrites a hand-edited title or date on one of them."
+        }
+
+        adapt {
+            let! syncView = invoicesModule.SyncViewAval
+            let! pendingActionCount = invoicesModule.PendingActionCountAval
+            let! isSyncing = invoicesModule.IsSyncingAval
+
+            // Q2.11: no account ready at all disables the button with its reason. With an account
+            // ready but nothing outstanding, task 8.10 says so plainly instead of leaving an
+            // enabled button that would do nothing.
+            let disabledReason =
+                match syncView.NotReadyReason with
+                | Some reason -> Some reason
+                | None when pendingActionCount = 0 -> Some "Up to date - nothing to sync."
+                | None -> None
+
+            div {
+                style' "display:flex; gap:1rem; align-items:center"
+
+                MudTooltip'' {
+                    Text(disabledReason |> Option.defaultValue "")
+
+                    MudButton'' {
+                        Variant Variant.Filled
+                        Color Color.Primary
+                        StartIcon Icons.Material.Filled.Sync
+                        Disabled(disabledReason.IsSome || isSyncing)
+                        OnClick(fun _ -> onSyncRequested ())
+                        $"Sync now ({pendingActionCount})"
+                    }
+                }
+
+                match disabledReason with
+                | Some reason ->
+                    MudText'' {
+                        Typo Typo.body2
+                        Color Color.Warning
+                        reason
+                    }
+                | None -> ()
+            }
+
+            match syncView.NotReadyReason with
+            | Some _ -> ()
+            | None ->
+                if not (List.isEmpty syncView.Plan) then
+                    fragment {
+                        MudText'' {
+                            Typo Typo.subtitle2
+                            "Outstanding actions"
+                        }
+
+                        syncPlanPreview syncView.Plan
+                    }
+        }
+
+        orphanedEventsView invoicesModule
+        lastSyncOutcomesView invoicesModule
     }
 
 /// The problems view: sender, subject, date and cause per row.

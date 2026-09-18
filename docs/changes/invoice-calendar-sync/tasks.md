@@ -164,28 +164,28 @@ type; every test binds a lambda or a stubbed HTTP handler.
 
 ## Phase 8 — UI (required)
 
-- [ ] **8.1** `MyDogsbody.UI.Types`: `InvoiceSyncApi`, `SyncPlanRowUiType`, `SyncOutcomeUiType`,
+- [x] **8.1** `MyDogsbody.UI.Types`: `InvoiceSyncApi`, `SyncPlanRowUiType`, `SyncOutcomeUiType`,
       a sync-status field on `InvoiceUiType`, and on `InvoicesModule`:
       `SelectedInvoiceIdsAval`, `ToggleInvoice`, `ClearSelection`, `PendingActionCountAval`.
-- [ ] **8.2** *(test-first)* Module-creator additions.
+- [x] **8.2** *(test-first)* Module-creator additions.
       Tests: ticking rows limits the plan to them; **no ticks means everything outstanding in view**;
       **a rescan clears the selection** — a tick against a row that no longer exists is worse than no
       tick at all; selection is view state and is **not persisted**.
-- [ ] **8.3** The sync-status column: **three per-row states** — up to date, missing, changed
+- [x] **8.3** The sync-status column: **three per-row states** — up to date, missing, changed
       (design decision 5). An invoice with no due date shows *not uploadable* with its reason and
       **no** sync status.
-- [ ] **8.4** The plan preview. Every action shown, **naming the invoice**, before anything runs
+- [x] **8.4** The plan preview. Every action shown, **naming the invoice**, before anything runs
       (Q2.13).
-- [ ] **8.5** **Confirmation required for any plan containing a delete**, listing what will be
+- [x] **8.5** **Confirmation required for any plan containing a delete**, listing what will be
       deleted. *This is the guard that makes delete permission trustworthy.*
-- [ ] **8.6** The orphaned-events view — events whose invoice has left the ledger, and events with no
+- [x] **8.6** The orphaned-events view — events whose invoice has left the ledger, and events with no
       or unparseable sync keys, the latter marked as needing attention rather than deletion.
-- [ ] **8.7** Per-row outcomes after a partial failure (Q2.8).
-- [ ] **8.8** The bulk sync button, stating the count it will act on; **disabled with its reason**
+- [x] **8.7** Per-row outcomes after a partial failure (Q2.8).
+- [x] **8.8** The bulk sync button, stating the count it will act on; **disabled with its reason**
       when the account is not ready (Q2.11) or no account is registered.
-- [ ] **8.9** **A sentence on the page saying that an invoice event is app-owned and that a sync will
+- [x] **8.9** **A sentence on the page saying that an invoice event is app-owned and that a sync will
       overwrite a hand-edited title or date** (Q2.14). The behaviour is defensible; hiding it is not.
-- [ ] **8.10** An empty plan says so plainly rather than showing an enabled button that does nothing.
+- [x] **8.10** An empty plan says so plainly rather than showing an enabled button that does nothing.
 
 ## Phase 9 — Contract suites (required)
 
