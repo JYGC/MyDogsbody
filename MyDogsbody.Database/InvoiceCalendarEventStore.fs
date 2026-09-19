@@ -136,9 +136,15 @@ let loadAllLedgerKeys
     }
 
 /// Diagnostic reads only - "when did we last touch this event, and on whose calendar?" (design.md).
-/// No domain workflow declares a dependency type for this; it is read directly by the composition
-/// root for the orphaned-events view, the same way GoogleAccountApiFactory.getCalendarsForWith
-/// reads ListCalendars directly with no workflow of its own.
+/// No domain workflow declares a dependency type for this, and unlike
+/// GoogleAccountApiFactory.getCalendarsForWith's direct read of ListCalendars, nothing in the
+/// composition root calls this one either: InvoiceSyncApiFactory builds the orphaned-events view
+/// from a live calendar read and the diff plan (InvoiceSyncApiMappers.toOrphanedEvents) instead,
+/// precisely because the calendar - not this stored history - is the source of truth (design.md).
+/// Exercised today only by this file's own Integration and Contract tests; a future diagnostics
+/// view over "when did we last touch this event" is this function's natural consumer, should one
+/// be added (PR #23 review round 7 - the doc comment here previously claimed this was already the
+/// case).
 let loadSyncRecords
     (handleError: HandleErrorBuilder)
     (getConnection: unit -> SqliteConnection)
