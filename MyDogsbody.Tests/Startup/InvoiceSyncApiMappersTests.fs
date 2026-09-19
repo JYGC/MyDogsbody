@@ -110,3 +110,214 @@ let ``toOrphanedEvents reports a second event sharing a key as a duplicate, not 
         Assert.Equal(duplicateEvent.Event.Date, row.Date)
         Assert.Equal(DuplicateOfAnotherEventsSyncKey, row.Reason)
     | other -> Assert.Fail($"Expected exactly one orphaned (duplicate) event, got {List.length other}")
+
+// ---------- toSyncPlanRowUiType ----------
+//
+// PR #23 review round 4: the other three InvoiceSyncApiMappers.fs functions had no dedicated unit
+// test of their own (rounds 2 and 3 both re-read them for a hidden defect and found none, but
+// left the coverage gap open rather than closing it). Every case is exercised here with every
+// output field asserted, per CLAUDE.md's unit-test bar - not merely that a row came back.
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncPlanRowUiType maps a CreateEvent action to a full plan row naming the invoice`` () =
+    let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
+
+    let actual = InvoiceSyncApiMappers.toSyncPlanRowUiType names (CreateEvent invoice)
+
+    match actual with
+    | Some row ->
+        Assert.Equal(Some(InvoiceId.value invoice.Id), row.InvoiceId)
+        Assert.Equal("Acme Corp", row.SupplierName)
+        Assert.Equal("INV-1", row.Reference)
+        Assert.Equal(InvoiceSyncKey.value (keyFor invoice), row.SyncKey)
+        Assert.Equal(Some(InvoiceDueDate.value invoice.DueDate), row.DueDate)
+        Assert.Equal(CreateSyncAction, row.Action)
+    | None -> Assert.Fail "Expected Some row for CreateEvent"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncPlanRowUiType maps an UpdateEvent action to a full plan row, ignoring the event id it carries`` () =
+    let invoice = uploadable "sup-1" "INV-2" (DateTime(2026, 4, 2))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
+
+    let actual = InvoiceSyncApiMappers.toSyncPlanRowUiType names (UpdateEvent(eventId "evt-1", invoice))
+
+    match actual with
+    | Some row ->
+        Assert.Equal(Some(InvoiceId.value invoice.Id), row.InvoiceId)
+        Assert.Equal("Acme Corp", row.SupplierName)
+        Assert.Equal("INV-2", row.Reference)
+        Assert.Equal(InvoiceSyncKey.value (keyFor invoice), row.SyncKey)
+        Assert.Equal(Some(InvoiceDueDate.value invoice.DueDate), row.DueDate)
+        Assert.Equal(UpdateSyncAction, row.Action)
+    | None -> Assert.Fail "Expected Some row for UpdateEvent"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncPlanRowUiType maps a DeleteEvent action to a row with no invoice id or due date, named from its sync key`` () =
+    // design decision 3: a delete's invoice has already left the ledger by the time diff produces
+    // it, so the sync key's own raw parts are the only way left to name which invoice it was.
+    let invoice = uploadable "sup-1" "INV-3" (DateTime(2026, 4, 3))
+    let key = keyFor invoice
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
+
+    let actual = InvoiceSyncApiMappers.toSyncPlanRowUiType names (DeleteEvent(eventId "evt-1", key))
+
+    match actual with
+    | Some row ->
+        Assert.Equal(None, row.InvoiceId)
+        Assert.Equal("Acme Corp", row.SupplierName)
+        Assert.Equal("INV-3", row.Reference)
+        Assert.Equal(InvoiceSyncKey.value key, row.SyncKey)
+        Assert.Equal(None, row.DueDate)
+        Assert.Equal(DeleteSyncAction, row.Action)
+    | None -> Assert.Fail "Expected Some row for DeleteEvent"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncPlanRowUiType falls back to a placeholder name for a supplier missing from the names map`` () =
+    let invoice = uploadable "sup-404" "INV-1" (DateTime(2026, 4, 1))
+
+    let actual = InvoiceSyncApiMappers.toSyncPlanRowUiType Map.empty (CreateEvent invoice)
+
+    match actual with
+    | Some row -> Assert.Equal("(unknown supplier sup-404)", row.SupplierName)
+    | None -> Assert.Fail "Expected Some row"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncPlanRowUiType reports no row at all for LeaveAlone`` () =
+    // An up-to-date row has nothing to preview - its status lives on InvoiceUiType.SyncStatus via
+    // toSyncStatusByInvoiceId instead.
+    let actual = InvoiceSyncApiMappers.toSyncPlanRowUiType Map.empty (LeaveAlone(eventId "evt-1"))
+
+    Assert.Equal(None, actual)
+
+// ---------- toSyncStatusByInvoiceId ----------
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncStatusByInvoiceId classifies every invoice in the window by its own plan action`` () =
+    let missingInvoice = uploadable "sup-1" "INV-MISSING" (DateTime(2026, 4, 1))
+    let changedInvoice = uploadable "sup-1" "INV-CHANGED" (DateTime(2026, 4, 2))
+    let upToDateInvoice = uploadable "sup-1" "INV-UPTODATE" (DateTime(2026, 4, 3))
+
+    // Exactly the shape diff() itself produces: one of CreateEvent/UpdateEvent/LeaveAlone per
+    // invoice in the window - the elimination toSyncStatusByInvoiceId's own doc comment describes.
+    let plan =
+        [ CreateEvent missingInvoice
+          UpdateEvent(eventId "evt-changed", changedInvoice)
+          LeaveAlone(eventId "evt-uptodate") ]
+
+    let actual =
+        InvoiceSyncApiMappers.toSyncStatusByInvoiceId [ missingInvoice; changedInvoice; upToDateInvoice ] plan
+
+    Assert.Equal<Map<string, InvoiceSyncStatusUiType>>(
+        Map.ofList
+            [ InvoiceId.value missingInvoice.Id, MissingSync
+              InvoiceId.value changedInvoice.Id, ChangedSync
+              InvoiceId.value upToDateInvoice.Id, UpToDateSync ],
+        actual
+    )
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncStatusByInvoiceId reports only invoices actually passed as in the window`` () =
+    // diff() itself only ever produces a CreateEvent/UpdateEvent for an invoice drawn from its own
+    // `snapshot.InWindow` argument, so this can't arise from a real plan - but the mapper's own
+    // contract is to report on the `inWindow` argument, not on whatever the plan happens to name,
+    // and this is what proves that rather than assuming it from diff's behaviour.
+    let inWindowInvoice = uploadable "sup-1" "INV-IN-WINDOW" (DateTime(2026, 4, 1))
+    let notInWindowInvoice = uploadable "sup-1" "INV-NOT-IN-WINDOW" (DateTime(2026, 4, 2))
+    let plan = [ CreateEvent notInWindowInvoice ]
+
+    let actual = InvoiceSyncApiMappers.toSyncStatusByInvoiceId [ inWindowInvoice ] plan
+
+    Assert.Equal<Map<string, InvoiceSyncStatusUiType>>(
+        Map.ofList [ InvoiceId.value inWindowInvoice.Id, UpToDateSync ],
+        actual
+    )
+
+// ---------- toSyncOutcomeRowUiType ----------
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType reports a successful create`` () =
+    let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
+    let action = CreateEvent invoice
+    let outcome = Created(invoice.Id, eventId "evt-1")
+
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+
+    match actual with
+    | Some row ->
+        Assert.Equal("INV-1", row.Reference)
+        Assert.Equal(CreateSyncAction, row.Action)
+        Assert.Equal(SyncSucceeded, row.Result)
+    | None -> Assert.Fail "Expected Some row for Created"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType reports a successful update`` () =
+    let invoice = uploadable "sup-1" "INV-2" (DateTime(2026, 4, 2))
+    let action = UpdateEvent(eventId "evt-1", invoice)
+    let outcome = Updated(invoice.Id, eventId "evt-1")
+
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+
+    match actual with
+    | Some row ->
+        Assert.Equal("INV-2", row.Reference)
+        Assert.Equal(UpdateSyncAction, row.Action)
+        Assert.Equal(SyncSucceeded, row.Result)
+    | None -> Assert.Fail "Expected Some row for Updated"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType reports a successful delete, naming the invoice from its sync key`` () =
+    let invoice = uploadable "sup-1" "INV-3" (DateTime(2026, 4, 3))
+    let key = keyFor invoice
+    let action = DeleteEvent(eventId "evt-1", key)
+    let outcome = Deleted(eventId "evt-1")
+
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+
+    match actual with
+    | Some row ->
+        Assert.Equal("INV-3", row.Reference)
+        Assert.Equal(DeleteSyncAction, row.Action)
+        Assert.Equal(SyncSucceeded, row.Result)
+    | None -> Assert.Fail "Expected Some row for Deleted"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType reports AlreadyGone as a success, not a failure`` () =
+    // EventNoLongerExists on an update or delete means the calendar already agrees with the
+    // target state - SyncInvoicesToCalendarWorkflow's own AlreadyGone case, never SyncFailed.
+    let invoice = uploadable "sup-1" "INV-4" (DateTime(2026, 4, 4))
+    let action = UpdateEvent(eventId "evt-1", invoice)
+    let outcome = AlreadyGone(eventId "evt-1")
+
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+
+    match actual with
+    | Some row ->
+        Assert.Equal("INV-4", row.Reference)
+        Assert.Equal(UpdateSyncAction, row.Action)
+        Assert.Equal(SyncAlreadyGone, row.Result)
+    | None -> Assert.Fail "Expected Some row for AlreadyGone"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType reports a failure carrying the calendar error's own message`` () =
+    let invoice = uploadable "sup-1" "INV-5" (DateTime(2026, 4, 5))
+    let action = CreateEvent invoice
+    let outcome = Failed(action, EventRejected "Invalid summary value.")
+
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+
+    match actual with
+    | Some row ->
+        Assert.Equal("INV-5", row.Reference)
+        Assert.Equal(CreateSyncAction, row.Action)
+        Assert.Equal(SyncFailed "Invalid summary value.", row.Result)
+    | None -> Assert.Fail "Expected Some row for Failed"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType reports nothing for a Skipped (LeaveAlone) outcome`` () =
+    // LeaveAlone is never sent to ExecuteSyncPlan in the first place, so it has no outcome row to
+    // report - None here is what lets the caller List.choose it away without a placeholder.
+    let actual =
+        InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (LeaveAlone(eventId "evt-1"), Skipped(eventId "evt-1"))
+
+    Assert.Equal(None, actual)
