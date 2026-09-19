@@ -259,17 +259,25 @@ let ``toSyncStatusByInvoiceId reports only invoices actually passed as in the wi
     )
 
 // ---------- toSyncOutcomeRowUiType ----------
+//
+// PR #23 review round 6: SyncOutcomeRowUiType carried Reference but not SupplierName, the same
+// ambiguity round 1 fixed for ExecuteSyncPlan's own selection matching - the ledger's unique
+// index is (supplier, reference), not reference alone, so two different suppliers' outcome rows
+// in the same run could show identical Reference text with no way to tell whose succeeded and
+// whose failed. Every case below now asserts SupplierName alongside the fields already covered.
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toSyncOutcomeRowUiType reports a successful create`` () =
     let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
     let action = CreateEvent invoice
     let outcome = Created(invoice.Id, eventId "evt-1")
 
-    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType names (action, outcome)
 
     match actual with
     | Some row ->
+        Assert.Equal("Acme Corp", row.SupplierName)
         Assert.Equal("INV-1", row.Reference)
         Assert.Equal(CreateSyncAction, row.Action)
         Assert.Equal(SyncSucceeded, row.Result)
@@ -278,29 +286,33 @@ let ``toSyncOutcomeRowUiType reports a successful create`` () =
 [<Fact; Trait("Level", "Unit")>]
 let ``toSyncOutcomeRowUiType reports a successful update`` () =
     let invoice = uploadable "sup-1" "INV-2" (DateTime(2026, 4, 2))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
     let action = UpdateEvent(eventId "evt-1", invoice)
     let outcome = Updated(invoice.Id, eventId "evt-1")
 
-    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType names (action, outcome)
 
     match actual with
     | Some row ->
+        Assert.Equal("Acme Corp", row.SupplierName)
         Assert.Equal("INV-2", row.Reference)
         Assert.Equal(UpdateSyncAction, row.Action)
         Assert.Equal(SyncSucceeded, row.Result)
     | None -> Assert.Fail "Expected Some row for Updated"
 
 [<Fact; Trait("Level", "Unit")>]
-let ``toSyncOutcomeRowUiType reports a successful delete, naming the invoice from its sync key`` () =
+let ``toSyncOutcomeRowUiType reports a successful delete, naming the invoice and supplier from its sync key`` () =
     let invoice = uploadable "sup-1" "INV-3" (DateTime(2026, 4, 3))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
     let key = keyFor invoice
     let action = DeleteEvent(eventId "evt-1", key)
     let outcome = Deleted(eventId "evt-1")
 
-    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType names (action, outcome)
 
     match actual with
     | Some row ->
+        Assert.Equal("Acme Corp", row.SupplierName)
         Assert.Equal("INV-3", row.Reference)
         Assert.Equal(DeleteSyncAction, row.Action)
         Assert.Equal(SyncSucceeded, row.Result)
@@ -311,13 +323,15 @@ let ``toSyncOutcomeRowUiType reports AlreadyGone as a success, not a failure`` (
     // EventNoLongerExists on an update or delete means the calendar already agrees with the
     // target state - SyncInvoicesToCalendarWorkflow's own AlreadyGone case, never SyncFailed.
     let invoice = uploadable "sup-1" "INV-4" (DateTime(2026, 4, 4))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
     let action = UpdateEvent(eventId "evt-1", invoice)
     let outcome = AlreadyGone(eventId "evt-1")
 
-    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType names (action, outcome)
 
     match actual with
     | Some row ->
+        Assert.Equal("Acme Corp", row.SupplierName)
         Assert.Equal("INV-4", row.Reference)
         Assert.Equal(UpdateSyncAction, row.Action)
         Assert.Equal(SyncAlreadyGone, row.Result)
@@ -326,17 +340,31 @@ let ``toSyncOutcomeRowUiType reports AlreadyGone as a success, not a failure`` (
 [<Fact; Trait("Level", "Unit")>]
 let ``toSyncOutcomeRowUiType reports a failure carrying the calendar error's own message`` () =
     let invoice = uploadable "sup-1" "INV-5" (DateTime(2026, 4, 5))
+    let names = Map.ofList [ "sup-1", "Acme Corp" ]
     let action = CreateEvent invoice
     let outcome = Failed(action, EventRejected "Invalid summary value.")
 
-    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType names (action, outcome)
 
     match actual with
     | Some row ->
+        Assert.Equal("Acme Corp", row.SupplierName)
         Assert.Equal("INV-5", row.Reference)
         Assert.Equal(CreateSyncAction, row.Action)
         Assert.Equal(SyncFailed "Invalid summary value.", row.Result)
     | None -> Assert.Fail "Expected Some row for Failed"
+
+[<Fact; Trait("Level", "Unit")>]
+let ``toSyncOutcomeRowUiType falls back to a placeholder supplier name when the names map misses`` () =
+    let invoice = uploadable "sup-404" "INV-1" (DateTime(2026, 4, 1))
+    let action = CreateEvent invoice
+    let outcome = Created(invoice.Id, eventId "evt-1")
+
+    let actual = InvoiceSyncApiMappers.toSyncOutcomeRowUiType Map.empty (action, outcome)
+
+    match actual with
+    | Some row -> Assert.Equal("(unknown supplier sup-404)", row.SupplierName)
+    | None -> Assert.Fail "Expected Some row"
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toSyncOutcomeRowUiType reports nothing for a Skipped (LeaveAlone) outcome`` () =

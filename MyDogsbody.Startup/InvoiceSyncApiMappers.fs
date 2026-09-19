@@ -171,9 +171,21 @@ let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : Orph
         | Some _ -> None)
 
 /// One executed SyncAction and its SyncOutcome -> a UI outcome row, naming the invoice the same
-/// way toSyncPlanRowUiType does. `None` for `Skipped`: a LeaveAlone is never sent to
-/// ExecuteSyncPlan in the first place, so it never has an outcome to report.
+/// way toSyncPlanRowUiType does - SupplierName alongside Reference, for the same reason
+/// toSyncPlanRowUiType carries both (PR #23 review round 1): the ledger's unique index is
+/// (supplier, reference), not reference alone, so two different suppliers' rows can show
+/// identical reference text, and a Reference-only outcome row could not tell whose succeeded and
+/// whose failed when both had an action in the same run (PR #23 review round 6). `None` for
+/// `Skipped`: a LeaveAlone is never sent to ExecuteSyncPlan in the first place, so it never has an
+/// outcome to report.
 let toSyncOutcomeRowUiType (namesById: Map<string, string>) (action: SyncAction, outcome: SyncOutcome) : SyncOutcomeRowUiType option =
+    let outcomeSupplierName =
+        match action with
+        | CreateEvent invoice
+        | UpdateEvent(_, invoice) -> supplierName namesById invoice.SupplierId
+        | DeleteEvent(_, key) -> nameAndReferenceFromKey namesById key |> fst
+        | LeaveAlone _ -> "(unknown supplier)"
+
     let reference =
         match action with
         | CreateEvent invoice
@@ -197,7 +209,14 @@ let toSyncOutcomeRowUiType (namesById: Map<string, string>) (action: SyncAction,
     match outcome with
     | Created _
     | Updated _
-    | Deleted _ -> Some { Reference = reference; Action = actionKind; Result = SyncSucceeded }
-    | AlreadyGone _ -> Some { Reference = reference; Action = actionKind; Result = SyncAlreadyGone }
-    | Failed(_, error) -> Some { Reference = reference; Action = actionKind; Result = SyncFailed(calendarErrorMessage error) }
+    | Deleted _ ->
+        Some { SupplierName = outcomeSupplierName; Reference = reference; Action = actionKind; Result = SyncSucceeded }
+    | AlreadyGone _ ->
+        Some { SupplierName = outcomeSupplierName; Reference = reference; Action = actionKind; Result = SyncAlreadyGone }
+    | Failed(_, error) ->
+        Some
+            { SupplierName = outcomeSupplierName
+              Reference = reference
+              Action = actionKind
+              Result = SyncFailed(calendarErrorMessage error) }
     | Skipped _ -> None

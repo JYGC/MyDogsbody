@@ -517,7 +517,8 @@ let ``ExecuteSync records the outcomes, clears the selection on success, and rel
                       Plan = [ aSyncPlanRow (Some "INV-1") "INV-1" CreateSyncAction ]
                       OrphanedEvents = []
                       NotReadyReason = None },
-            ExecuteSyncPlanResult = Ok [ { Reference = "INV-1"; Action = CreateSyncAction; Result = SyncSucceeded } ]
+            ExecuteSyncPlanResult =
+                Ok [ { SupplierName = "Acme Corp"; Reference = "INV-1"; Action = CreateSyncAction; Result = SyncSucceeded } ]
         )
 
     let invoicesModule =

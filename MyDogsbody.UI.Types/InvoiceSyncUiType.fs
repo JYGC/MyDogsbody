@@ -45,8 +45,14 @@ type SyncOutcomeResultUiType =
     | SyncAlreadyGone
     | SyncFailed of message: string
 
+/// SupplierName alongside Reference, mirroring SyncPlanRowUiType, and for the same reason
+/// (PR #23 review round 1's own finding, applied here in round 6): the ledger's unique index is
+/// (supplier, reference), not reference alone, so two different suppliers can share the same
+/// reference text. Without SupplierName, two outcome rows in the same run could show identical
+/// Reference text with no way to tell whose succeeded and whose failed.
 type SyncOutcomeRowUiType =
     {
+        SupplierName: string
         Reference: string
         Action: SyncPlanActionUiType
         Result: SyncOutcomeResultUiType

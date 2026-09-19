@@ -358,6 +358,7 @@ let private lastSyncOutcomesView (invoicesModule: InvoicesModule) =
 
                     HeaderContent(
                         fragment {
+                            MudTh'' { "Supplier" }
                             MudTh'' { "Reference" }
                             MudTh'' { "Action" }
                             MudTh'' { "Result" }
@@ -366,6 +367,7 @@ let private lastSyncOutcomesView (invoicesModule: InvoicesModule) =
 
                     RowTemplate(fun (outcome: SyncOutcomeRowUiType) ->
                         fragment {
+                            MudTd'' { outcome.SupplierName }
                             MudTd'' { outcome.Reference }
                             MudTd'' { formatSyncAction outcome.Action }
 
