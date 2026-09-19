@@ -22,7 +22,7 @@ let private clock () = DateTime(2026, 6, 15, 12, 0, 0)
 let private withApi (test: InvoiceApi -> unit) =
     let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={mainPath}"
+    MigrationSetup.setupMigrations $"Data Source={mainPath};Pooling=False"
     let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
     let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
     let api = InvoiceApiFactory.createInvoiceApi handleError clock mainContext tbContext
@@ -47,7 +47,7 @@ let ``Scan with no mail account selected is refused with a readable alert, nothi
 
     let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={mainPath}"
+    MigrationSetup.setupMigrations $"Data Source={mainPath};Pooling=False"
     let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
     let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
 
@@ -73,7 +73,7 @@ let ``RescanEverything with no mail account selected is the same readable alert 
 
     let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={mainPath}"
+    MigrationSetup.setupMigrations $"Data Source={mainPath};Pooling=False"
     let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
     let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
 
@@ -104,7 +104,7 @@ let ``RescanEverything with no mail account selected is the same readable alert 
 let ``RescanEverything deletes the selected account's watermark rows, and Scan leaves them`` () =
     let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let tbPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={mainPath}"
+    MigrationSetup.setupMigrations $"Data Source={mainPath};Pooling=False"
     let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
     let tbContext = ThunderbirdDatabaseContextModule.getDatabaseContext tbPath "direct"
 

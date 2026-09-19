@@ -15,7 +15,7 @@ let private handleError = HandleErrorBuilder(fun _ -> ())
 
 let private withApi (test: ScanWindowApi -> unit) =
     let path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={path}"
+    MigrationSetup.setupMigrations $"Data Source={path};Pooling=False"
     let context = DatabaseContextSetup.createDatabaseContext path
     let api = ScanWindowApiFactory.createScanWindowApi handleError context
 

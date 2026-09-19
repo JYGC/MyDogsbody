@@ -47,9 +47,9 @@ let private toInvoiceError (capturedException: MyDogsbody.Exceptions.Types.MyDog
 
 let private withReal (test: Dependencies -> unit) =
     let path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={path}"
+    MigrationSetup.setupMigrations $"Data Source={path};Pooling=False"
 
-    use seedConnection = new SqliteConnection($"Data Source={path}")
+    use seedConnection = new SqliteConnection($"Data Source={path};Pooling=False")
     seedConnection.Open()
     use seedCommand = seedConnection.CreateCommand()
     seedCommand.CommandText <-

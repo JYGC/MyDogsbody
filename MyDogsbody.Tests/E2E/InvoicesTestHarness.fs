@@ -42,7 +42,7 @@ type InvoicesHarness
 let withInvoicesHarness (test: InvoicesHarness -> unit) =
     let mainPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let thunderbirdDatabasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={mainPath}"
+    let connectionString = $"Data Source={mainPath};Pooling=False"
     MigrationSetup.setupMigrations connectionString
     let mainContext = DatabaseContextSetup.createDatabaseContext mainPath
     let thunderbirdDatabaseContext = ThunderbirdDatabaseContextModule.getDatabaseContext thunderbirdDatabasePath "direct"
