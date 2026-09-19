@@ -111,6 +111,31 @@ let ``toOrphanedEvents reports a second event sharing a key as a duplicate, not 
         Assert.Equal(DuplicateOfAnotherEventsSyncKey, row.Reason)
     | other -> Assert.Fail($"Expected exactly one orphaned (duplicate) event, got {List.length other}")
 
+[<Fact; Trait("Level", "Unit")>]
+let ``toOrphanedEvents does not report an event as a duplicate when its invoice is merely outside the current window`` () =
+    // PR #23 review round 5. Q2.9: "narrowing hides; it does not forget" - an invoice's window
+    // membership is decided by when its MESSAGE arrived (MyDogsbody.Database/InvoiceStore.fs's
+    // cutoff filters on MessageReceivedAt), not by its due date, so an invoice can sit outside
+    // `InWindow` today while its due date still falls inside the calendar's queried date range
+    // (e.g. a 45-day-old invoice due next week, viewed under a 14-day window). `diff` correctly
+    // produces NO action at all for such a key: not Create/Update/LeaveAlone (the invoice is not
+    // in `InWindow`) and not Delete either (the key is still in `AllLedgerKeys`, since the invoice
+    // has not left the ledger - merely fallen out of view). Before this round's fix,
+    // toOrphanedEvents had no way to tell "nobody's SyncAction named this event because it is out
+    // of view" apart from "a second event is sharing an already-matched key", and reported every
+    // such event as DuplicateOfAnotherEventsSyncKey - a false "needs attention" alarm on a
+    // perfectly healthy, singly-synced event, purely from narrowing the scan window.
+    let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
+    let key = keyFor invoice
+    let event = keyedEvent "evt-1" (Some key)
+    // Exactly what `diff` produces for a key that is in the ledger but outside the window: no
+    // SyncAction names this event at all - not even one for a different invoice.
+    let plan: SyncAction list = []
+
+    let actual = InvoiceSyncApiMappers.toOrphanedEvents [ event ] plan
+
+    Assert.Empty actual
+
 // ---------- toSyncPlanRowUiType ----------
 //
 // PR #23 review round 4: the other three InvoiceSyncApiMappers.fs functions had no dedicated unit

@@ -115,6 +115,19 @@ let toSyncStatusByInvoiceId (inWindow: UploadableInvoice list) (plan: SyncAction
 /// SyncAction and so never appears in `matchedEventIds` below. Left out of this function, such an
 /// event was invisible everywhere in the view: not in the plan, not among orphans, PR #23 review
 /// round 2.
+///
+/// A THIRD reason an event can be unmatched, distinct from a duplicate: its invoice is still in
+/// the ledger but merely outside the current scan window (Q2.9's "narrowing hides; it does not
+/// forget") - `InWindow` membership is decided by when the invoice's MESSAGE arrived, not by its
+/// due date (`MyDogsbody.Database/InvoiceStore.fs`'s cutoff filters on `MessageReceivedAt`), so an
+/// invoice can sit outside `InWindow` while its due date still falls inside the calendar's queried
+/// date range. `diff` then produces no action at all for that key: not a create/update/leave-alone
+/// (not `InWindow`) and not a delete either (the key is still in `AllLedgerKeys`). `explainedKeys`
+/// below is what tells the two apart: a genuine duplicate's key IS explained elsewhere, via the
+/// OTHER (matched) event sharing it, whereas an out-of-window event's key is not explained by
+/// anything in the plan at all. Before this round's fix (PR #23 review round 5), every
+/// out-of-window event was misreported as a duplicate, purely because narrowing the window moved
+/// its invoice out of `plan`.
 let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : OrphanedEventUiType list =
     let deletedEventIds =
         plan
@@ -135,15 +148,25 @@ let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : Orph
             | CreateEvent _ -> None)
         |> Set.ofList
 
+    /// Every sync key the plan explains via SOME matched event - not necessarily the one being
+    /// classified. An unmatched event whose own key appears here is a genuine second event for an
+    /// already-claimed key; an unmatched event whose key does NOT appear here belongs to an
+    /// invoice the plan never looked at at all (out of window), not a duplicate.
+    let explainedKeys =
+        events
+        |> List.choose (fun event -> if Set.contains event.Id matchedEventIds then event.SyncKey else None)
+        |> Set.ofList
+
     events
     |> List.choose (fun event ->
         match event.SyncKey with
         | None -> Some { Title = event.Event.Title; Date = event.Event.Date; Reason = NoRecognisableSyncKey }
         | Some _ when Set.contains event.Id deletedEventIds ->
             Some { Title = event.Event.Title; Date = event.Event.Date; Reason = InvoiceAlreadyLeftTheLedger }
-        | Some _ when not (Set.contains event.Id matchedEventIds) ->
-            // Keyed, but not the one `diff` matched to its invoice - a duplicate, per
-            // requirements.md's own wording for this edge case (PR #23 review round 3).
+        | Some key when not (Set.contains event.Id matchedEventIds) && Set.contains key explainedKeys ->
+            // Keyed, not the one `diff` matched to its invoice, and that key IS accounted for
+            // elsewhere in the plan - a duplicate, per requirements.md's own wording for this edge
+            // case (PR #23 review round 3).
             Some { Title = event.Event.Title; Date = event.Event.Date; Reason = DuplicateOfAnotherEventsSyncKey }
         | Some _ -> None)
 
