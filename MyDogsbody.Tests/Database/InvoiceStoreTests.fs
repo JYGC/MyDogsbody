@@ -24,7 +24,7 @@ let private orFail =
 /// the Invoices foreign keys are satisfied.
 let private withLedger (test: DatabaseContext -> unit) =
     let path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    let connectionString = $"Data Source={path}"
+    let connectionString = $"Data Source={path};Pooling=False"
     MigrationSetup.setupMigrations connectionString
 
     use seed = new SqliteConnection(connectionString)

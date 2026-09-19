@@ -34,7 +34,6 @@ One solution, `MyDogsbody.sln`. Every project targets `net9.0` except the WPF ho
 | Cross-cutting | `MyDogsbody.Exceptions` / `.Exceptions.Types` | `ExceptionHelpers`, `MyDogsbodyException`, `ActionNames` |
 | Cross-cutting | `MyDogsbody.Logging` (+ `.Database.Models`, C#) | **The log store — its own LiteDB database, one collection per log type.** Context, repository, use cases, `ExceptionLog` entity. Only errors (`Exceptions`) are implemented today. Not an integration — see *Architecture* |
 | Tests | `MyDogsbody.Tests` | xunit v2, the only test project |
-| Scratch | `GNUCashAccess`, `TestMsGraphToEmails`, `PdfProcessing` | Standalone experiments. `GoogleCalendarCRUD` was removed by `google-account-integration` — what it proved now lives in `MyDogsbody.Integrations.Google` |
 
 Reference direction, enforced by project references. **Dependencies point inward** — that is the whole rule, and the reference graph is what enforces it:
 
@@ -44,7 +43,7 @@ Reference direction, enforced by project references. **Dependencies point inward
 - **`MyDogsbody.UI.Portal` references *only* `UI.Types` and (transitively) `Exceptions.Types` — nothing else.** `MyDogsbody.Enums` is out of the reference graph entirely; `Domain` and the integrations stay unreachable from the screen. Do not add a `Domain` reference to the UI to save a mapper; see *Architecture → The two mapping points*.
 - **`Startup` references everything it wires** — `Domain`, the integrations, `Builders`, `Logging`, `UI.Types`, and now `Database` + `Database.Migrations` — and nothing references `Startup` except the C# host and a throwaway smoke harness.
 - The C# projects sit at the bottom (entities) and reference nothing upward.
-- **`MyDogsbody.Database` references `MyDogsbody.Domain` and `MyDogsbody.Builders`**, and is itself referenced by `MyDogsbody.Startup` and `MyDogsbody.Tests` — the `invoice-ledger-foundation` change wired it in. It sits in the outer ring like an integration (same `handleError` / `Result<_, MyDogsbodyException>` shape, same bottom-mapper convention) without being one: it is the application's *main* store, not a per-integration one, so its `ActionNames` entries live under a `Database` module rather than `Integrations.*`. The sole other reference to `.Database.Migrations` remains the scratch project `TestMsGraphToEmails`, which never calls it.
+- **`MyDogsbody.Database` references `MyDogsbody.Domain` and `MyDogsbody.Builders`**, and is itself referenced by `MyDogsbody.Startup` and `MyDogsbody.Tests` — the `invoice-ledger-foundation` change wired it in. It sits in the outer ring like an integration (same `handleError` / `Result<_, MyDogsbodyException>` shape, same bottom-mapper convention) without being one: it is the application's *main* store, not a per-integration one, so its `ActionNames` entries live under a `Database` module rather than `Integrations.*`.
 
 Watch the name collision: `MyDogsbody.Database.Models` is **F# records for the main SQLite database**, while `MyDogsbody.Integrations.*.Database.Models` are **C# classes for that integration's LiteDB store**. Same suffix, different tier, different language. `MyDogsbody.Logging.Database.Models` is a third thing again — the log store's entities, C# for the same LiteDB reason, but belonging to no integration.
 

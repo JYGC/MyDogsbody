@@ -19,7 +19,7 @@ let private orFail =
 
 let private withStore (test: DatabaseContext -> unit) =
     let path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
-    MigrationSetup.setupMigrations $"Data Source={path}"
+    MigrationSetup.setupMigrations $"Data Source={path};Pooling=False"
     let context = DatabaseContextSetup.createDatabaseContext path
 
     try
