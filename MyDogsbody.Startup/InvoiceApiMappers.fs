@@ -61,7 +61,8 @@ let toInvoiceUiType (namesById: Map<string, string>) (stored: StoredInvoice) : I
       DueDate = stored.Invoice.DueDate |> Option.map InvoiceDueDate.value
       MessageReceivedAt = stored.Invoice.MessageReceivedAt
       CanBecomeCalendarEvent = hasDueDate
-      CannotUploadReason = (if hasDueDate then None else Some NoDueDateReason) }
+      CannotUploadReason = (if hasDueDate then None else Some NoDueDateReason)
+      SyncStatus = None }
 
 let toTombstoneUiType (namesById: Map<string, string>) (tombstone: InvoiceTombstone) : TombstoneUiType =
     { SupplierId = SupplierId.value tombstone.SupplierId

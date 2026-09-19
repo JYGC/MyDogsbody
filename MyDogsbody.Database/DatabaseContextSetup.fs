@@ -16,6 +16,7 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let invoiceTombstonesTableName = "InvoiceTombstones"
     let scanWindowsTableName = "ScanWindows"
     let invoiceSettingsTableName = "InvoiceSettings"
+    let invoiceCalendarEventsTableName = "InvoiceCalendarEvents"
 
     OptionTypes.register()
 
@@ -51,6 +52,7 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
     let invoiceTombstonesTable = table'<InvoiceTombstoneRecord> invoiceTombstonesTableName
     let scanWindowsTable = table'<ScanWindowRecord> scanWindowsTableName
     let invoiceSettingsTable = table'<InvoiceSettingsRecord> invoiceSettingsTableName
+    let invoiceCalendarEventsTable = table'<InvoiceCalendarEventRecord> invoiceCalendarEventsTableName
 
     {
         GetDatabaseConnection = fun () -> databaseConnection
@@ -65,5 +67,6 @@ let createDatabaseContext (databaseFilePath): DatabaseContext =
         GetInvoiceTombstones = fun () -> invoiceTombstonesTable
         GetScanWindows = fun () -> scanWindowsTable
         GetInvoiceSettings = fun () -> invoiceSettingsTable
+        GetInvoiceCalendarEvents = fun () -> invoiceCalendarEventsTable
         Dispose = fun () -> databaseConnection.Dispose()
     }

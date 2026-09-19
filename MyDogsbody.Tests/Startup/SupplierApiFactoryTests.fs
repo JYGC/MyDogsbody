@@ -174,6 +174,7 @@ let ``a store failure reaches the UI as an Error and is written to the log exact
             GetInvoiceTombstones = fun () -> failwith "not used"
             GetScanWindows = fun () -> failwith "not used"
             GetInvoiceSettings = fun () -> failwith "not used"
+            GetInvoiceCalendarEvents = fun () -> failwith "not used"
             Dispose = fun () -> ()
         }
 

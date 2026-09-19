@@ -81,6 +81,7 @@ let withUnreachableInvoiceStoreHarness (test: InvoicesHarness -> unit) =
           GetInvoiceTombstones = fun () -> failwith "x"
           GetScanWindows = fun () -> failwith "x"
           GetInvoiceSettings = fun () -> failwith "x"
+          GetInvoiceCalendarEvents = fun () -> failwith "x"
           Dispose = fun () -> () }
 
     let thunderbirdDatabasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")

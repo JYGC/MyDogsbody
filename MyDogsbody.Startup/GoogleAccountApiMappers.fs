@@ -84,6 +84,68 @@ let toListCalendarsError (accountId: GoogleAccountId) (caughtException: MyDogsbo
 /// infrastructure, never something a user did.
 let toStoreError (caughtException: MyDogsbodyException) : CalendarError = GoogleStoreFailed caughtException.Message
 
+// ---------- Change #7: GoogleCalendarClient's four event operations. Grouped the same way as
+// toListCalendarsError above - by which adapter action produced the exception - because
+// EventNoLongerExists and CalendarNoLongerExists each need a payload (the CalendarEventId or
+// CalendarId being acted on) that only the call site's own arguments carry, not the generic
+// exception alone. ----------
+
+/// The parts every event-operation failure shares with `toListCalendarsError`: not-authorised,
+/// rate-limited, api-not-enabled, and the generic unreachable fallback. Each public translator
+/// below layers its own special case on top before falling back to this.
+let private toGenericCalendarEventError (accountId: GoogleAccountId) (caughtException: MyDogsbodyException) : CalendarError =
+    if caughtException.Message.StartsWith GoogleCalendarClient.apiNotEnabledPrefix then
+        CalendarApiNotEnabled caughtException.Message
+    else
+        match caughtException.Message with
+        | "The stored Google credential is no longer authorised."
+        | "No stored credential for this account." -> NotAuthorised accountId
+        | "Google is rate-limiting this account; try again shortly." -> CalendarRateLimited caughtException.Message
+        | "The stored Google client secret is malformed." -> ClientSecretInvalid caughtException.Message
+        | _ -> CalendarUnreachable caughtException.Message
+
+/// `GoogleCalendarClient.listEvents` failures.
+let toListCalendarEventsError
+    (accountId: GoogleAccountId)
+    (calendarId: CalendarId)
+    (caughtException: MyDogsbodyException)
+    : CalendarError =
+    if caughtException.Message = GoogleCalendarClient.calendarGoneMessage then
+        CalendarNoLongerExists calendarId
+    else
+        toGenericCalendarEventError accountId caughtException
+
+/// `GoogleCalendarClient.createEvent` failures.
+let toCreateCalendarEventError (accountId: GoogleAccountId) (caughtException: MyDogsbodyException) : CalendarError =
+    if caughtException.Message.StartsWith GoogleCalendarClient.eventRejectedPrefix then
+        EventRejected caughtException.Message
+    else
+        toGenericCalendarEventError accountId caughtException
+
+/// `GoogleCalendarClient.updateEvent` failures.
+let toUpdateCalendarEventError
+    (accountId: GoogleAccountId)
+    (eventId: CalendarEventId)
+    (caughtException: MyDogsbodyException)
+    : CalendarError =
+    if caughtException.Message = GoogleCalendarClient.eventNotFoundMessage then
+        EventNoLongerExists eventId
+    elif caughtException.Message.StartsWith GoogleCalendarClient.eventRejectedPrefix then
+        EventRejected caughtException.Message
+    else
+        toGenericCalendarEventError accountId caughtException
+
+/// `GoogleCalendarClient.deleteEvent` failures.
+let toDeleteCalendarEventError
+    (accountId: GoogleAccountId)
+    (eventId: CalendarEventId)
+    (caughtException: MyDogsbodyException)
+    : CalendarError =
+    if caughtException.Message = GoogleCalendarClient.eventNotFoundMessage then
+        EventNoLongerExists eventId
+    else
+        toGenericCalendarEventError accountId caughtException
+
 // ---------- outbound: CalendarError -> MyDogsbodyException ----------
 
 /// Expected failures - wrapped in an `ApplicationException` and passed unlogged, the same
@@ -118,3 +180,11 @@ let toMyDogsbodyException (action: string) (error: CalendarError) : MyDogsbodyEx
     | CalendarUnreachable message -> MyDogsbodyException(action, message)
     | CalendarRateLimited message -> MyDogsbodyException(action, message)
     | GoogleStoreFailed message -> MyDogsbodyException(action, message)
+    // Change #7. EventRejected/InvoiceStoreFailed are genuine infrastructure trouble the adapter
+    // has already logged once - same posture as CalendarUnreachable/GoogleStoreFailed above.
+    // EventNoLongerExists reaching here at all is not expected in practice:
+    // SyncInvoicesToCalendarWorkflow turns it into AlreadyGone, a success, before it can become a
+    // Failed outcome - this case exists only so the match stays exhaustive.
+    | EventRejected message -> MyDogsbodyException(action, message)
+    | EventNoLongerExists eventId -> expected $"The calendar event '{CalendarEventId.value eventId}' no longer exists."
+    | InvoiceStoreFailed message -> MyDogsbodyException(action, message)

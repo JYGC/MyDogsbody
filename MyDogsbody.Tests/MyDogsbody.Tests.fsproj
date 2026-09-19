@@ -40,7 +40,11 @@
     <Compile Include="Domain\Invoices\ScanForInvoicesWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\DeleteInvoiceWorkflowTests.fs" />
     <Compile Include="Domain\Invoices\ScanWindowWorkflowsTests.fs" />
+    <Compile Include="Domain\Calendar\InvoiceSyncKeyTests.fs" />
     <Compile Include="Domain\Calendar\CalendarTypesTests.fs" />
+    <Compile Include="Domain\Calendar\CalendarDateRangeWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\DiffInvoicesAgainstCalendarWorkflowTests.fs" />
+    <Compile Include="Domain\Calendar\SyncInvoicesToCalendarWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\RegisterGoogleAccountWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\ListGoogleAccountsWorkflowTests.fs" />
     <Compile Include="Domain\Calendar\SetDefaultInvoiceCalendarWorkflowTests.fs" />
@@ -78,6 +82,7 @@
     <Compile Include="Database\SupplierMigrationsTests.fs" />
     <Compile Include="Database\InvoiceTemplateMigrationsTests.fs" />
     <Compile Include="Database\InvoiceMigrationsTests.fs" />
+    <Compile Include="Database\InvoiceCalendarEventsMigrationTests.fs" />
     <Compile Include="Database\DatabaseContextSetupTests.fs" />
     <Compile Include="Database\SqliteConnectionPoolingTests.fs" />
     <Compile Include="Database\SupplierRecordMappersTests.fs" />
@@ -86,6 +91,7 @@
     <Compile Include="Database\SupplierStoreTests.fs" />
     <Compile Include="Database\InvoiceRecordMappersTests.fs" />
     <Compile Include="Database\InvoiceStoreTests.fs" />
+    <Compile Include="Database\InvoiceCalendarEventStoreTests.fs" />
     <Compile Include="Database\ScanWindowStoreTests.fs" />
     <Compile Include="Startup\SupplierApiMappersTests.fs" />
     <Compile Include="Startup\SupplierApiFactoryTests.fs" />
@@ -98,6 +104,7 @@
     <Compile Include="Startup\InvoiceApiFactoryTests.fs" />
     <Compile Include="Startup\GoogleAccountApiMappersTests.fs" />
     <Compile Include="Startup\GoogleAccountApiFactoryTests.fs" />
+    <Compile Include="Startup\InvoiceSyncApiMappersTests.fs" />
     <Compile Include="Contracts\GoogleCredentialDependencyContractTests.fs" />
     <Compile Include="Contracts\GoogleCredentialPersistedShapeTests.fs" />
     <Compile Include="Contracts\GoogleCredentialBoundaryMapperTests.fs" />
@@ -118,6 +125,13 @@
     <Compile Include="Contracts\GoogleAccountDependencyContractTests.fs" />
     <Compile Include="Contracts\ListCalendarsDependencyContractTests.fs" />
     <Compile Include="Contracts\GoogleAccountApiContractTests.fs" />
+    <Compile Include="Contracts\ListCalendarEventsDependencyContractTests.fs" />
+    <Compile Include="Contracts\CreateCalendarEventDependencyContractTests.fs" />
+    <Compile Include="Contracts\UpdateCalendarEventDependencyContractTests.fs" />
+    <Compile Include="Contracts\DeleteCalendarEventDependencyContractTests.fs" />
+    <Compile Include="Contracts\InvoiceCalendarEventStoreDependencyContractTests.fs" />
+    <Compile Include="Contracts\InvoiceCalendarEventsPersistedShapeTests.fs" />
+    <Compile Include="Contracts\InvoiceSyncApiContractTests.fs" />
     <Compile Include="Contracts\ActionNamesTests.fs" />
     <Compile Include="UI\ModuleCreators\SuppliersBrowserModuleCreatorsTests.fs" />
     <Compile Include="UI\ModuleCreators\MailAccountsBrowserModuleCreatorsTests.fs" />
@@ -131,6 +145,8 @@
     <Compile Include="E2E\MailAccountsFlowTests.fs" />
     <Compile Include="E2E\InvoicesTestHarness.fs" />
     <Compile Include="E2E\InvoicesFlowTests.fs" />
+    <Compile Include="E2E\InvoiceSyncTestHarness.fs" />
+    <Compile Include="E2E\InvoiceSyncFlowTests.fs" />
     <Compile Include="E2E\GoogleAccountsTestHarness.fs" />
     <Compile Include="E2E\GoogleAccountsFlowTests.fs" />
     <Compile Include="Program.fs" />

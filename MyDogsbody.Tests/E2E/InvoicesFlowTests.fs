@@ -7,7 +7,22 @@ open Fun.Blazor
 open MudBlazor
 open MyDogsbody.UI.Portal.Components
 open MyDogsbody.UI.Portal.ModuleCreators
+open MyDogsbody.UI.Types
 open MyDogsbody.Tests.E2E.InvoicesTestHarness
+
+/// Change #7's calendar sync is not this file's concern - these flows predate it and exercise the
+/// ledger/problems/tombstones/window paths only. A real Google-backed InvoiceSyncApi is Phase 10's
+/// job (E2E/InvoiceSyncFlowTests.fs); this fake exists only so getInvoicesModule's now-mandatory
+/// third parameter has something to bind to here, and it always reports "nothing outstanding".
+let private noOpInvoiceSyncApi: InvoiceSyncApi =
+    { GetSyncPlan =
+        fun () ->
+            Ok
+                { StatusByInvoiceId = Map.empty
+                  Plan = []
+                  OrphanedEvents = []
+                  NotReadyReason = None }
+      ExecuteSyncPlan = fun _ -> Ok [] }
 
 /// The window picker is a MudSelect, which renders through a popover - so every view that
 /// contains it must be rendered inside a MudPopoverProvider, the same way SuppliersFlowTests
@@ -31,7 +46,7 @@ let private renderWithProviders (harness: InvoicesHarness) (view: NodeRenderFrag
 
 let private renderInvoices (harness: InvoicesHarness) =
     let invoicesModule =
-        InvoicesModuleCreators.getInvoicesModule (fun work -> work ()) harness.InvoiceApi harness.ScanWindowApi
+        InvoicesModuleCreators.getInvoicesModule (fun work -> work ()) harness.InvoiceApi harness.ScanWindowApi noOpInvoiceSyncApi
 
     let view = InvoicesComponents.invoicesTable invoicesModule (fun _ -> ())
     invoicesModule, renderWithProviders harness view
@@ -107,8 +122,9 @@ let ``each invoice is one table row, its cells directly inside it, and a no-due-
 
         // one invoice -> exactly one <tr>, not a row nested inside a row
         Assert.Equal(1, countOccurrences "<tr" body)
-        // the five cells and the delete button's cell are that row's own children
-        Assert.Equal(6, countOccurrences "<td" body)
+        // the selection checkbox, the five original cells, change #7's calendar-sync status cell,
+        // and the delete button's cell are all that row's own children
+        Assert.Equal(8, countOccurrences "<td" body)
         // the greying survives: it is on the row MudTable renders
         Assert.Contains("mud-text-disabled", body))
 
@@ -144,7 +160,7 @@ let ``the problems view lists a persisted scan problem with its sender and subje
              VALUES ('m1', NULL, 'noreply@stranger.test', 'A statement, not an invoice', '2026-06-10T00:00:00.0000000', 'NoSupplierMatched', NULL, '2026-06-15T00:00:00.0000000');"
 
         let invoicesModule =
-            InvoicesModuleCreators.getInvoicesModule (fun work -> work ()) harness.InvoiceApi harness.ScanWindowApi
+            InvoicesModuleCreators.getInvoicesModule (fun work -> work ()) harness.InvoiceApi harness.ScanWindowApi noOpInvoiceSyncApi
 
         invoicesModule.LoadProblems()
         let rendered = renderWithProviders harness (InvoicesComponents.problemsView invoicesModule)

@@ -323,6 +323,33 @@ type StoredInvoice =
       Invoice: ValidInvoice
       ScannedAt: System.DateTime }
 
+/// An invoice that can actually become a calendar event. DueDate is NOT an option here - unlike
+/// StoredInvoice's, which is.
+///
+/// This is how "an invoice with no due date can't go on a calendar" (Q1.10) stops being a
+/// runtime check: the sync workflow (change #7) accepts only this type, so an invoice missing a
+/// due date cannot reach it. The invoice is still stored and still listed - it just isn't
+/// uploadable, and the table says why.
+type UploadableInvoice =
+    { Id: InvoiceId
+      SupplierId: SupplierId
+      Reference: InvoiceReference
+      Amount: Money
+      DueDate: InvoiceDueDate }
+
+module UploadableInvoice =
+
+    /// The only door. A StoredInvoice with no due date returns None, and the page renders that
+    /// as "not uploadable" with the reason.
+    let ofStored (invoice: StoredInvoice) : UploadableInvoice option =
+        invoice.Invoice.DueDate
+        |> Option.map (fun dueDate ->
+            { Id = invoice.Id
+              SupplierId = invoice.Invoice.SupplierId
+              Reference = invoice.Invoice.Reference
+              Amount = invoice.Invoice.Amount
+              DueDate = dueDate })
+
 /// Why a message yielded no invoice. Persisted (Q1.19) so incremental scanning does not empty
 /// the diagnostic list before it is looked at. The eight causes requirements.md enumerates.
 type ScanProblemCause =

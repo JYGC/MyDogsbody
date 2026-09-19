@@ -19,6 +19,7 @@ type DatabaseContext =
         GetInvoiceTombstones: unit -> QuerySource<InvoiceTombstoneRecord>
         GetScanWindows: unit -> QuerySource<ScanWindowRecord>
         GetInvoiceSettings: unit -> QuerySource<InvoiceSettingsRecord>
+        GetInvoiceCalendarEvents: unit -> QuerySource<InvoiceCalendarEventRecord>
 
         /// Closes the underlying SqliteConnection.
         ///

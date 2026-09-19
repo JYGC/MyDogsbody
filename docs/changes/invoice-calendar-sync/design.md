@@ -49,10 +49,10 @@ Both are one-line ideas. Both are unrecoverable if missed. Everything below is a
                               UpdateCalendarEvent, DeleteCalendarEvent
         ▲
  Database   InvoiceCalendarEventStore.fs  markSynced · clearSyncRecord · loadSyncRecords
- Migrations 20260809000010_CreateInvoiceCalendarEventsTable
+ Migrations 20260810000009_CreateInvoiceCalendarEventsTable
 ```
 
-**Reserved migration timestamp for this change: `20260809000010`.**
+**Reserved migration timestamp for this change: `20260810000009`.**
 
 ---
 
@@ -202,7 +202,7 @@ let buildPlan
 
 | Timestamp | Name | Creates |
 | --- | --- | --- |
-| `20260809000010` | `CreateInvoiceCalendarEventsTable` | `InvoiceCalendarEvents(Id, InvoiceId FK → Invoices.Id ON DELETE CASCADE, GoogleAccountId, CalendarId, EventId, LastSyncedAt)` + unique index on `InvoiceId` |
+| `20260810000009` | `CreateInvoiceCalendarEventsTable` | `InvoiceCalendarEvents(Id, InvoiceId FK → Invoices.Id ON DELETE CASCADE, GoogleAccountId, CalendarId, EventId, LastSyncedAt)` + unique index on `InvoiceId` |
 
 **This table is history, not truth.** A sync record is a fact about *an invoice*, so it belongs on
 this side rather than in the Google integration's store — but it also means the app has an opinion

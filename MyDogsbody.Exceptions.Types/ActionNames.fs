@@ -75,6 +75,11 @@ module MyDogsbody =
             let getCalendarsFor = $"{googleAccountApi}.getCalendarsFor"
             let setDefaultInvoiceCalendar = $"{googleAccountApi}.setDefaultInvoiceCalendar"
 
+        module InvoiceSyncApi =
+            let private invoiceSyncApi = $"{startup}.InvoiceSyncApi"
+            let getSyncPlan = $"{invoiceSyncApi}.getSyncPlan"
+            let executeSyncPlan = $"{invoiceSyncApi}.executeSyncPlan"
+
     /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
     /// it - MyDogsbody.Database is the application's main store, not an integration, so its
     /// entries do not go under Integrations.
@@ -116,6 +121,13 @@ module MyDogsbody =
             let getSelectedScanWindow = $"{scanWindowStore}.getSelectedScanWindow"
             let saveSelectedScanWindow = $"{scanWindowStore}.saveSelectedScanWindow"
 
+        module InvoiceCalendarEventStore =
+            let private invoiceCalendarEventStore = $"{database}.InvoiceCalendarEventStore"
+            let markSynced = $"{invoiceCalendarEventStore}.markSynced"
+            let clearSyncRecord = $"{invoiceCalendarEventStore}.clearSyncRecord"
+            let loadAllLedgerKeys = $"{invoiceCalendarEventStore}.loadAllLedgerKeys"
+            let loadSyncRecords = $"{invoiceCalendarEventStore}.loadSyncRecords"
+
     module Integrations =
         let private integrations = $"{myDogsbody}.Integrations"
 
@@ -145,6 +157,10 @@ module MyDogsbody =
             module GoogleCalendarClient =
                 let private googleCalendarClient = $"{google}.GoogleCalendarClient"
                 let listCalendars = $"{googleCalendarClient}.listCalendars"
+                let listEvents = $"{googleCalendarClient}.listEvents"
+                let createEvent = $"{googleCalendarClient}.createEvent"
+                let updateEvent = $"{googleCalendarClient}.updateEvent"
+                let deleteEvent = $"{googleCalendarClient}.deleteEvent"
 
         module Documents =
             let private documents = $"{integrations}.Documents"

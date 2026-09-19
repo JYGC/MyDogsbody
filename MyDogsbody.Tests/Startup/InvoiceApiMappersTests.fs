@@ -47,6 +47,9 @@ let ``toInvoiceUiType maps every field, joining the supplier name`` () =
     Assert.Equal(DateTime(2026, 1, 20), ui.MessageReceivedAt)
     Assert.True(ui.CanBecomeCalendarEvent)
     Assert.Equal(None, ui.CannotUploadReason)
+    // Always None straight out of InvoiceApi: it knows nothing about Google. The page overlays
+    // this from InvoiceSyncApi.GetSyncPlan.
+    Assert.Equal(None, ui.SyncStatus)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toInvoiceUiType greys out an invoice with no due date and gives the reason`` () =

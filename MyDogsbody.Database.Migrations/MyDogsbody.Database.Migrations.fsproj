@@ -18,6 +18,7 @@
     <Compile Include="Migrations\Migration_20260810000006_CreateInvoiceTombstonesTable.fs" />
     <Compile Include="Migrations\Migration_20260810000007_CreateScanWindowsTable.fs" />
     <Compile Include="Migrations\Migration_20260810000008_CreateInvoiceSettingsTable.fs" />
+    <Compile Include="Migrations\Migration_20260810000009_CreateInvoiceCalendarEventsTable.fs" />
     <Compile Include="MigrationSetup.fs" />
     <None Include="INSTALL.md" />
   </ItemGroup>

@@ -17,7 +17,13 @@ type InvoiceUiType =
       CanBecomeCalendarEvent: bool
       /// The sentence shown when it cannot - "No due date was found, so this invoice cannot be
       /// added to a calendar." None when it can.
-      CannotUploadReason: string option }
+      CannotUploadReason: string option
+      /// Change #7: the per-row calendar sync state (design decision 5) - up to date, missing or
+      /// changed. Always None from InvoiceApi.GetInvoices itself, which knows nothing about
+      /// Google; the page overlays this from InvoiceSyncApi.GetSyncPlan's StatusByInvoiceId, and
+      /// it stays None for an invoice InvoiceSyncApi has no opinion about - in particular any
+      /// invoice with CanBecomeCalendarEvent = false, which InvoiceSyncApi never classifies.
+      SyncStatus: InvoiceSyncStatusUiType option }
 
 /// A message that yielded no invoice, as the problems view renders it - a message id alone is
 /// not actionable, so the sender, subject and date travel with the cause sentence.

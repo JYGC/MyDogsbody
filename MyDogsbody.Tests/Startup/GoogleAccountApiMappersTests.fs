@@ -15,6 +15,7 @@ let private anAction = ActionNames.MyDogsbody.Startup.GoogleAccountApi.getAccoun
 let private accountId value = GoogleAccountId.create value |> valueOrFail
 let private email value = GoogleEmail.create value |> valueOrFail
 let private calendarId value = CalendarId.create value |> valueOrFail
+let private eventId value = CalendarEventId.create value |> valueOrFail
 
 // ---------- domain -> UI record ----------
 
@@ -385,6 +386,10 @@ let ``every CalendarError case produces a non-empty message and the declared act
             GoogleStoreFailed "f"
             GoogleAccountIdInvalid "g"
             CalendarIdInvalid "h"
+            // Change #7
+            EventRejected "i"
+            EventNoLongerExists(eventId "evt-1")
+            InvoiceStoreFailed "j"
         ]
 
     let declaredCases = Reflection.FSharpType.GetUnionCases(typeof<CalendarError>) |> Array.length

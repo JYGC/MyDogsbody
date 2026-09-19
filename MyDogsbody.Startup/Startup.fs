@@ -104,6 +104,9 @@ let private googleDatabaseContext =
 let googleAccountApi: GoogleAccountApi =
     GoogleAccountApiFactory.createGoogleAccountApi handleError googleDatabaseContext
 
+let invoiceSyncApi: InvoiceSyncApi =
+    InvoiceSyncApiFactory.createInvoiceSyncApi handleError getCurrentTime mainDatabaseContext googleDatabaseContext
+
 /// The host's entire share of the wiring. Every registration is expressed here, in F#, so
 /// MainWindow.xaml.cs states which services exist without stating how they are built.
 let registerServices (services: IServiceCollection) : IServiceCollection =
@@ -114,3 +117,4 @@ let registerServices (services: IServiceCollection) : IServiceCollection =
         .AddSingleton<InvoiceApi>(invoiceApi)
         .AddSingleton<ScanWindowApi>(scanWindowApi)
         .AddSingleton<GoogleAccountApi>(googleAccountApi)
+        .AddSingleton<InvoiceSyncApi>(invoiceSyncApi)

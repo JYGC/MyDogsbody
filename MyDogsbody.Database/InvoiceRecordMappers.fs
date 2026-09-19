@@ -9,6 +9,7 @@ open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
 open MyDogsbody.Domain.Invoices
+open MyDogsbody.Domain.Calendar
 open MyDogsbody.Database.Models
 
 let private invariant = CultureInfo.InvariantCulture
@@ -215,4 +216,27 @@ let toInvoiceTombstone (row: InvoiceTombstoneRecord) : Result<InvoiceTombstone, 
             { SupplierId = supplierId
               Reference = reference
               DeletedAt = deletedAt }
+    }
+
+// ---------------- change #7: the calendar sync record ----------------
+
+/// An invoice row's natural key, as InvoiceSyncKey.derive would build it from the domain type -
+/// the ONE derivation (Q2.10), never re-implemented here as a second concatenation.
+let toInvoiceSyncKey (row: InvoiceRecord) : Result<InvoiceSyncKey, string> =
+    result {
+        let! supplierId = SupplierId.create (string row.SupplierId)
+        let! reference = InvoiceReference.create row.Reference
+        return InvoiceSyncKey.derive supplierId reference
+    }
+
+let toSyncRecord
+    (row: InvoiceCalendarEventRecord)
+    : Result<InvoiceId * GoogleAccountId * CalendarId * CalendarEventId * DateTime, string> =
+    result {
+        let! invoiceId = InvoiceId.create (string row.InvoiceId)
+        let! accountId = GoogleAccountId.create row.GoogleAccountId
+        let! calendarId = CalendarId.create row.CalendarId
+        let! eventId = CalendarEventId.create row.EventId
+        let! lastSyncedAt = parseTimestamp "LastSyncedAt" row.LastSyncedAt
+        return invoiceId, accountId, calendarId, eventId, lastSyncedAt
     }
