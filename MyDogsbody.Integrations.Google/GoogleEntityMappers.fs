@@ -9,8 +9,6 @@ open LiteDB
 open MyDogsbody.Domain.Calendar
 open MyDogsbody.Integrations.Google.Database.Models
 
-/// Persistence -> the domain type, whole row.
-///
 /// Returns Result because LiteDB is schemaless: a document written by an older build, or edited
 /// by hand, can carry a null where a constrained type is required. The store turns a failure
 /// here into a logged MyDogsbodyException.
@@ -45,9 +43,9 @@ let toRegisteredAccount (entity: GoogleAccountEntity) : Result<RegisteredGoogleA
             NeedsReauthorisation = entity.NeedsReauthorisation
         }
 
-/// The domain type -> persistence. `Id` is set explicitly rather than left for LiteDB to
-/// assign - the account's id is minted by the authorisation adapter before the browser opens,
-/// so the same id already used as the OAuth datastore key is the one this row is keyed by.
+/// `Id` is set explicitly rather than left for LiteDB to assign - the account's id is minted by the
+/// authorisation adapter before the browser opens, so the same id already used as the OAuth
+/// datastore key is the one this row is keyed by.
 let toEntity (account: RegisteredGoogleAccount) : GoogleAccountEntity =
     GoogleAccountEntity(
         Id = ObjectId(GoogleAccountId.value account.Id),

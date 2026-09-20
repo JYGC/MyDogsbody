@@ -71,9 +71,10 @@ let ``a line that starts lower-case but follows a sentence terminator is not joi
 
     Assert.Equal<TextLine list>([ line 0 "Total."; line 0 "amount due separately." ], actual)
 
-// Order is pinned: NFKC has to run before collapseRuns, because NFKC is what turns each
-// non-breaking space into a plain space in the first place - collapseRuns only recognises
-// literal ' ' and '\t'. Running collapse before NFKC would see three untouched non-breaking
+// Order is pinned: NFKC has to run before collapseRunsOfPlainSpacesAndTabsToOneSpace, because NFKC
+// is what turns each non-breaking space into a plain space in the first place -
+// collapseRunsOfPlainSpacesAndTabsToOneSpace only recognises literal ' ' and '\t'. Running
+// collapse before NFKC would see three untouched non-breaking
 // spaces, not a collapsible run, and leave all three in the output. Verified empirically before
 // writing this test: .NET's NormalizationForm.FormKC alone decomposes U+00A0 to U+0020.
 [<Fact; Trait("Level", "Unit")>]

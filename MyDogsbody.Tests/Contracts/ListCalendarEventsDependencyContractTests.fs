@@ -61,7 +61,7 @@ let private eventEntryFor (event: CalendarEvent) =
     let extendedProperties =
         match event.SyncKey with
         | Some key ->
-            $""", "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PropertyName}": "{jsonEscapedSyncKeyValue key}" }} }}"""
+            $""", "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent}": "{jsonEscapedSyncKeyValue key}" }} }}"""
         | None -> ""
 
     $"""{{ "kind": "calendar#event", "id": "{CalendarEventId.value event.Id}", "summary": "{event.Event.Title}", "description": "{event.Event.Description}", "start": {{ "date": "{startDate}" }}, "end": {{ "date": "{endDate}" }}{extendedProperties} }}"""
@@ -203,7 +203,7 @@ let ``the real adapter reports an event carrying the extended property with Sync
 
     let respond (_: HttpRequestMessage) =
         let withKey =
-            $"""{{ "kind": "calendar#event", "id": "evt-1", "summary": "Invoice due: INV-100", "description": "", "start": {{ "date": "2026-09-20" }}, "end": {{ "date": "2026-09-21" }}, "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PropertyName}": "{jsonEscapedSyncKeyValue key}" }} }} }}"""
+            $"""{{ "kind": "calendar#event", "id": "evt-1", "summary": "Invoice due: INV-100", "description": "", "start": {{ "date": "2026-09-20" }}, "end": {{ "date": "2026-09-21" }}, "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent}": "{jsonEscapedSyncKeyValue key}" }} }} }}"""
 
         let withoutKey =
             """{ "kind": "calendar#event", "id": "evt-2", "summary": "Team lunch", "description": "", "start": { "date": "2026-09-21" }, "end": { "date": "2026-09-22" } }"""

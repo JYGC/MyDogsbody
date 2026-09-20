@@ -76,11 +76,11 @@ let private mapOrRaise (mapResult: Result<StoredTemplate, string>) =
     | Ok stored -> stored
     | Error reason -> raise (InvalidOperationException $"Stored template is unusable: {reason}")
 
-/// Runs `work` with the connection open and inside a transaction, committing on success. Any
-/// exception - including one raised deliberately by mapOrRaise or TemplateRecordMappers.toRowId -
-/// unwinds without a Commit, so the transaction's own Dispose rolls it back: a write in the
-/// middle of a multi-statement sequence (a template row plus its field-rule rows, or several
-/// position updates for a reorder) never survives a later statement's failure.
+/// An exception - including one raised deliberately by mapOrRaise or
+/// TemplateRecordMappers.toRowId - unwinds without a Commit, so the transaction's own Dispose
+/// rolls it back: a write in the middle of a multi-statement sequence (a template row plus its
+/// field-rule rows, or several position updates for a reorder) never survives a later
+/// statement's failure.
 let private inTransaction (connection: SqliteConnection) (work: SqliteTransaction -> 'T) : 'T =
     connection.Open()
 
@@ -117,10 +117,9 @@ let getForSupplier
 
             let templateIds = templateRows |> List.map (fun templateRow -> templateRow.Id) |> Set.ofList
 
-            // One query for every field rule, grouped in memory, rather than one query per
-            // template - getForSupplier runs on every page load and after every write, the same
-            // reasoning as SupplierStore.getAll's matcher loading.
-            let ruleRowsByTemplateId =
+            // Rather than one query per template - getForSupplier runs on every page load and after
+            // every write, the same reasoning as SupplierStore.getAll's matcher loading.
+            let fieldRulesOfTheseTemplatesFromOneQueryForEveryFieldRuleGroupedByTemplateId =
                 select {
                     for fieldRuleRow in getTemplateFieldRules () do
                     selectAll
@@ -135,7 +134,11 @@ let getForSupplier
             return
                 templateRows
                 |> List.map (fun row ->
-                    let ruleRows = ruleRowsByTemplateId |> Map.tryFind row.Id |> Option.defaultValue []
+                    let ruleRows =
+                        fieldRulesOfTheseTemplatesFromOneQueryForEveryFieldRuleGroupedByTemplateId
+                        |> Map.tryFind row.Id
+                        |> Option.defaultValue []
+
                     TemplateRecordMappers.toStoredTemplate row ruleRows |> mapOrRaise)
         with caughtException ->
             return! MyDogsbodyException(action, "Failed to retrieve templates for supplier.", caughtException)
@@ -169,13 +172,13 @@ let insertOne
 
                     insertedId)
 
-            // Every field is already known from the input plus the id the insert assigned - no
-            // need to read back what was just written.
-            return
+            let storedTemplateBuiltFromTheInputAndTheAssignedIdNotReadBackFromTheDatabase =
                 TemplateRecordMappers.toStoredTemplate
                     { newRecord with Id = insertedId }
                     (ValidTemplate.rules template |> List.map (TemplateRecordMappers.toNewTemplateFieldRuleRecord insertedId))
                 |> mapOrRaise
+
+            return storedTemplateBuiltFromTheInputAndTheAssignedIdNotReadBackFromTheDatabase
         with caughtException ->
             return! MyDogsbodyException(action, "Failed to insert new template.", caughtException)
     }
@@ -242,9 +245,7 @@ let updateOne
                         TemplateRecordMappers.toNewTemplateFieldRuleRecord rowId rule
                         |> insertFieldRuleRow connection transaction))
 
-                // Every field is already known from the input plus the row id already confirmed
-                // to exist above - no need to read back what was just written.
-                let updatedRecord: InvoiceTemplateRecord =
+                let updatedRecordBuiltFromTheEditAndTheRowIdConfirmedToExistNotReadBackFromTheDatabase: InvoiceTemplateRecord =
                     {
                         Id = rowId
                         SupplierId = supplierRowId
@@ -256,7 +257,7 @@ let updateOne
 
                 return
                     TemplateRecordMappers.toStoredTemplate
-                        updatedRecord
+                        updatedRecordBuiltFromTheEditAndTheRowIdConfirmedToExistNotReadBackFromTheDatabase
                         (ValidTemplate.rules template |> List.map (TemplateRecordMappers.toNewTemplateFieldRuleRecord rowId))
                     |> mapOrRaise
                     |> Some

@@ -30,10 +30,10 @@ let toExpectedEvent (invoice: UploadableInvoice) : AllDayEvent =
       Title = $"Invoice due: {InvoiceReference.value invoice.Reference}"
       Description = $"Amount: {Money.amount invoice.Amount} {Money.currency invoice.Amount}. Synced by MyDogsbody." }
 
-/// Q2.14: only title and date are compared - an update rewrites both unconditionally when either
-/// disagrees. Description is not compared: it carries no information the ledger's own fields
-/// don't already put in the title, so it drifting alone is not "disagreement".
-let private agrees (expected: AllDayEvent) (actual: AllDayEvent) : bool =
+/// Q2.14: an update rewrites both unconditionally when either disagrees. Description is not
+/// compared: it carries no information the ledger's own fields don't already put in the title, so
+/// it drifting alone is not "disagreement".
+let private eventAgreesOnTitleAndDateOnly (expected: AllDayEvent) (actual: AllDayEvent) : bool =
     expected.Date.Date = actual.Date.Date && expected.Title = actual.Title
 
 let private invoiceSyncKey (invoice: UploadableInvoice) : InvoiceSyncKey =
@@ -68,7 +68,8 @@ let diff (snapshot: LedgerSnapshot) (events: CalendarEvent list) : SyncAction li
 
             match Map.tryFind key firstEventByKey with
             | None -> CreateEvent invoice
-            | Some event when agrees (toExpectedEvent invoice) event.Event -> LeaveAlone event.Id
+            | Some event when eventAgreesOnTitleAndDateOnly (toExpectedEvent invoice) event.Event ->
+                LeaveAlone event.Id
             | Some event -> UpdateEvent(event.Id, invoice))
 
     // The ONLY path that produces a delete: a canonical (first-seen) keyed event whose key is

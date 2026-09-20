@@ -19,7 +19,6 @@ let private source format : DocumentSource =
 [<InlineData("PlainText", "plain")>]
 [<InlineData("EmailBody", "email")>]
 let ``dispatch routes a source to the reader for its format and no other`` (format: string) (expected: string) =
-    // Arrange
     let calls = ResizeArray<string>()
 
     let read =
@@ -36,10 +35,9 @@ let ``dispatch routes a source to the reader for its format and no other`` (form
         | "PlainText" -> PlainText
         | _ -> EmailBody
 
-    // Act
     let actual = read (source documentFormat)
 
-    // Assert - exactly one reader called, and it was the right one
+    // exactly one reader called, and it was the right one
     Assert.Equal<string list>([ expected ], List.ofSeq calls)
 
     match actual with

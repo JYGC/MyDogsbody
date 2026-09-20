@@ -109,17 +109,7 @@ let toSelectedMailAccountId (entity: SelectedAccountEntity option) : Result<Mail
 
 // ---------- ScanWatermarkEntity ⇄ FolderWatermark ----------
 
-/// `ModifiedAt` is deliberately persisted as UTC ticks rather than as a DateTime column - see
-/// ScanWatermarkEntity for what LiteDB does to a DateTime, and why readFolder's equality check
-/// cannot survive it. This is a rename, not a new field: `ModifiedAt` became
-/// `ModifiedAtTicksUtc`.
-///
-/// `CutoffReached` is persisted as ticks for the same reason, and reconstructed as
-/// `DateTimeKind.Unspecified` rather than Utc: the cutoff comes from `GetCurrentTime`, which the
-/// composition root binds to `DateTime.Now`, so it is a local-clock value and calling it UTC would
-/// be a lie. Only `<` is ever applied to it, and DateTime comparison is on ticks regardless of
-/// Kind. Ticks of 0 (`DateTime.MinValue`) is what an entity stored before this field existed
-/// decodes to, and `resumeOffset` reads that as "not recorded".
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Integrations.Thunderbird.md - ThunderbirdEntityMappers.fs: toNewWatermarkEntity
 let toNewWatermarkEntity (accountId: string) (relativePath: string) (watermark: FolderWatermark) : ScanWatermarkEntity =
     ScanWatermarkEntity(
         AccountId = accountId,

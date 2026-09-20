@@ -1,6 +1,5 @@
 /// Removes a tombstone so the next scan of a covering window stores that invoice again (Q5.14 -
-/// tombstones are visible and reversible). Undeleting a key that has no tombstone is reported,
-/// not silently ignored.
+/// tombstones are visible and reversible).
 module MyDogsbody.Domain.Invoices.UndeleteInvoiceWorkflow
 
 open MyDogsbody.Domain
@@ -13,9 +12,9 @@ let undeleteInvoice
     (reference: InvoiceReference)
     : Result<unit, InvoiceError> =
     result {
-        let! removed = removeTombstone supplierId reference
+        let! aTombstoneExistedForThatKeyAndWasRemoved = removeTombstone supplierId reference
 
-        if removed then
+        if aTombstoneExistedForThatKeyAndWasRemoved then
             return ()
         else
             return! Error InvoiceNotFound

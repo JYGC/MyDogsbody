@@ -11,11 +11,9 @@ open MyDogsbody.Domain.Suppliers
 let private orEmpty (text: string) : string =
     if isNull text then "" else text
 
-/// The address out of a mail header. Change #3 hands over whatever the mail store gives it, which
-/// is very often a full "Display Name <address>" header rather than a bare address; everything
-/// between the last '<' and the last '>' is the address, and anything else is taken as already
-/// being one.
-let private addressOf (sender: string) : string =
+/// Change #3 hands over whatever the mail store gives it, which is very often a full
+/// "Display Name <address>" header rather than a bare address.
+let private addressBetweenTheLastAngleBracketsElseTheWholeText (sender: string) : string =
     let trimmed = (orEmpty sender).Trim()
     let opening = trimmed.LastIndexOf '<'
     let closing = trimmed.LastIndexOf '>'
@@ -25,31 +23,39 @@ let private addressOf (sender: string) : string =
     else
         trimmed
 
-/// The domain is the part after the LAST '@' of the address, not the first. A quoted local part
-/// legally carries its own ("a@b"@acme.example), and splitting on the first '@' also left the
-/// trailing '>' on the domain of every display-name sender - so SenderDomain "acme.example" did
-/// not match, SenderAddress did not match either, and the supplier fell through to
-/// SupplierNotRecognised entirely.
-let private senderDomain (sender: string) : string =
-    let address = addressOf sender
+/// A quoted local part legally carries its own ("a@b"@acme.example), and splitting on the first
+/// '@' also left the trailing '>' on the domain of every display-name sender - so
+/// SenderDomainEqualToIgnoringCase "acme.example" did not match, SenderAddressEqualToIgnoringCase
+/// did not match either, and the supplier fell through to SupplierNotRecognised entirely.
+let private senderDomainAfterTheLastAtSignNotTheFirst (sender: string) : string =
+    let address = addressBetweenTheLastAngleBracketsElseTheWholeText sender
 
     match address.LastIndexOf '@' with
     | -1 -> ""
     | index -> address.Substring(index + 1).Trim()
 
-/// A matcher whose stored value is empty matches NOTHING. Without this, an empty domain matcher
-/// compared equal to the "" that senderDomain yields for a message with no sender at all, so that
-/// one supplier claimed every senderless message. SupplierMatcher.create now refuses to build one,
-/// but rows saved before that still exist, so the workflow refuses to honour one too.
-let private matchesValue (stored: string) (candidate: string) : bool =
+/// Without this, an empty domain matcher compared equal to the "" that
+/// senderDomainAfterTheLastAtSignNotTheFirst yields for a message with no sender at all, so that
+/// one supplier claimed every senderless message. SupplierMatcher.create now refuses to build
+/// one, but rows saved before that still exist, so the workflow refuses to honour one too.
+let private storedValueMatchesCandidateIgnoringCaseAndAnEmptyStoredValueMatchesNothing
+    (stored: string)
+    (candidate: string)
+    : bool =
     not (String.IsNullOrWhiteSpace stored)
     && String.Equals(stored, candidate, StringComparison.OrdinalIgnoreCase)
 
 let private matches (message: ScannedMessage) (matcher: SupplierMatcher) : bool =
     match matcher with
-    | SenderAddress address -> matchesValue address (addressOf message.Sender)
-    | SenderDomain domain -> matchesValue domain (senderDomain message.Sender)
-    | SubjectPattern substring ->
+    | SenderAddressEqualToIgnoringCase address ->
+        storedValueMatchesCandidateIgnoringCaseAndAnEmptyStoredValueMatchesNothing
+            address
+            (addressBetweenTheLastAngleBracketsElseTheWholeText message.Sender)
+    | SenderDomainEqualToIgnoringCase domain ->
+        storedValueMatchesCandidateIgnoringCaseAndAnEmptyStoredValueMatchesNothing
+            domain
+            (senderDomainAfterTheLastAtSignNotTheFirst message.Sender)
+    | SubjectContainsSubstringIgnoringCase substring ->
         // A subject is text a rule is evaluated against, so requirements.md's "WHEN any rule is
         // evaluated THE SYSTEM SHALL first apply a defined normalization to the text" covers it.
         // The stored value is a plain substring rather than a regex, so it is normalized too -
@@ -59,12 +65,13 @@ let private matches (message: ScannedMessage) (matcher: SupplierMatcher) : bool 
         && (InvoiceText.normalizeLine (orEmpty message.Subject))
             .IndexOf(InvoiceText.normalizeLine substring, StringComparison.OrdinalIgnoreCase) >= 0
 
-/// Matches a message against the stored suppliers, treating a supplier's rules as alternatives -
-/// any one rule matching is enough. Pure: no I/O, the caller already loaded the suppliers.
 let matchSupplier (suppliers: StoredSupplier list) (message: ScannedMessage) : Result<SupplierId, InvoiceError> =
+    let supplierMatchesWhenAnyOneOfItsRulesMatches (supplier: StoredSupplier) =
+        supplier.Matchers |> List.exists (matches message)
+
     let matchedSupplierIds =
         suppliers
-        |> List.filter (fun supplier -> supplier.Matchers |> List.exists (matches message))
+        |> List.filter supplierMatchesWhenAnyOneOfItsRulesMatches
         |> List.map (fun supplier -> supplier.Id)
 
     match matchedSupplierIds with

@@ -377,17 +377,7 @@ let private writeDuplicateProfile (profileDir: string) =
 
 [<Fact; Trait("Level", "E2E")>]
 let ``two profiles declaring the same account are told apart on the page by the profile they came from`` () =
-    // requirements.md -> "Walking the chosen folder": "WHEN several profiles are found THE SYSTEM
-    // SHALL list all of their accounts, QUALIFIED BY THE PROFILE PATH THEY CAME FROM, so two
-    // profiles containing the same account are distinguishable (Q4.9)" - and again under "Edge
-    // cases": "WHEN two profiles declare accounts with the same email address THE SYSTEM SHALL list
-    // both, qualified by profile path."
-    //
-    // The chosen folder being "a backup copy" alongside the live profile is one of the three
-    // shapes the walk is required to handle, so this is the ordinary case, not a contrived one.
-    // Both rows carry the same display name, the same address, the same format, the same folder
-    // count and the same size; the only thing that separates them is the profile - and the user is
-    // being asked to pick ONE of them for import.
+    // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - MailAccountsFlowTests.fs: root
     let root = Path.Combine(Path.GetTempPath(), $"mdb-e2e-{Guid.NewGuid()}")
     Directory.CreateDirectory root |> ignore
 

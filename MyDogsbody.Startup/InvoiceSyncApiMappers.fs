@@ -17,7 +17,7 @@ let private supplierName (namesById: Map<string, string>) (id: SupplierId) : str
 /// invoice a DeleteEvent's event belonged to (design decision 3), since the invoice itself has
 /// already left the ledger by the time a delete is produced.
 let private nameAndReferenceFromKey (namesById: Map<string, string>) (key: InvoiceSyncKey) : string * string =
-    match InvoiceSyncKey.parts key with
+    match InvoiceSyncKey.supplierRowIdAndInvoiceReferenceAsPlainStrings key with
     | Some(rawSupplierId, reference) ->
         let name =
             match SupplierId.create rawSupplierId with
@@ -104,30 +104,7 @@ let toSyncStatusByInvoiceId (inWindow: UploadableInvoice list) (plan: SyncAction
         id, status)
     |> Map.ofList
 
-/// Events the plan does not fully explain: no sync key at all (an orphan needing attention), one
-/// whose invoice has left the ledger (a pending delete, already shown in the plan too), or a
-/// second event sharing another event's key (a duplicate needing attention - requirements.md's
-/// "the same invoice has two events on the calendar" edge case).
-///
-/// `DiffInvoicesAgainstCalendarWorkflow.diff` compares only the first-seen keyed event against
-/// the ledger for a shared key and leaves every other one untouched - neither updated, left
-/// alone, nor deleted (its own "Duplicates" comment) - so a duplicate is never the target of any
-/// SyncAction and so never appears in `matchedEventIds` below. Left out of this function, such an
-/// event was invisible everywhere in the view: not in the plan, not among orphans, PR #23 review
-/// round 2.
-///
-/// A THIRD reason an event can be unmatched, distinct from a duplicate: its invoice is still in
-/// the ledger but merely outside the current scan window (Q2.9's "narrowing hides; it does not
-/// forget") - `InWindow` membership is decided by when the invoice's MESSAGE arrived, not by its
-/// due date (`MyDogsbody.Database/InvoiceStore.fs`'s cutoff filters on `MessageReceivedAt`), so an
-/// invoice can sit outside `InWindow` while its due date still falls inside the calendar's queried
-/// date range. `diff` then produces no action at all for that key: not a create/update/leave-alone
-/// (not `InWindow`) and not a delete either (the key is still in `AllLedgerKeys`). `explainedKeys`
-/// below is what tells the two apart: a genuine duplicate's key IS explained elsewhere, via the
-/// OTHER (matched) event sharing it, whereas an out-of-window event's key is not explained by
-/// anything in the plan at all. Before this round's fix (PR #23 review round 5), every
-/// out-of-window event was misreported as a duplicate, purely because narrowing the window moved
-/// its invoice out of `plan`.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Startup.md - InvoiceSyncApiMappers.fs: toOrphanedEvents
 let toOrphanedEvents (events: CalendarEvent list) (plan: SyncAction list) : OrphanedEventUiType list =
     let deletedEventIds =
         plan

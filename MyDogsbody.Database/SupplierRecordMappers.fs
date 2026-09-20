@@ -10,15 +10,15 @@ open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Database.Models
 
-/// Domain -> persistence. Exhaustive: adding a case to MatcherKind breaks this build.
+/// Exhaustive: adding a case to MatcherKind breaks this build.
 let toMatcherKindString (kind: MatcherKind) : string =
     match kind with
     | Sender -> "Sender"
     | Domain -> "Domain"
     | Subject -> "Subject"
 
-/// Persistence -> domain. Returns Result because the column is a plain TEXT value: a row
-/// written by an older build, or edited by hand, can carry a string no current build declares.
+/// Returns Result because the column is a plain TEXT value: a row written by an older build, or
+/// edited by hand, can carry a string no current build declares.
 let fromMatcherKindString (value: string) : Result<MatcherKind, string> =
     match value with
     | "Sender" -> Ok Sender
@@ -26,14 +26,12 @@ let fromMatcherKindString (value: string) : Result<MatcherKind, string> =
     | "Subject" -> Ok Subject
     | unknown -> Error $"Stored matcher kind '{unknown}' has no domain equivalent."
 
-/// The identifier the domain carries, as the store's own key type. Only ever called on an id
-/// that came from a row already read (SupplierId.create only checks non-empty, so nothing
-/// upstream guarantees it parses) - a value that does not parse is a data-integrity failure, not
-/// something a user did, so it is allowed to raise and be caught like any other unexpected
-/// adapter failure.
+/// Only ever called on an id that came from a row already read (SupplierId.create only checks
+/// non-empty, so nothing upstream guarantees it parses) - a value that does not parse is a
+/// data-integrity failure, not something a user did, so it is allowed to raise and be caught like
+/// any other unexpected adapter failure.
 let toRowId (id: SupplierId) : int = int (SupplierId.value id)
 
-/// Persistence -> domain, whole row plus its matchers.
 let toStoredSupplier
     (row: SupplierRecord)
     (matcherRows: SupplierMatcherRecord list)
@@ -63,8 +61,7 @@ let toStoredSupplier
             }
     }
 
-/// Domain -> persistence, for a row the store has not seen before. Id is a placeholder - the
-/// insert excludes that column so SQLite assigns it.
+/// Id is a placeholder - the insert excludes that column so SQLite assigns it.
 let toNewSupplierRecord (supplier: ValidSupplier) : SupplierRecord =
     {
         Id = 0
@@ -72,7 +69,6 @@ let toNewSupplierRecord (supplier: ValidSupplier) : SupplierRecord =
         PaymentTermDays = PaymentTermDays.value supplier.PaymentTermDays
     }
 
-/// Domain -> persistence, for a matcher row the store has not seen before.
 let toNewMatcherRecord (supplierId: int) (matcher: SupplierMatcher) : SupplierMatcherRecord =
     {
         Id = 0

@@ -6,11 +6,10 @@ open System.IO
 open System.Text
 open MyDogsbody.Domain.Documents
 
-/// Splits decoded text into lines and tags each with a block index. A run of one or more blank
-/// lines is a single block boundary and the blank lines themselves are dropped - Finding 4:
-/// "Drop empty lines before applying line offsets, so LinesAfterLabel(label, 1) means 'the next
-/// line with content'."
-let private toBlocks (text: string) : TextLine list =
+/// A run of one or more blank lines is a single block boundary and the blank lines themselves are
+/// dropped - Finding 4: "Drop empty lines before applying line offsets, so
+/// LinesAfterLabel(label, 1) means 'the next line with content'."
+let private splitDecodedTextIntoLinesTaggedWithABlockIndex (text: string) : TextLine list =
     let rawLines = text.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n')
 
     rawLines
@@ -38,6 +37,6 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
             // detectEncodingFromByteOrderMarks honours a BOM; UTF-8 otherwise, which is what the
             // measured mailbox's text parts use.
             use reader = new StreamReader(stream, Encoding.UTF8, true)
-            Ok(toBlocks (reader.ReadToEnd()))
+            Ok(splitDecodedTextIntoLinesTaggedWithABlockIndex (reader.ReadToEnd()))
         with caughtException ->
             Error(DocumentUnreadable caughtException.Message)

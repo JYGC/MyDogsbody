@@ -1,8 +1,5 @@
 namespace MyDogsbody.Domain.Calendar
 
-// The Google calendar workflow area: constrained primitives, one type per pipeline stage, the
-// area's error DU, and the dependency function types its workflows declare.
-//
 // Created here with the accounts + calendars half (change #6, google-account-integration);
 // change #7 (invoice-calendar-sync) extends it with the events half and the sync plan. Nothing
 // here names CalendarService, an OAuth type, ILiteCollection or an HTTP type - the domain cannot
@@ -40,7 +37,7 @@ module GoogleEmail =
 
     let value (GoogleEmail emailAddress) = emailAddress
 
-/// A calendar's id at Google. Opaque - it is Google's business what shape it has.
+/// Opaque - it is Google's business what shape it has.
 type CalendarId = private CalendarId of string
 
 module CalendarId =
@@ -53,7 +50,6 @@ module CalendarId =
 
     let value (CalendarId id) = id
 
-/// A calendar's display name, as Google shows it.
 type CalendarName = private CalendarName of string
 
 module CalendarName =
@@ -66,7 +62,7 @@ module CalendarName =
 
     let value (CalendarName name) = name
 
-/// A calendar as Google lists it. The domain carries only what a person picks from.
+/// The domain carries only what a person picks from.
 type AvailableCalendar =
     {
         Id: CalendarId
@@ -93,12 +89,11 @@ type RegisteredGoogleAccount =
 // below) carries a CalendarEventId.
 // ---------------------------------------------------------------------------------------------
 
-/// Start date, title and description of a calendar event for an invoice. No time, no time zone,
-/// no duration - Q2.1 makes every invoice event all-day on the due date, so the domain carries
-/// nothing it never sets, and the mapper cannot accidentally invent one.
+/// No time, no time zone, no duration - Q2.1 makes every invoice event all-day on the due date,
+/// so the domain carries nothing it never sets, and the mapper cannot accidentally invent one.
 type AllDayEvent = { Date: System.DateTime; Title: string; Description: string }
 
-/// A calendar event's id at Google. Opaque - it is Google's business what shape it has.
+/// Opaque - it is Google's business what shape it has.
 type CalendarEventId = private CalendarEventId of string
 
 module CalendarEventId =
@@ -111,9 +106,6 @@ module CalendarEventId =
 
     let value (CalendarEventId id) = id
 
-/// What can go wrong in this area, in terms a person could say out loud. Each case carries the
-/// values its message is written from.
-///
 /// GoogleAccountIdInvalid and CalendarIdInvalid are not in design.md's original listing - its
 /// workflow signatures take raw strings (`accountId: string`, `calendarId: string`) but its
 /// CalendarError has no case for one that is malformed rather than merely unknown. Adding them
@@ -208,8 +200,6 @@ type CalendarEvent =
       Event: AllDayEvent
       SyncKey: InvoiceSyncKey option }
 
-/// The bound `ListCalendarEvents` needs.
-///
 /// Q2.5 ties it to the scan window, which needs saying carefully because the obvious reading is
 /// wrong: the scan window looks BACKWARDS at when mail arrived, while an invoice event sits on
 /// its DUE date, which is normally ahead of that. Querying [today - N, today] would miss the
@@ -248,18 +238,15 @@ type LedgerSnapshot =
     { InWindow: UploadableInvoice list
       AllLedgerKeys: Set<InvoiceSyncKey> }
 
-/// One invoice and the event id it is synced to.
 type SyncedInvoice = { Invoice: UploadableInvoice; EventId: CalendarEventId }
 
-/// What executing one SyncAction actually did.
 type SyncOutcome =
     | Created of InvoiceId * CalendarEventId
     | Updated of InvoiceId * CalendarEventId
     | Deleted of CalendarEventId
     /// LeaveAlone executed - no call was made.
     | Skipped of CalendarEventId
-    /// An update or delete found the event already gone. A success: the calendar already agrees
-    /// with the target state.
+    /// A success: the calendar already agrees with the target state.
     | AlreadyGone of CalendarEventId
     | Failed of SyncAction * CalendarError
 
@@ -269,7 +256,6 @@ type SyncOutcome =
 type ListCalendarEvents =
     GoogleAccountId -> CalendarId -> CalendarDateRange -> Result<CalendarEvent list, CalendarError>
 
-/// Creates an all-day event and stamps the extended property with the derived InvoiceSyncKey.
 type CreateCalendarEvent =
     GoogleAccountId -> CalendarId -> InvoiceSyncKey -> AllDayEvent -> Result<CalendarEventId, CalendarError>
 
@@ -285,8 +271,6 @@ type DeleteCalendarEvent =
 type MarkSynced =
     InvoiceId -> GoogleAccountId -> CalendarId -> CalendarEventId -> Result<unit, InvoiceError>
 
-/// Removes a sync record after its event is deleted.
-///
 /// Keyed by CalendarEventId, not InvoiceId, deliberately: by the time SyncInvoicesToCalendarWorkflow
 /// executes a DeleteEvent, the invoice it belonged to is already gone from the Invoices table -
 /// that is the whole reason it is a DeleteEvent - so the InvoiceCalendarEvents row referencing it

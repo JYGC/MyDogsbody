@@ -65,7 +65,7 @@ let ``validateInvoice returns InvoiceReferenceInvalid carrying the raw value`` (
 
 [<Fact; Trait("Level", "Unit")>]
 let ``validateInvoice returns AmountInvalid carrying the raw value`` () =
-    let tooBig = Money.MaxAbsAmount + 1m
+    let tooBig = Money.MaximumAbsoluteAmountAsATypoGuardNotAPolicy + 1m
 
     match validateInvoice received { extracted with Amount = tooBig } with
     | Error(AmountInvalid carried) -> Assert.Equal(string tooBig, carried)

@@ -1,6 +1,3 @@
-/// The scan orchestration: read the selected account, match a supplier, apply its templates,
-/// validate, store; record a problem for every message that yields nothing, and continue.
-///
 /// Every dependency is a function value - no mail store, no database, no files - so the whole
 /// thing is unit-tested with lambdas. Most of the body is calls to the pure workflows from
 /// change #2.
@@ -32,16 +29,13 @@ let private fromMailAccountError (error: MailAccountError) : InvoiceError =
 let private fromSupplierError (error: SupplierError) : InvoiceError = InvoiceStoreFailed $"{error}"
 let private fromTemplateError (error: TemplateError) : InvoiceError = InvoiceStoreFailed $"{error}"
 
-/// An apply-time or validation InvoiceError becomes the persisted ScanProblemCause for the
-/// message it happened on. supplierId is the matched supplier - known by the time any of these
-/// can arise.
-let private toProblemCause (supplierId: SupplierId) (error: InvoiceError) : ScanProblemCause =
+let private toProblemCause (matchedSupplierId: SupplierId) (error: InvoiceError) : ScanProblemCause =
     match error with
     | SupplierNotRecognised _ -> NoSupplierMatched
     | MultipleSuppliersMatched(_, ids) -> SeveralSuppliersMatched ids
     | NoTemplateForSupplier sid -> NoTemplateMatched sid
-    | TemplateMatchedNothing(templateId, field) -> RuleFoundNothing(supplierId, templateId, string field)
-    | RuleTimedOut(templateId, field) -> RuleTimedOutCause(supplierId, templateId, string field)
+    | TemplateMatchedNothing(templateId, field) -> RuleFoundNothing(matchedSupplierId, templateId, string field)
+    | RuleTimedOut(templateId, field) -> RuleTimedOutCause(matchedSupplierId, templateId, string field)
     | AmountUnparseable(field, raw) -> ValueUnparseable(string field, raw)
     | DateUnparseable(field, raw, _) -> ValueUnparseable(string field, raw)
     | DueDateOutOfRange(_, issueDate, days) ->
@@ -62,12 +56,10 @@ let private toProblemCause (supplierId: SupplierId) (error: InvoiceError) : Scan
     | NoAccountSelected
     | InvoiceStoreFailed _ -> ValueUnparseable("(scan)", string error)
 
-/// What one message produced: an invoice to store, a problem to record, or - for a tombstoned
-/// key - nothing at all.
 type private MessageOutcome =
-    | Extracted of ValidInvoice
-    | Recorded of ScanProblemCause
-    | Skipped
+    | InvoiceToStore of ValidInvoice
+    | ProblemToRecord of ScanProblemCause
+    | NothingBecauseTheKeyIsTombstoned
 
 let private processMessage
     (suppliers: StoredSupplier list)
@@ -77,32 +69,7 @@ let private processMessage
     (attachmentCauses: ScanProblemCause list)
     : Result<MessageOutcome, InvoiceError> =
     result {
-        // An attachment that could not be read, or whose format has no reader, is the more useful
-        // diagnostic whenever the message yielded nothing: it is a fact ABOUT THE MESSAGE, whereas
-        // every other cause here is a conclusion about the template, and it is recorded nowhere
-        // else - ScanMessageWorkflow hands it over exactly once, in this list. Reported only for a
-        // message that produced no invoice, since a scan records one problem per message and a
-        // message that yielded an invoice has its rows cleared by clearScanProblems.
-        //
-        // requirements.md names these two among the eight distinguishable causes, asks that an
-        // unsupported format be named "so the question of whether to build a reader for it can
-        // later be answered from data", says a legacy .doc "SHALL NOT" be skipped silently, and
-        // pins the case outright: "WHEN an attachment is empty or zero bytes THE SYSTEM SHALL
-        // report it as unreadable RATHER THAN AS TEXT THAT MATCHED NOTHING."
-        //
-        // Consulting the list only when NO supplier matched left both unreachable for a CONFIGURED
-        // supplier - the case the feature exists for - and produced two measured wrong diagnostics:
-        //
-        //   RuleFoundNothing(acme, acme-t1, "Reference")  - literally the sentence the requirement
-        //                                                   above forbids, for an unreadable PDF;
-        //   NoTemplateMatched(acme)                       - for a supplier that HAS a PDF template.
-        //
-        // The second is the worse of the two and is why this covers the whole selectTemplate
-        // branch: SelectTemplateWorkflow filters out every template whose DocumentPart the message
-        // does not carry, and an attachment that failed to read is not among the message's parts.
-        // So the one supplier configured correctly is told to go and configure a template that is
-        // already there. outcome.md's 12.5 run recorded NoTemplateMatched twice against the real
-        // mailbox.
+        // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ScanForInvoicesWorkflow.fs: orAttachmentCause
         let orAttachmentCause (conclusion: ScanProblemCause) : ScanProblemCause =
             match attachmentCauses with
             | cause :: _ -> cause
@@ -111,10 +78,10 @@ let private processMessage
         match MatchSupplierWorkflow.matchSupplier suppliers scanned with
         // Decided BEFORE any template is tried, so the attachment is not the diagnostic: the
         // matchers have to be narrowed whatever the attachment turned out to be.
-        | Error(MultipleSuppliersMatched(_, ids)) -> return Recorded(SeveralSuppliersMatched ids)
+        | Error(MultipleSuppliersMatched(_, ids)) -> return ProblemToRecord(SeveralSuppliersMatched ids)
         | Error _ ->
             // matchSupplier only ever returns SupplierNotRecognised here.
-            return Recorded(orAttachmentCause NoSupplierMatched)
+            return ProblemToRecord(orAttachmentCause NoSupplierMatched)
         | Ok supplierId ->
             let supplier = suppliers |> List.find (fun candidateSupplier -> candidateSupplier.Id = supplierId)
 
@@ -122,30 +89,21 @@ let private processMessage
                 loadTemplatesForSupplier supplierId |> Result.mapError fromTemplateError
 
             match SelectTemplateWorkflow.selectTemplate supplier.PaymentTermDays supplierId templates scanned with
-            | Error selectError -> return Recorded(orAttachmentCause (toProblemCause supplierId selectError))
+            | Error selectError -> return ProblemToRecord(orAttachmentCause (toProblemCause supplierId selectError))
             | Ok extracted ->
                 match ValidateInvoiceWorkflow.validateInvoice scanned.ReceivedAt extracted with
                 | Error validationError ->
-                    return Recorded(orAttachmentCause (toProblemCause supplierId validationError))
+                    return ProblemToRecord(orAttachmentCause (toProblemCause supplierId validationError))
                 | Ok invoice ->
                     let key = SupplierId.value invoice.SupplierId, InvoiceReference.value invoice.Reference
 
                     if Set.contains key tombstonedKeys then
-                        return Skipped
+                        return NothingBecauseTheKeyIsTombstoned
                     else
-                        return Extracted invoice
+                        return InvoiceToStore invoice
     }
 
-/// Everything after `readMailFolder` runs with every folder's watermark already advanced to EOF -
-/// `MailFolderReader.readFolder` saves it as part of reading, before a single message is processed.
-/// So ANY abort from there on strands the mail this scan read behind an "already read" mark:
-/// `resumeOffset` resumes from `OffsetReached` whenever the file has only grown, so the next scan
-/// answers "nothing new" for messages that never became an invoice or a problem. No invoice, no
-/// problem, nothing on screen (design.md -> Decisions taken #17; requirements.md -> "SHALL NOT
-/// advance them past mail it read but never turned into an invoice or a problem").
-///
-/// The ORIGINAL error is returned whether or not the clear succeeded, so a broken store - the usual
-/// cause of an abort here - does not mask itself behind a second failure.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ScanForInvoicesWorkflow.fs: resettingWatermarksOnError
 let private resettingWatermarksOnError
     (clearWatermarks: ClearWatermarks)
     (accountId: MailAccountId)
@@ -158,13 +116,13 @@ let private resettingWatermarksOnError
         |> Result.mapError (fun _ -> error)
         |> Result.bind (fun () -> Error error)
 
-/// The running total across messages. `Fatal` short-circuits: once set, no further message is
-/// processed and the scan returns that error rather than a partial result.
+/// Once the fatal error is set, no further message is processed and the scan returns that error
+/// rather than a partial result.
 type private ScanAccumulator =
     { Stored: StoredInvoice list
       Recorded: ScanProblem list
       Succeeded: SourceMessageId list
-      Fatal: InvoiceError option }
+      FatalErrorThatShortCircuitsTheScan: InvoiceError option }
 
 let scanForInvoices
     (getCurrentTime: GetCurrentTime)
@@ -204,7 +162,8 @@ let scanForInvoices
         let! messages = readMailFolder accountId cutoff |> Result.mapError fromMailAccountError
 
         // Past this line every folder's watermark is at EOF, so every abort below has to reset
-        // them - not only the ScanAccumulator.Fatal one. See resettingWatermarksOnError.
+        // them - not only the ScanAccumulator.FatalErrorThatShortCircuitsTheScan one. See
+        // resettingWatermarksOnError.
         let onAbortResetWatermarks outcome =
             resettingWatermarksOnError clearWatermarks accountId outcome
 
@@ -227,17 +186,17 @@ let scanForInvoices
               RecordedAt = getCurrentTime () }
 
         let step (accumulator: ScanAccumulator) (message: MailMessage) : ScanAccumulator =
-            match accumulator.Fatal with
+            match accumulator.FatalErrorThatShortCircuitsTheScan with
             | Some _ -> accumulator
             | None ->
                 let scanned, attachmentCauses = ScanMessageWorkflow.scanMessage readDocumentText message
 
                 match processMessage suppliers loadTemplatesForSupplier tombstonedKeys scanned attachmentCauses with
-                | Error error -> { accumulator with Fatal = Some error }
-                | Ok Skipped -> accumulator
-                | Ok(Recorded cause) ->
+                | Error error -> { accumulator with FatalErrorThatShortCircuitsTheScan = Some error }
+                | Ok NothingBecauseTheKeyIsTombstoned -> accumulator
+                | Ok(ProblemToRecord cause) ->
                     { accumulator with Recorded = problemFor scanned cause :: accumulator.Recorded }
-                | Ok(Extracted invoice) ->
+                | Ok(InvoiceToStore invoice) ->
                     match upsertInvoice invoice with
                     | Ok storedInvoice ->
                         { accumulator with
@@ -245,13 +204,13 @@ let scanForInvoices
                             Succeeded = scanned.SourceMessageId :: accumulator.Succeeded }
                     | Error(SupplierGone _) ->
                         { accumulator with Recorded = problemFor scanned NoSupplierMatched :: accumulator.Recorded }
-                    | Error error -> { accumulator with Fatal = Some error }
+                    | Error error -> { accumulator with FatalErrorThatShortCircuitsTheScan = Some error }
 
         let final =
             messages
-            |> List.fold step { Stored = []; Recorded = []; Succeeded = []; Fatal = None }
+            |> List.fold step { Stored = []; Recorded = []; Succeeded = []; FatalErrorThatShortCircuitsTheScan = None }
 
-        match final.Fatal with
+        match final.FatalErrorThatShortCircuitsTheScan with
         // This scan is aborting with some or none of the messages handled, over watermarks
         // readMailFolder already advanced to EOF - so reset them on the way out.
         | Some error -> return! onAbortResetWatermarks (Error error)
@@ -259,7 +218,6 @@ let scanForInvoices
             let problems = List.rev final.Recorded
             let succeeded = List.rev final.Succeeded
 
-            // Persist this scan's problems, then clear the rows for messages that now succeeded.
             // clearScanProblems only touches the ids passed - a narrower window does not erase
             // diagnostics for messages outside it (design decision 4).
             //

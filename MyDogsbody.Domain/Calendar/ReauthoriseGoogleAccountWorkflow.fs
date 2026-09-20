@@ -3,8 +3,6 @@ module MyDogsbody.Domain.Calendar.ReauthoriseGoogleAccountWorkflow
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Calendar
 
-/// Re-authorises an account whose token has expired or been revoked.
-///
 /// Keeps the account's chosen default calendar, because it is looked up and re-saved via
 /// `{ account with ... }` rather than rebuilt from scratch (requirements.md: "an account is
 /// re-authorised THE SYSTEM SHALL keep its chosen default calendar").

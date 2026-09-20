@@ -15,8 +15,6 @@ open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.UI.Types
 
-/// UI string -> domain union.
-///
 /// Returns Result rather than failing loudly: this mapper is handed a plain string, so an
 /// unrecognised value is reachable input rather than an impossible one. SupplierApi promises
 /// Result<_, MyDogsbodyException>, and raising here broke that promise in the one place nothing
@@ -29,16 +27,14 @@ let private toMatcherKind (kind: string) : Result<MatcherKind, string> =
     | "Subject" -> Ok Subject
     | unknown -> Error $"Matcher kind '{unknown}' has no domain equivalent."
 
-/// Domain union -> UI string. Exhaustive: adding a case to MatcherKind breaks this build.
+/// Exhaustive: adding a case to MatcherKind breaks this build.
 let private toMatcherKindUiString (kind: MatcherKind) : string =
     match kind with
     | Sender -> "Sender"
     | Domain -> "Domain"
     | Subject -> "Subject"
 
-/// Stops at the first unrecognised kind, the same way the domain's own matcher validation stops
-/// at the first invalid rule.
-let private toUnvalidatedMatchers
+let private toUnvalidatedMatchersStoppingAtTheFirstUnrecognisedKind
     (matchers: SupplierMatcherUiType list)
     : Result<(MatcherKind * string) list, SupplierError> =
     let rec loop remaining accumulatedMatchers =
@@ -61,7 +57,7 @@ let toUnvalidatedSupplier
     (uiType: SupplierUiTypeWithoutId)
     : Result<UnvalidatedSupplier, SupplierError> =
     result {
-        let! matchers = toUnvalidatedMatchers uiType.Matchers
+        let! matchers = toUnvalidatedMatchersStoppingAtTheFirstUnrecognisedKind uiType.Matchers
 
         return
             {
@@ -75,7 +71,7 @@ let toUnvalidatedSupplierEdit
     (uiType: SupplierUiType)
     : Result<UnvalidatedSupplierEdit, SupplierError> =
     result {
-        let! matchers = toUnvalidatedMatchers uiType.Matchers
+        let! matchers = toUnvalidatedMatchersStoppingAtTheFirstUnrecognisedKind uiType.Matchers
 
         return
             {

@@ -18,8 +18,7 @@ let private supplierName (namesById: Map<string, string>) (id: SupplierId) : str
     |> Map.tryFind (SupplierId.value id)
     |> Option.defaultValue $"(unknown supplier {SupplierId.value id})"
 
-/// The sentence the problems view shows for each cause. EXHAUSTIVE over ScanProblemCause: a
-/// ninth case breaks this build.
+/// Exhaustive over ScanProblemCause: a ninth case breaks this build.
 let causeSentence (namesById: Map<string, string>) (cause: ScanProblemCause) : string =
     match cause with
     | NoSupplierMatched -> "No supplier's matchers recognised this message."

@@ -28,18 +28,15 @@ let private domainProjectFile () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``MyDogsbody.Domain declares no ProjectReference`` () =
-    // Arrange
     let projectFile = domainProjectFile ()
     Assert.True(File.Exists projectFile, $"Expected the domain project at {projectFile}")
 
-    // Act
     let references =
         XDocument.Load(projectFile).Descendants()
         |> Seq.filter (fun element -> element.Name.LocalName = "ProjectReference")
         |> Seq.map (fun element -> element.Attribute(XName.Get "Include").Value)
         |> Seq.toList
 
-    // Assert
     Assert.True(
         List.isEmpty references,
         "MyDogsbody.Domain must reference no other project, but found: "
@@ -49,17 +46,15 @@ let ``MyDogsbody.Domain declares no ProjectReference`` () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``MyDogsbody.Domain declares no PackageReference`` () =
-    // Arrange - FSharp.Core is supplied implicitly by the SDK and never appears in the file.
+    // FSharp.Core is supplied implicitly by the SDK and never appears in the file.
     let projectFile = domainProjectFile ()
 
-    // Act
     let packages =
         XDocument.Load(projectFile).Descendants()
         |> Seq.filter (fun element -> element.Name.LocalName = "PackageReference")
         |> Seq.map (fun element -> element.Attribute(XName.Get "Include").Value)
         |> Seq.toList
 
-    // Assert
     Assert.True(
         List.isEmpty packages,
         "MyDogsbody.Domain must reference no package, but found: "
@@ -68,11 +63,10 @@ let ``MyDogsbody.Domain declares no PackageReference`` () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``the domain assembly references no MyDogsbody assembly`` () =
-    // Arrange - the .fsproj assertions above cover what is declared; this covers what was
+    // the .fsproj assertions above cover what is declared; this covers what was
     // actually linked, which is what a workflow can really reach at runtime.
     let domainAssembly = typeof<MyDogsbody.Domain.Suppliers.SupplierError>.Assembly
 
-    // Act
     let myDogsbodyReferences =
         domainAssembly.GetReferencedAssemblies()
         |> Array.map (fun assemblyName -> assemblyName.Name)
@@ -80,7 +74,6 @@ let ``the domain assembly references no MyDogsbody assembly`` () =
             not (isNull name) && name.StartsWith("MyDogsbody", StringComparison.Ordinal))
         |> Array.toList
 
-    // Assert
     Assert.True(
         List.isEmpty myDogsbodyReferences,
         "The domain assembly must link no MyDogsbody assembly, but found: "

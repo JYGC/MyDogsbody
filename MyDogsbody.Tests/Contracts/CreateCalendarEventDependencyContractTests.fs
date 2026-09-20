@@ -179,7 +179,10 @@ let ``the real adapter sends an all-day start date and stamps the derived sync k
         Assert.DoesNotContain("dateTime", startElement.EnumerateObject() |> Seq.map (fun p -> p.Name))
 
         let privateProperties = requestRoot.GetProperty("extendedProperties").GetProperty "private"
-        Assert.Equal(InvoiceSyncKey.value syncKey, privateProperties.GetProperty(InvoiceSyncKey.PropertyName).GetString()))
+        let syncKeyPropertyOnTheRequest =
+            privateProperties.GetProperty(InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent).GetString()
+
+        Assert.Equal(InvoiceSyncKey.value syncKey, syncKeyPropertyOnTheRequest))
 
 [<Fact; Trait("Level", "Contract")>]
 let ``the real adapter maps a 400 rejection to EventRejected, carrying Google's sentence`` () =

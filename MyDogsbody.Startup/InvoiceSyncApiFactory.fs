@@ -108,9 +108,8 @@ let createInvoiceSyncApiWith
         fun eventId ->
             InvoiceCalendarEventStore.clearSyncRecord handleError databaseConnection eventId |> Result.mapError toInvoiceError
 
-    /// The current window, resolved the same way ScanWindowApiFactory.GetSelectedScanWindow is -
-    /// the remembered choice, or the fallback if it no longer exists.
-    let resolvedWindow () : Result<ScanWindowDays, MyDogsbodyException> =
+    /// Resolved the same way ScanWindowApiFactory.GetSelectedScanWindow is.
+    let rememberedScanWindowOrTheFallbackIfItNoLongerExists () : Result<ScanWindowDays, MyDogsbodyException> =
         result {
             let! windows = ScanWindowStore.getScanWindows handleError databaseConnection databaseContext.GetScanWindows ()
             let! remembered = ScanWindowStore.getSelectedScanWindow handleError databaseConnection ()
@@ -160,7 +159,7 @@ let createInvoiceSyncApiWith
             | None -> return None
             | Some account ->
                 let calendarId = Option.get account.DefaultInvoiceCalendar
-                let! window = resolvedWindow ()
+                let! window = rememberedScanWindowOrTheFallbackIfItNoLongerExists ()
                 let cutoff = Some(ScanForInvoicesWorkflow.computeCutoff getCurrentTime window)
 
                 let! storedInWindow = loadInvoices cutoff |> Result.mapError (InvoiceApiMappers.toMyDogsbodyException action)
@@ -211,18 +210,7 @@ let createInvoiceSyncApiWith
             match context with
             | None -> return! Error(MyDogsbodyException(action, notReadyMessage, ApplicationException notReadyMessage))
             | Some(account, calendarId, _, fullPlan, _) ->
-                // Q2.7: the selection when there is one, everything outstanding when there is not.
-                // Selected by SyncKey (supplier + reference, InvoiceSyncKey.value) - the one field
-                // every plan-row kind carries that is actually unique - rather than by re-trusting
-                // an event id or invoice id the preview handed back, so a plan that has moved on
-                // since the preview (a rescan, a due-date change) still selects the right CURRENT
-                // action for that invoice rather than a stale one.
-                //
-                // NOT Reference alone (PR #23 review round 1): the ledger's unique index is on
-                // (supplier, reference), not on reference alone, so two different suppliers can
-                // share the same reference text. Matching on bare Reference let a tick on one
-                // supplier's row also select a different supplier's action for the same text -
-                // including, in the worst case, a DeleteEvent nobody ticked.
+                // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Startup.md - InvoiceSyncApiFactory.fs: selectedSyncKeys
                 let selectedSyncKeys = selectedRows |> List.map (fun row -> row.SyncKey) |> Set.ofList
 
                 let syncKeyOf =
@@ -261,8 +249,6 @@ let createInvoiceSyncApiWith
     { GetSyncPlan = getSyncPlan
       ExecuteSyncPlan = executeSyncPlan }
 
-/// The composition root's entry point - the production Google calendar client, exactly the way
-/// `Startup.fs` calls it.
 let createInvoiceSyncApi
     (handleError: HandleErrorBuilder)
     (getCurrentTime: unit -> DateTime)

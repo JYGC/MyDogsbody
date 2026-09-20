@@ -84,16 +84,7 @@ let ``toOrphanedEvents does not report an event the plan already accounts for`` 
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toOrphanedEvents reports a second event sharing a key as a duplicate, not as keyless`` () =
-    // requirements.md's edge case: "WHEN the same invoice has two events on the calendar THE
-    // SYSTEM SHALL update the first and report the second as a duplicate, and SHALL NOT delete it
-    // without confirmation." `diff` compares only the first-seen event for a shared key against
-    // the ledger (its own "Duplicates" comment) and leaves every other event untouched - neither
-    // updated nor deleted, so it is never the target of any SyncAction. Before round 2's fix, that
-    // made the second event invisible here too. Before round 3's fix, it was visible but
-    // mislabelled: OrphanedEventUiType's old bare `NeedsAttention: bool` could not tell this case
-    // apart from a genuinely keyless event, so the screen told the user "no recognisable sync key"
-    // for an event that had one - just not the one `diff` matched. This asserts the exact reason,
-    // not merely that the row is flagged.
+    // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - InvoiceSyncApiMappersTests.fs: invoice
     let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
     let key = keyFor invoice
     let firstEvent = keyedEvent "evt-1" (Some key)
@@ -113,18 +104,7 @@ let ``toOrphanedEvents reports a second event sharing a key as a duplicate, not 
 
 [<Fact; Trait("Level", "Unit")>]
 let ``toOrphanedEvents does not report an event as a duplicate when its invoice is merely outside the current window`` () =
-    // PR #23 review round 5. Q2.9: "narrowing hides; it does not forget" - an invoice's window
-    // membership is decided by when its MESSAGE arrived (MyDogsbody.Database/InvoiceStore.fs's
-    // cutoff filters on MessageReceivedAt), not by its due date, so an invoice can sit outside
-    // `InWindow` today while its due date still falls inside the calendar's queried date range
-    // (e.g. a 45-day-old invoice due next week, viewed under a 14-day window). `diff` correctly
-    // produces NO action at all for such a key: not Create/Update/LeaveAlone (the invoice is not
-    // in `InWindow`) and not Delete either (the key is still in `AllLedgerKeys`, since the invoice
-    // has not left the ledger - merely fallen out of view). Before this round's fix,
-    // toOrphanedEvents had no way to tell "nobody's SyncAction named this event because it is out
-    // of view" apart from "a second event is sharing an already-matched key", and reported every
-    // such event as DuplicateOfAnotherEventsSyncKey - a false "needs attention" alarm on a
-    // perfectly healthy, singly-synced event, purely from narrowing the scan window.
+    // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - InvoiceSyncApiMappersTests.fs: invoice (2)
     let invoice = uploadable "sup-1" "INV-1" (DateTime(2026, 4, 1))
     let key = keyFor invoice
     let event = keyedEvent "evt-1" (Some key)

@@ -11,20 +11,19 @@ open MyDogsbody.Builders
 open MyDogsbody.Exceptions.Types
 open MyDogsbody.Domain.Documents
 
-/// Words whose baselines sit within this many PDF units of each other are one line.
-let private lineTolerance = 2.0
+let private baselineDistanceInPdfUnitsWithinWhichWordsAreOneLine = 2.0
 
-/// A vertical gap between consecutive lines larger than this multiple of the page's line pitch
-/// starts a new block. A block is what Finding 4's join rule is scoped to: a wrapped continuation
-/// may be joined to its predecessor within a block and never across one.
-let private blockGapFactor = 1.8
+/// A block is what Finding 4's join rule is scoped to: a wrapped continuation may be joined to its
+/// predecessor within a block and never across one.
+let private lineGapAsAMultipleOfThePageLinePitchAboveWhichANewBlockStarts = 1.8
 
-/// One page's words grouped into lines: banded by baseline, top of the page first, each band
-/// read left to right. Returns the band key (larger = higher up the page) alongside the text so
-/// the caller can measure vertical gaps.
-let private pageLines (words: (float * float * string) list) : (float * string) list =
+/// Returns the band key (larger = higher up the page) alongside the text so the caller can
+/// measure vertical gaps.
+let private groupOnePagesWordsIntoLinesByBaselineBandTopOfThePageFirstEachBandReadLeftToRight
+    (words: (float * float * string) list)
+    : (float * string) list =
     words
-    |> List.groupBy (fun (bottom, _, _) -> Math.Round(bottom / lineTolerance))
+    |> List.groupBy (fun (bottom, _, _) -> Math.Round(bottom / baselineDistanceInPdfUnitsWithinWhichWordsAreOneLine))
     |> List.sortByDescending fst
     |> List.map (fun (band, banded) ->
         let text =
@@ -35,10 +34,10 @@ let private pageLines (words: (float * float * string) list) : (float * string) 
 
         band, text)
 
-/// Assigns a block index to every line of a page, starting from `startBlock`. A new block begins
-/// where the gap to the previous line exceeds `blockGapFactor` times the smallest gap on the
-/// page (its line pitch). Returns the tagged lines and the next free block index.
-let private tagBlocks (startBlock: int) (lines: (float * string) list) : TextLine list * int =
+let private tagEveryLineOfOnePageWithItsBlockIndexReturningTheNextFreeBlockIndex
+    (startBlock: int)
+    (lines: (float * string) list)
+    : TextLine list * int =
     let gaps =
         lines
         |> List.pairwise
@@ -53,7 +52,8 @@ let private tagBlocks (startBlock: int) (lines: (float * string) list) : TextLin
             (fun (reversedTaggedLines, block, previousBand) (band, text) ->
                 let block =
                     match previousBand with
-                    | Some prev when prev - band > blockGapFactor * pitch -> block + 1
+                    | Some prev when prev - band > lineGapAsAMultipleOfThePageLinePitchAboveWhichANewBlockStarts * pitch ->
+                        block + 1
                     | _ -> block
 
                 ({ Text = text; BlockIndex = block } :: reversedTaggedLines, block, Some band))
@@ -62,7 +62,7 @@ let private tagBlocks (startBlock: int) (lines: (float * string) list) : TextLin
 
     tagged, lastBlock + 1
 
-/// Reads a document's text, one TextLine per line. Satisfies the domain's ReadDocumentText.
+/// Satisfies the domain's ReadDocumentText.
 ///
 /// Returns DocumentError directly rather than going through handleError: every outcome here is a
 /// domain fact the scan reports as a problem - a scanned image (DocumentHasNoTextLayer), a file
@@ -87,7 +87,10 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
                     wordsByPage
                     |> List.fold
                         (fun (accumulatedLines, nextBlock) words ->
-                            let tagged, nextBlock = tagBlocks nextBlock (pageLines words)
+                            let tagged, nextBlock =
+                                tagEveryLineOfOnePageWithItsBlockIndexReturningTheNextFreeBlockIndex
+                                    nextBlock
+                                    (groupOnePagesWordsIntoLinesByBaselineBandTopOfThePageFirstEachBandReadLeftToRight words)
                             accumulatedLines @ tagged, nextBlock)
                         ([], 0)
 
@@ -123,8 +126,8 @@ let readContent
                                 yield
                                     {
                                         Text = word.Text
-                                        Bottom = word.BoundingBox.Bottom
-                                        Left = word.BoundingBox.Left
+                                        BottomEdgeHeightAboveThePageBottom = word.BoundingBox.Bottom
+                                        LeftEdgeDistanceFromThePageLeft = word.BoundingBox.Left
                                     }
                     ]
             }

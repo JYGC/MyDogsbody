@@ -19,27 +19,25 @@ module SourceMessageId =
 
     let value (SourceMessageId id) = id
 
-    /// Never fails: a blank id is replaced by the fallback text (itself never blank). A message
-    /// with no Message-ID already gets a synthesized one in the mail reader, so this only guards
-    /// against a torn read - and a problem keyed by nothing is worse than one keyed by a
-    /// stand-in.
+    /// A message with no Message-ID already gets a synthesized one in the mail reader, so this
+    /// only guards against a torn read - and a problem keyed by nothing is worse than one keyed
+    /// by a stand-in.
     let createOrDefault (fallback: string) (value: string) : SourceMessageId =
         match create value with
         | Ok id -> id
         | Error _ ->
+            let placeholderWhenTheFallbackIsAlsoBlank = SourceMessageId "unidentified-message"
+
             if System.String.IsNullOrWhiteSpace fallback then
-                SourceMessageId "unidentified-message"
+                placeholderWhenTheFallbackIsAlsoBlank
             else
                 SourceMessageId fallback
 
-/// Which part of a message some text came from.
 type MessagePart =
     | SubjectPart
     | BodyPart
     | AttachmentPart of name: string * format: DocumentFormat
 
-/// A message and its attachments flattened to text, ready for a template.
-///
 /// Deliberately carries no SupplierId - MatchSupplierWorkflow produces one FROM this, so
 /// carrying one here would be circular. The supplier lands on ExtractedInvoice instead.
 type ScannedMessage =
@@ -57,20 +55,7 @@ type NormalizedPart =
     { Part: MessagePart
       Lines: TextNormalization.NormalizedLine list }
 
-/// A ScannedMessage whose text has been through TextNormalization exactly once - every part's
-/// lines, the subject, and every attachment filename.
-///
-/// A distinct stage type rather than a flag or a convention, for the two reasons CLAUDE.md gives
-/// for stage types at all. It makes the normalization impossible to skip: applyTemplate takes one
-/// of these and there is no way to hand it raw text. And it makes the normalization impossible to
-/// repeat: it happens once per message in MessageNormalization, above the loop that tries a
-/// supplier's templates in turn, rather than once per candidate template inside it - NFKC over
-/// every line of every attachment is the most expensive thing in this pipeline, and it used to
-/// run once for each template tried.
-///
-/// Carries no Sender: MatchSupplierWorkflow answers "whose message is this?" from the raw
-/// ScannedMessage before a template is ever chosen, so nothing downstream of normalization needs
-/// one.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - InvoicesTypes.fs: NormalizedMessage
 type NormalizedMessage =
     private
         { SourceMessageId': SourceMessageId
@@ -86,8 +71,6 @@ module NormalizedMessage =
     let subject (normalizedMessage: NormalizedMessage) = normalizedMessage.Subject'
     let parts (normalizedMessage: NormalizedMessage) = normalizedMessage.Parts'
 
-/// What a template pulled out and parsed with its own hints.
-///
 /// Deliberately not named UnvalidatedInvoice - it is still untrusted in the domain sense
 /// (Reference is a plain string, Amount an unconstrained decimal, Currency compared to
 /// nothing), but ApplyTemplateWorkflow both extracts AND parses using the hint that selected
@@ -103,8 +86,7 @@ type ExtractedInvoice =
       IssueDate: System.DateTime option
       DueDate: System.DateTime option }
 
-/// What can go wrong turning a message into an invoice. Change #4 adds the storage and
-/// mail-store cases to this same union.
+/// Change #4 adds the storage and mail-store cases to this same union.
 ///
 /// DueDateOutOfRange is the one case here that is not about text: DateTime.AddDays RAISES
 /// ArgumentOutOfRangeException once the result leaves DateTime's range, and an issue date read as
@@ -124,26 +106,22 @@ type InvoiceError =
     | DueDateOutOfRange of template: TemplateId * issueDate: System.DateTime * paymentTermDays: int
     | RuleTimedOut of template: TemplateId * field: TargetField
     // --- change #4 ---
-    /// A field ExtractedInvoice carried could not become its constrained type. Each carries the
-    /// raw value the message is written from (task 3.3).
+    /// Each carries the raw value the message is written from (task 3.3).
     | InvoiceReferenceInvalid of raw: string
     | AmountInvalid of raw: string
     | CurrencyInvalid of raw: string
     /// A scan produced an invoice for a supplier that has since been deleted - reported as a
     /// problem rather than stored as a row with no supplier (edge case).
     | SupplierGone of SupplierId
-    /// A scan-window day count outside ScanWindowDays' bounds. Expected, rendered in the alert.
+    /// Expected, rendered in the alert.
     | ScanWindowInvalid of reason: string
-    /// Adding a window whose day count already exists. Carries the days for the message.
     | ScanWindowAlreadyExists of days: int
-    /// Deleting the only remaining window. A domain rule, not a UI guard: the picker must always
-    /// have something to offer.
+    /// A domain rule, not a UI guard: the picker must always have something to offer.
     | CannotDeleteLastScanWindow
-    /// A window was selected that is not one of the stored rows.
     | ScanWindowNotFound of days: int
     /// A delete or undelete named an invoice the ledger does not hold.
     | InvoiceNotFound
-    /// The scan ran with no mail account selected (change #3). Expected, not logged.
+    /// Expected, not logged (change #3).
     | NoAccountSelected
     /// The store, the mail reader, or a sibling area failed outright. Wraps the real message and
     /// is the one case here that is logged once.
@@ -169,24 +147,23 @@ module InvoiceReference =
 
     let value (InvoiceReference reference) = reference
 
-/// An amount and its currency code. Q1.2 makes currency part of what an invoice is; Q7.6.8 makes
-/// it a per-template FixedValue, overridable by a rule. 96% of measured documents carry `$` and
-/// every one sampled is AUD.
-type Money = private Money of decimal * string // amount, currency code
+/// Q1.2 makes currency part of what an invoice is; Q7.6.8 makes it a per-template FixedValue,
+/// overridable by a rule. 96% of measured documents carry `$` and every one sampled is AUD.
+type Money = private Money of amount: decimal * currencyCode: string
 
 module Money =
 
-    /// A typo guard, not a policy - the same shape as ScanWindowDays' bound. No lower bound: an
-    /// amount parsed as zero or negative is stored as found (requirements.md edge case).
-    /// (Not [<Literal>] - F# literal bindings cannot be decimal.)
-    let MaxAbsAmount = 1_000_000_000_000m
+    /// The same shape as ScanWindowDays' bound. No lower bound: an amount parsed as zero or
+    /// negative is stored as found (requirements.md edge case). (Not [<Literal>] - F# literal
+    /// bindings cannot be decimal.)
+    let MaximumAbsoluteAmountAsATypoGuardNotAPolicy = 1_000_000_000_000m
 
     let create (amount: decimal) (currency: string) : Result<Money, string> =
         let trimmed = if isNull currency then "" else currency.Trim()
 
         if trimmed = "" then
             Error "Currency must not be empty."
-        elif abs amount > MaxAbsAmount then
+        elif abs amount > MaximumAbsoluteAmountAsATypoGuardNotAPolicy then
             Error $"Amount {amount} is implausibly large."
         else
             Ok(Money(amount, trimmed.ToUpperInvariant()))
@@ -194,8 +171,8 @@ module Money =
     let amount (Money(rawAmount, _)) = rawAmount
     let currency (Money(_, currencyCode)) = currencyCode
 
-/// The date a document states it was issued. A year guard keeps a date read as 31 Dec 9999 -
-/// which DateFromField arithmetic would overflow on - out of the ledger.
+/// A year guard keeps a date read as 31 Dec 9999 - which DateFromField arithmetic would overflow
+/// on - out of the ledger.
 ///
 /// Named InvoiceIssueDate, not IssueDate: TargetField (the template DSL) already has union cases
 /// IssueDate and DueDate, and a type of the same name shadows them wherever both namespaces are
@@ -279,9 +256,8 @@ module ScanWindowDays =
     /// Used when nothing has been chosen yet, or the remembered choice no longer exists.
     let fallback = 14
 
-    /// The same value as a ScanWindowDays. Built with the private constructor because `fallback`
-    /// is inside the bounds by construction - ResolveScanWindowWorkflow needs it without a
-    /// Result to unwrap.
+    /// Built with the private constructor because `fallback` is inside the bounds by
+    /// construction - ResolveScanWindowWorkflow needs it without a Result to unwrap.
     let fallbackWindow = ScanWindowDays fallback
 
 type ScanWindowId = private ScanWindowId of string
@@ -300,9 +276,8 @@ type StoredScanWindow = { Id: ScanWindowId; Days: ScanWindowDays }
 
 // --- stage types and persisted shapes (task 2.3) ---
 
-/// An ExtractedInvoice whose every field has become its constrained type. Produced only by
-/// ValidateInvoiceWorkflow. DueDate is an option - Q1.10: an invoice with no due date is stored
-/// and listed, greyed out, and is simply not uploadable.
+/// Produced only by ValidateInvoiceWorkflow. DueDate is an option - Q1.10: an invoice with no
+/// due date is stored and listed, greyed out, and is simply not uploadable.
 type ValidInvoice =
     { SupplierId: SupplierId
       TemplateId: TemplateId
@@ -317,15 +292,11 @@ type ValidInvoice =
       /// from the mail store and is a fact, not a user value.
       MessageReceivedAt: System.DateTime }
 
-/// A ValidInvoice that has been through the store: it has an id and a scan timestamp.
 type StoredInvoice =
     { Id: InvoiceId
       Invoice: ValidInvoice
       ScannedAt: System.DateTime }
 
-/// An invoice that can actually become a calendar event. DueDate is NOT an option here - unlike
-/// StoredInvoice's, which is.
-///
 /// This is how "an invoice with no due date can't go on a calendar" (Q1.10) stops being a
 /// runtime check: the sync workflow (change #7) accepts only this type, so an invoice missing a
 /// due date cannot reach it. The invoice is still stored and still listed - it just isn't
@@ -339,8 +310,7 @@ type UploadableInvoice =
 
 module UploadableInvoice =
 
-    /// The only door. A StoredInvoice with no due date returns None, and the page renders that
-    /// as "not uploadable" with the reason.
+    /// The only door. The page renders None as "not uploadable" with the reason.
     let ofStored (invoice: StoredInvoice) : UploadableInvoice option =
         invoice.Invoice.DueDate
         |> Option.map (fun dueDate ->
@@ -350,8 +320,8 @@ module UploadableInvoice =
               Amount = invoice.Invoice.Amount
               DueDate = dueDate })
 
-/// Why a message yielded no invoice. Persisted (Q1.19) so incremental scanning does not empty
-/// the diagnostic list before it is looked at. The eight causes requirements.md enumerates.
+/// Persisted (Q1.19) so incremental scanning does not empty the diagnostic list before it is
+/// looked at. The eight causes requirements.md enumerates.
 type ScanProblemCause =
     | NoSupplierMatched
     | SeveralSuppliersMatched of SupplierId list
@@ -385,8 +355,6 @@ type ScanResult =
     { Invoices: StoredInvoice list
       Problems: ScanProblem list }
 
-/// Whether a scan resumes each folder from its watermark or reads every folder in full.
-///
 /// A choice type rather than a `bool` (CLAUDE.md coding style). A folder's watermark records how
 /// far it was read, and `MailFolderReader.resumeOffset` skips a message older than the cutoff
 /// BEFORE parsing its body - so a folder scanned once with no supplier configured advances to the

@@ -492,9 +492,10 @@ let ``an optional field whose rule simply finds nothing is still absent rather t
 
 [<Fact; Trait("Level", "Unit")>]
 let ``a rule that times out stops there rather than spending the whole timeout again on every later line`` () =
-    // runRegexAcross promises in its own doc comment to stop at the first TimedOut. Twenty
-    // candidate lines at 250ms of budget each is ~5s if the promise is not kept and ~250ms if
-    // it is; selectTemplate then multiplies whichever it gets by the number of candidate
+    // runRegexOnEachCandidateUntilOneIsFoundOrTimesOut promises in its own doc comment to stop at
+    // the first TimedOut. Twenty candidate lines at 250ms of budget each is ~5s if the promise is
+    // not kept and ~250ms if it is; selectTemplate then multiplies whichever it gets by the
+    // number of candidate
     // templates. requirements.md: "WHEN a rule times out THE SYSTEM SHALL NOT block the user
     // interface."
     let template =
@@ -728,8 +729,9 @@ let ``AsMoney refuses a hyphenated reference rather than booking the digits afte
     (rawLine: string)
     =
     // Measured on the round-1 implementation: these booked -1042, -30 and -77 respectively,
-    // silently, because numericRuns treated the '-' inside INV-1042 as the run's sign. A label
-    // collision - an Amount rule whose label also appears on a reference line - is all it takes.
+    // silently, because everyMaximalRunOfNumberShapedCharactersInTheTextInOrder treated the '-'
+    // inside INV-1042 as the run's sign. A label collision - an Amount rule whose label also
+    // appears on a reference line - is all it takes.
     let template =
         validTemplate
             [ { Field = Reference; Rule = FixedValue "X"; Hint = AsText }
@@ -977,7 +979,9 @@ let ``when no attachment yields every required field the reported error is the l
     // The cover letter carries the amount but no matching filename; the invoice matches the
     // filename but carries no amount. Pooled, those two halves made an Ok invoice out of nothing;
     // tried one at a time each fails on its own missing half, and the LAST failure is reported -
-    // the same rule SelectTemplateWorkflow.tryInOrder follows one level up.
+    // the same rule
+    // SelectTemplateWorkflow.tryEachTemplateInOrderUntilOneSucceedsReportingTheLastErrorWhenAllFail
+    // follows one level up.
     let template =
         validTemplateFor (Attachment Pdf) [ attachmentNameReference; stableAmountRule; stableCurrencyRule ]
     let scanned =
@@ -1127,7 +1131,8 @@ let ``AsMoney does not read a bracket that merely sits near the number as a cred
 [<Fact; Trait("Level", "Unit")>]
 let ``AsMoney still refuses a trailing sign rather than guessing which end the sign belonged to`` () =
     // Not a parenthesis case, but the same function and the same failure mode - pinned here
-    // because closing the parenthesis gap is a change to numericRuns, and "245.00-" reporting
+    // because closing the parenthesis gap is a change to
+    // everyMaximalRunOfNumberShapedCharactersInTheTextInOrder, and "245.00-" reporting
     // rather than guessing is the behaviour that must survive it.
     let template =
         validTemplate

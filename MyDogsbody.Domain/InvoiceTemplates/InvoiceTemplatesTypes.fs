@@ -37,7 +37,6 @@ module TemplateName =
 
     let value (TemplateName name) = name
 
-/// Which part of a message a template reads.
 type DocumentPart =
     | Body
     | Attachment of DocumentFormat
@@ -67,7 +66,6 @@ type TemplateFieldRule =
       Rule: FieldRule
       Hint: ParseHint }
 
-/// What the dialog produced. Untrusted - nothing has checked any of this yet.
 type UnvalidatedTemplate =
     { SupplierId: string
       Name: string
@@ -98,66 +96,20 @@ module ValidTemplate =
     let rules (validTemplate: ValidTemplate) = validTemplate.Rules'
     let compiledPatterns (validTemplate: ValidTemplate) = validTemplate.CompiledPatterns'
 
-/// Been through the store.
 type StoredTemplate =
     { Id: TemplateId
       Template: ValidTemplate }
 
-/// Can this template be SAVED? Apply-time failures are InvoiceError, not this - see design.md ->
-/// Decisions taken.
-///
-/// Three cases beyond design.md's original listing, the same way change #1 added
-/// SupplierError.PaymentTermInvalid when its documented DU had no case for a failure the
-/// workflow actually needed to report:
-///  - TemplateSupplierIdInvalid, TemplateIdInvalid: design.md's sequence diagram never shows a
-///    "parse this id" step, but EditSupplierWorkflow.validate is the established precedent for
-///    this exact shape of problem (an id arriving as an untrusted string) - it parses the id
-///    itself and reports SupplierIdInvalid on failure. These mirror that, one for the supplier a
-///    template belongs to and one for the template being edited.
-///  - DerivationSourceIsSelf: "a DateFromField rule may not name DueDate as its own source"
-///    (design.md -> Decisions taken, #9) names a refusal that fits neither
-///    DerivationSourceMissing (the source DOES have a rule - itself) nor DerivationSourceNotADate
-///    (the question isn't whether the source is date-shaped). Generalised to any field, not only
-///    DueDate, since a rule naming itself as its own source is circular regardless of which field.
-///  - ReorderIncomplete: requirements.md requires refusing a reorder that omits one of the
-///    supplier's existing templates. A submitted id that names no template of this supplier's
-///    reuses TemplateNotFound (an exact semantic fit); an existing template left out of the
-///    submitted order has no existing case to reuse, so this one carries every id left out, not
-///    only the first, the same way MultipleSuppliersMatched carries every match rather than one.
-///  - ReorderDuplicate: an order naming the same template twice is neither foreign (the id IS the
-///    supplier's) nor incomplete (Set.ofList collapses the repeat, so nothing looks missing), so
-///    neither existing case describes it. Carries the repeated id, the same way TemplateNotFound
-///    carries the offending one.
-///  - DerivationUnsupported, FieldHintMismatch: both close a save-time gap that used to surface
-///    as a scan-time silence. The engine supports exactly one derivation (DueDate from IssueDate)
-///    and reads a date only from an AsDate hint and money only from AsMoney; a template naming a
-///    different derivation, or pairing a date field with AsText, previously saved without
-///    complaint and then extracted nothing on every message forever. requirements.md is explicit
-///    that a template is validated "at that moment, not when a scan next runs", so the refusal
-///    belongs here. DerivationUnsupported carries both ends of the derivation because the message
-///    has to name the pair; FieldHintMismatch carries the hint actually given, since "which hint
-///    did I choose?" is the question the user needs answered.
-///  - LabelIsEmpty: "".IndexOf returns 0 against any string, so an AfterLabel with an empty label
-///    matches the FIRST LINE of every document and returns the whole of it, and
-///    LinesAfterLabel("", 1) returns the second. Both then pass the engine's empty check and store
-///    a confidently wrong value - worse than the two cases above, which merely drop a field. Null
-///    counts as empty here: a label arrives from a stored row, and a NULL column is how one
-///    reaches the domain.
-///  - RuleUnreachableForPart: an AttachmentName rule on a Body-scoped template reads a list of
-///    filenames that is empty by construction, so the field is silently absent on every message
-///    forever. validateTemplate sees both the Part and the Rules, so the contradiction is
-///    refusable at the only moment the user is standing in front of the editor. Carries both ends
-///    for the same reason DerivationUnsupported does - the message has to name the pair.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - InvoiceTemplatesTypes.fs: TemplateError
 type TemplateError =
     | TemplateNameInvalid of reason: string
     | TemplateIdInvalid of reason: string
     | TemplateSupplierIdInvalid of reason: string
-    /// The UI sent a TargetField/FieldRule-kind/ParseHint-kind/DocumentPart/DocumentFormat string
-    /// with no domain equivalent - a mapping-level concern, distinct from PatternInvalid (a
-    /// pattern that does not compile) or DateFormatInvalid (a format string that is not real).
-    /// Mirrors SupplierError.MatcherInvalid: Result rather than raising, because the top mapper
-    /// is called from Async.Start, where an uncaught exception reaches neither an alert nor a log.
-    | TemplateRuleShapeInvalid of reason: string
+    /// A mapping-level concern, distinct from PatternInvalid (a pattern that does not compile) or
+    /// DateFormatInvalid (a format string that is not real). Mirrors SupplierError.MatcherInvalid:
+    /// Result rather than raising, because the top mapper is called from Async.Start, where an
+    /// uncaught exception reaches neither an alert nor a log.
+    | TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent of reason: string
     | PatternInvalid of field: TargetField * reason: string
     | PatternHasNoCaptureGroup of field: TargetField
     | DateFormatInvalid of field: TargetField * reason: string
@@ -191,10 +143,9 @@ type DeleteTemplate = TemplateId -> Result<bool, TemplateError>
 
 type ReorderTemplates = SupplierId -> TemplateId list -> Result<unit, TemplateError>
 
-/// The suppliers a template may be written for. Declared here rather than reusing the suppliers
-/// area's LoadSuppliers, which returns Result<_, SupplierError>: a workflow in this area returns
-/// TemplateError, so reusing it would mean a Result.mapError at every call site and one
-/// dependency type spanning two error DUs - and therefore owing a contract suite in both areas.
-/// The adapter is the same SupplierStore.getAll; only the error mapping in TemplateApiFactory
-/// differs.
+/// Declared here rather than reusing the suppliers area's LoadSuppliers, which returns
+/// Result<_, SupplierError>: a workflow in this area returns TemplateError, so reusing it would
+/// mean a Result.mapError at every call site and one dependency type spanning two error DUs - and
+/// therefore owing a contract suite in both areas. The adapter is the same SupplierStore.getAll;
+/// only the error mapping in TemplateApiFactory differs.
 type LoadSuppliersForTemplates = unit -> Result<StoredSupplier list, TemplateError>

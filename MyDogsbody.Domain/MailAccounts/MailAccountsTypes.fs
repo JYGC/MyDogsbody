@@ -1,8 +1,5 @@
 namespace MyDogsbody.Domain.MailAccounts
 
-// The mail accounts workflow area: constrained primitives, one type per pipeline stage, the
-// area's error DU, and the dependency function types its workflows declare.
-//
 // This area depends on nothing else in the invoice-to-calendar series - see design.md -> "The
 // domain area, and why it is its own". Nothing here names ILiteCollection, a prefs.js key, an
 // mbox offset or a MIME type. The domain cannot reach any of them, and does not need to.
@@ -38,7 +35,7 @@ module MailAccountId =
 
     let value (MailAccountId id) = id
 
-/// How the account's messages are stored on disk. From storeContractID, never guessed.
+/// From storeContractID, never guessed.
 type StoreFormat =
     | Mbox
     | Maildir
@@ -54,7 +51,6 @@ module ScanCutoff =
 
     let value (ScanCutoff c) = c
 
-/// One folder inside an account's store.
 type MailFolder =
     {
         /// "Inbox", "Music.sbd/Surrey Hills Orchestra.sbd/Messages"
@@ -65,7 +61,7 @@ type MailFolder =
         IsScannable: bool
     }
 
-/// What discovery found for one account. "Configured but missing" is a state, not an omission.
+/// "Configured but missing" is a state, not an omission.
 type DiscoveredMailAccount =
     {
         Id: MailAccountId
@@ -81,7 +77,7 @@ type DiscoveredMailAccount =
         CachedMessageCount: (int * System.DateTime) option
     }
 
-/// A directory the walk could not read. Reported, never fatal - friction #13.
+/// Reported, never fatal - friction #13.
 type UnreadableDirectory = { Path: string; Reason: string }
 
 type DiscoveryResult =
@@ -121,9 +117,6 @@ type MailMessage =
         Attachments: MailAttachment list
     }
 
-/// What can go wrong in this area, in terms a person could say out loud. Each case carries the
-/// values its message is written from.
-///
 /// MailAccountIdInvalid is not in design.md's original listing - the design shows
 /// SelectMailAccountWorkflow taking a raw string but its error DU has no case for a malformed
 /// (empty) id, only for one that parses but names no known account. Adding one here is the

@@ -1,5 +1,4 @@
-/// Adds a scan window (Q1.17: add and delete, no edit). Rejects a day count outside the bounds
-/// or one that already exists, and does not touch the store on either refusal.
+/// Q1.17: add and delete, no edit.
 module MyDogsbody.Domain.Invoices.AddScanWindowWorkflow
 
 open MyDogsbody.Domain

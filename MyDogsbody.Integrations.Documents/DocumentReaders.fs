@@ -5,8 +5,8 @@ module MyDogsbody.Integrations.Documents.DocumentReaders
 
 open MyDogsbody.Domain.Documents
 
-/// Routes on DocumentSource.Format. The Format was decided upstream from the filename extension
-/// (DocumentFormat.ofFileName) - this function never looks at a content type.
+/// The Format was decided upstream from the filename extension (DocumentFormat.ofFileName) - this
+/// function never looks at a content type.
 let dispatch
     (readPdf: ReadDocumentText)
     (readWord: ReadDocumentText)

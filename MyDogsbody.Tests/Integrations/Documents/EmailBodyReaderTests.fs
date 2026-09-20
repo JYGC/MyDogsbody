@@ -16,10 +16,8 @@ let ``readText keeps a table label and its value adjacent in one block`` () =
     // alternative destroyed by wrapping.
     let html = File.ReadAllText DocumentFixtures.tableBodyHtml
 
-    // Act
     let actual = EmailBodyReader.readText { htmlSource html with Content = File.ReadAllBytes DocumentFixtures.tableBodyHtml }
 
-    // Assert
     match actual with
     | Ok lines ->
         let texts = lines |> List.map (fun line -> line.Text)

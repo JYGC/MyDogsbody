@@ -6,26 +6,7 @@ open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.InvoiceTemplates
 open MyDogsbody.Domain.Invoices
 
-// MessageNormalization.normalizeMessage is the SOLE DOOR to NormalizedMessage: the record is
-// private to the Invoices namespace and this is the only function that builds the literal.
-// ApplyTemplateWorkflow is then written against a guarantee it never re-checks - that anything
-// holding this type has had its subject, its attachment filenames and both views of every part's
-// lines put through TextNormalization exactly once.
-//
-// That guarantee is what this suite pins. CLAUDE.md -> Testing -> Contract asks for every mapper
-// at a ring boundary to be asserted field-for-field, and normalizeMessage is that mapper for the
-// Invoices area's stage boundary: ScannedMessage (untrusted text, straight off a reader) ->
-// NormalizedMessage (the only thing the engine accepts). Its own unit tests assert what it does
-// with a given input; these assert the properties applyTemplate LEANS on, so a later change that
-// reaches NormalizedMessage by another route - a second constructor, a store loading one back,
-// a normalization step moved elsewhere - breaks here rather than silently in the engine. The
-// un-normalized-subject defect of review round 1 was exactly that drift, found by hand.
-//
-// DEFERRED, deliberately, and not silently: the error-translation rows (each InvoiceError and
-// TemplateError case to its intended MyDogsbodyException) need TemplateApiMappers, which lands in
-// PR #12 with the store and the API record. A dependency-function-type suite is likewise thin
-// value while the Invoices area still declares no dependency types and has no adapter to run one
-// against - change #4 introduces both, and owes the suite then.
+// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - MessageNormalizationContractTests.fs: valueOrFail
 
 let private valueOrFail (result: Result<'T, string>) =
     match result with

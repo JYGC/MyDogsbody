@@ -29,8 +29,8 @@ let private message sender subject : ScannedMessage =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier returns the one supplier whose sender address matches exactly`` () =
-    let acme = supplier "1" [ SenderAddress "billing@acme.example" ]
-    let other = supplier "2" [ SenderAddress "billing@other.example" ]
+    let acme = supplier "1" [ SenderAddressEqualToIgnoringCase "billing@acme.example" ]
+    let other = supplier "2" [ SenderAddressEqualToIgnoringCase "billing@other.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme; other ] (message "billing@acme.example" "Invoice")
 
@@ -40,7 +40,7 @@ let ``matchSupplier returns the one supplier whose sender address matches exactl
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier matches a sender-domain rule against an address in that domain`` () =
-    let acme = supplier "1" [ SenderDomain "acme.example" ]
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "invoices@acme.example" "Invoice")
 
@@ -50,7 +50,7 @@ let ``matchSupplier matches a sender-domain rule against an address in that doma
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier compares sender address case-insensitively`` () =
-    let acme = supplier "1" [ SenderAddress "Billing@Acme.example" ]
+    let acme = supplier "1" [ SenderAddressEqualToIgnoringCase "Billing@Acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "billing@acme.example" "Invoice")
 
@@ -60,7 +60,7 @@ let ``matchSupplier compares sender address case-insensitively`` () =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier compares sender domain case-insensitively`` () =
-    let acme = supplier "1" [ SenderDomain "ACME.example" ]
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "ACME.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "invoices@acme.example" "Invoice")
 
@@ -70,7 +70,7 @@ let ``matchSupplier compares sender domain case-insensitively`` () =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier matches a subject substring`` () =
-    let acme = supplier "1" [ SubjectPattern "your acme statement" ]
+    let acme = supplier "1" [ SubjectContainsSubstringIgnoringCase "your acme statement" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "noreply@example.com" "Your Acme Statement is ready")
 
@@ -80,7 +80,7 @@ let ``matchSupplier matches a subject substring`` () =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier returns SupplierNotRecognised carrying the sender when nothing matches`` () =
-    let acme = supplier "1" [ SenderAddress "billing@acme.example" ]
+    let acme = supplier "1" [ SenderAddressEqualToIgnoringCase "billing@acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "unknown@nowhere.example" "Invoice")
 
@@ -90,8 +90,8 @@ let ``matchSupplier returns SupplierNotRecognised carrying the sender when nothi
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier returns MultipleSuppliersMatched carrying every matching supplier`` () =
-    let acme = supplier "1" [ SenderDomain "shared.example" ]
-    let other = supplier "2" [ SenderDomain "shared.example" ]
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "shared.example" ]
+    let other = supplier "2" [ SenderDomainEqualToIgnoringCase "shared.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme; other ] (message "billing@shared.example" "Invoice")
 
@@ -121,9 +121,10 @@ let ``matchSupplier never matches a supplier with no match rules`` () =
 [<InlineData("Acme Billing  <billing@acme.example>  ")>]
 let ``matchSupplier reads the domain out of a display-name sender`` (sender: string) =
     // Splitting on the first '@' and taking the rest leaves the trailing '>' on the domain, so
-    // SenderDomain "acme.example" did not match - and neither did SenderAddress, so the supplier
-    // fell through to SupplierNotRecognised entirely.
-    let acme = supplier "1" [ SenderDomain "acme.example" ]
+    // SenderDomainEqualToIgnoringCase "acme.example" did not match - and neither did
+    // SenderAddressEqualToIgnoringCase, so the supplier fell through to SupplierNotRecognised
+    // entirely.
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message sender "Invoice")
 
@@ -133,7 +134,7 @@ let ``matchSupplier reads the domain out of a display-name sender`` (sender: str
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier matches a sender-address rule against a display-name sender`` () =
-    let acme = supplier "1" [ SenderAddress "billing@acme.example" ]
+    let acme = supplier "1" [ SenderAddressEqualToIgnoringCase "billing@acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "Acme Billing <billing@acme.example>" "Invoice")
 
@@ -144,7 +145,7 @@ let ``matchSupplier matches a sender-address rule against a display-name sender`
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier takes the domain after the last at-sign, not the first`` () =
     // A quoted local part is legal in an address and carries its own '@'.
-    let acme = supplier "1" [ SenderDomain "acme.example" ]
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "\"a@b\"@acme.example" "Invoice")
 
@@ -159,7 +160,7 @@ let ``matchSupplier takes the domain after the last at-sign, not the first`` () 
 let ``an empty domain matcher does not match a message that carries no sender domain`` (sender: string) =
     // A stored empty matcher (savable before this change) compared equal to the "" that a
     // senderless message yields, so that one supplier claimed every such message.
-    let acme = supplier "1" [ SenderDomain "" ]
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message sender "Invoice")
 
@@ -173,7 +174,7 @@ let ``an empty domain matcher does not match a message that carries no sender do
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier returns a Result rather than raising when the sender is null`` () =
-    let acme = supplier "1" [ SenderDomain "acme.example" ]
+    let acme = supplier "1" [ SenderDomainEqualToIgnoringCase "acme.example" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message null "Invoice")
 
@@ -183,7 +184,7 @@ let ``matchSupplier returns a Result rather than raising when the sender is null
 
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier returns a Result rather than raising when the subject is null`` () =
-    let acme = supplier "1" [ SubjectPattern "your invoice" ]
+    let acme = supplier "1" [ SubjectContainsSubstringIgnoringCase "your invoice" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "billing@acme.example" null)
 
@@ -194,7 +195,8 @@ let ``matchSupplier returns a Result rather than raising when the subject is nul
 [<Fact; Trait("Level", "Unit")>]
 let ``a null sender still matches a supplier on its subject rule, rather than failing the whole match`` () =
     // The guard must make the sender rules not match; it must not abandon the other rules.
-    let acme = supplier "1" [ SenderDomain "acme.example"; SubjectPattern "your invoice" ]
+    let acme =
+        supplier "1" [ SenderDomainEqualToIgnoringCase "acme.example"; SubjectContainsSubstringIgnoringCase "your invoice" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message null "Your Invoice is ready")
 
@@ -208,7 +210,7 @@ let ``a null sender still matches a supplier on its subject rule, rather than fa
 [<Fact; Trait("Level", "Unit")>]
 let ``matchSupplier matches a subject substring across a non-breaking space`` () =
     // U+00A0 between "Acme" and "Statement" in the subject, a plain space in the stored pattern.
-    let acme = supplier "1" [ SubjectPattern "your acme statement" ]
+    let acme = supplier "1" [ SubjectContainsSubstringIgnoringCase "your acme statement" ]
 
     let actual = MatchSupplierWorkflow.matchSupplier [ acme ] (message "billing@acme.example" "Your Acme\u00A0Statement is ready")
 

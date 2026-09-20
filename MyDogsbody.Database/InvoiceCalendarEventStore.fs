@@ -1,5 +1,4 @@
-/// The InvoiceCalendarEvents adapter: markSynced, clearSyncRecord, loadSyncRecords and
-/// loadAllLedgerKeys. This table is history, not truth (design.md) - the calendar itself remains
+/// The InvoiceCalendarEvents table is history, not truth (design.md) - the calendar itself remains
 /// the source of truth for DiffInvoicesAgainstCalendarWorkflow.diff; this store's job is
 /// diagnostic bookkeeping plus, in loadAllLedgerKeys, the one query hazard (a)'s guard depends on.
 ///

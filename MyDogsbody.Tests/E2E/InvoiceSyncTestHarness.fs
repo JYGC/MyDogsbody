@@ -77,7 +77,7 @@ type FakeGoogleCalendar() =
     member private _.ExtendedPropertyValue(root: JsonElement) : string option =
         tryGetProperty "extendedProperties" root
         |> Option.bind (tryGetProperty "private")
-        |> Option.bind (tryGetProperty InvoiceSyncKey.PropertyName)
+        |> Option.bind (tryGetProperty InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent)
         |> Option.map (fun value -> value.GetString())
 
     member this.Respond(request: HttpRequestMessage) : HttpResponseMessage =
@@ -92,7 +92,7 @@ type FakeGoogleCalendar() =
 
                     let extendedProperties =
                         match syncKeyValue with
-                        | Some value -> $"""{{ "private": {{ "{InvoiceSyncKey.PropertyName}": "{value}" }} }}"""
+                        | Some value -> $"""{{ "private": {{ "{InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent}": "{value}" }} }}"""
                         | None -> "null"
 
                     $"""{{ "id": "{id}", "summary": "{title}", "start": {{ "date": "{dateText}" }}, "extendedProperties": {extendedProperties} }}""")

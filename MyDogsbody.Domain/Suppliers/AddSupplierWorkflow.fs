@@ -3,9 +3,7 @@ module MyDogsbody.Domain.Suppliers.AddSupplierWorkflow
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 
-/// Validates every submitted match rule, stopping at the first failure and naming which rule
-/// failed. A partially valid supplier is never handed to the store.
-let private validateMatchers
+let private validateEveryMatchRuleStoppingAtTheFirstFailure
     (matchers: (MatcherKind * string) list)
     : Result<SupplierMatcher list, SupplierError> =
     let rec loop remaining accumulatedMatchers =
@@ -22,7 +20,7 @@ let private validate (input: UnvalidatedSupplier) : Result<ValidSupplier, Suppli
     result {
         let! name = SupplierName.create input.Name |> Result.mapError SupplierNameInvalid
         let! term = PaymentTermDays.create input.PaymentTermDays |> Result.mapError PaymentTermInvalid
-        let! matchers = validateMatchers input.Matchers
+        let! matchers = validateEveryMatchRuleStoppingAtTheFirstFailure input.Matchers
 
         return
             {
@@ -32,9 +30,8 @@ let private validate (input: UnvalidatedSupplier) : Result<ValidSupplier, Suppli
             }
     }
 
-/// A name that only differs by case or surrounding whitespace is still taken - SupplierName
-/// already trims, so only case remains to compare here.
-let private ensureNameFree
+/// SupplierName already trims, so only case remains to compare here.
+let private ensureNoStoredSupplierHasTheSameNameIgnoringCase
     (stored: StoredSupplier list)
     (candidate: ValidSupplier)
     : Result<ValidSupplier, SupplierError> =
@@ -51,11 +48,8 @@ let private ensureNameFree
     | Some existing -> Error (SupplierNameTaken (SupplierName.value existing.Name))
     | None -> Ok candidate
 
-/// Adds a new supplier.
-///
-/// Dependencies first, input last, Result out. loadSuppliers performing a database read is
-/// invisible here on purpose - this file sees a function value, which is why the whole workflow
-/// tests with lambdas.
+/// loadSuppliers performing a database read is invisible here on purpose - this file sees a
+/// function value, which is why the whole workflow tests with lambdas.
 let addSupplier
     (loadSuppliers: LoadSuppliers)
     (saveSupplier: SaveSupplier)
@@ -64,6 +58,6 @@ let addSupplier
     result {
         let! candidate = validate input
         let! stored = loadSuppliers ()
-        let! confirmed = ensureNameFree stored candidate
+        let! confirmed = ensureNoStoredSupplierHasTheSameNameIgnoringCase stored candidate
         return! saveSupplier confirmed
     }

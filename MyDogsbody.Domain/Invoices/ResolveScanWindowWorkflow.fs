@@ -4,16 +4,7 @@ module MyDogsbody.Domain.Invoices.ResolveScanWindowWorkflow
 
 open MyDogsbody.Domain.Invoices
 
-/// Given the windows the store holds and the day count the user last chose (a NUMBER, not a
-/// foreign key - it survives its row being deleted), return the window to open on:
-///
-///   remembered is present in the store      -> that one
-///   remembered is absent (or None)          -> 14, if 14 is present
-///   remembered is absent and 14 is absent   -> the shortest window still present
-///   the store holds nothing (cannot happen  -> the fallback constant, constructed
-///     - CannotDeleteLastScanWindow forbids it)
-///
-/// The remembered-but-since-deleted row is the case nobody tries by hand; it has its own test.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ResolveScanWindowWorkflow.fs: resolveScanWindow
 let resolveScanWindow
     (storedWindows: StoredScanWindow list)
     (remembered: ScanWindowDays option)

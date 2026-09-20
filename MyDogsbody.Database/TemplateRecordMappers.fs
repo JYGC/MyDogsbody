@@ -9,7 +9,7 @@ open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
 open MyDogsbody.Database.Models
 
-// Domain -> persistence. Exhaustive: adding a case to DocumentFormat breaks this build.
+// Exhaustive: adding a case to DocumentFormat breaks this build.
 let toDocumentFormatString (format: DocumentFormat) : string =
     match format with
     | Pdf -> "Pdf"
@@ -127,14 +127,12 @@ let fromTemplateFieldRuleRecord (row: TemplateFieldRuleRecord) : Result<Template
         return { Field = field; Rule = rule; Hint = hint }
     }
 
-/// The identifier the domain carries, as the store's own key type. Only ever called on an id
-/// that came from a row already read - a value that does not parse is a data-integrity failure,
-/// not something a user did, so it is allowed to raise and be caught like any other unexpected
-/// adapter failure. Same idiom as SupplierRecordMappers.toRowId.
+/// Only ever called on an id that came from a row already read - a value that does not parse is a
+/// data-integrity failure, not something a user did, so it is allowed to raise and be caught like
+/// any other unexpected adapter failure. Same idiom as SupplierRecordMappers.toRowId.
 let toRowId (id: TemplateId) : int = int (TemplateId.value id)
 
-/// Domain -> persistence, for a row the store has not seen before. Id is a placeholder - the
-/// insert excludes that column so SQLite assigns it.
+/// Id is a placeholder - the insert excludes that column so SQLite assigns it.
 let toNewTemplateRecord (supplierId: int) (template: ValidTemplate) : InvoiceTemplateRecord =
     let documentPart, attachmentFormat = toDocumentPartColumns (ValidTemplate.part template)
 
@@ -147,9 +145,8 @@ let toNewTemplateRecord (supplierId: int) (template: ValidTemplate) : InvoiceTem
         Position = ValidTemplate.position template
     }
 
-/// Persistence -> domain, whole row plus its field rules. Reconstructing the ValidTemplate
-/// recompiles every pattern-carrying rule's pattern rather than reading one back compiled - see
-/// ValidateTemplateWorkflow.reconstructValidTemplate.
+/// Reconstructing the ValidTemplate recompiles every pattern-carrying rule's pattern rather than
+/// reading one back compiled - see ValidateTemplateWorkflow.reconstructValidTemplate.
 let toStoredTemplate (row: InvoiceTemplateRecord) (fieldRuleRows: TemplateFieldRuleRecord list) : Result<StoredTemplate, string> =
     result {
         let! id = TemplateId.create (string row.Id)

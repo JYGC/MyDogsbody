@@ -2,8 +2,8 @@ namespace MyDogsbody.UI.Types
 
 open System
 
-/// A ledger row as the invoices table renders it. Supplier is a NAME here (the top mapper joins
-/// the supplier list), not an id - the screen never sees a domain id.
+/// Supplier is a NAME here (the top mapper joins the supplier list), not an id - the screen never
+/// sees a domain id.
 type InvoiceUiType =
     { Id: string
       SupplierName: string
@@ -44,11 +44,10 @@ type TombstoneUiType =
       Reference: string
       DeletedAt: DateTime }
 
-/// A scan window for the picker. Label is composed by the top mapper - "mail received in the
-/// last 90 days", never a bare "90" (Q1.6).
+/// Label is composed by the top mapper - "mail received in the last 90 days", never a bare "90"
+/// (Q1.6).
 type ScanWindowUiType = { Id: string; Days: int; Label: string }
 
-/// The result of one scan, as the page shows it above the table.
 type ScanResultUiType =
     { Invoices: InvoiceUiType list
       Problems: ScanProblemUiType list }

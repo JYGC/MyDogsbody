@@ -1,6 +1,4 @@
-/// Persists the user's scan-window choice (Q1.7 - the choice persists, as a NUMBER of days, in
-/// the main database). Refuses a day count that is not one of the stored windows, and does not
-/// touch the store on that refusal.
+/// Q1.7 - the choice persists, as a NUMBER of days, in the main database.
 module MyDogsbody.Domain.Invoices.SelectScanWindowWorkflow
 
 open MyDogsbody.Domain
@@ -14,11 +12,11 @@ let selectScanWindow
     result {
         let! windows = loadScanWindows ()
 
-        let chosen =
+        let storedWindowWithTheRequestedDayCount =
             windows
             |> List.tryFind (fun window -> ScanWindowDays.value window.Days = rawDays)
 
-        match chosen with
+        match storedWindowWithTheRequestedDayCount with
         | None -> return! Error(ScanWindowNotFound rawDays)
         | Some window ->
             do! saveSelectedScanWindow window.Days

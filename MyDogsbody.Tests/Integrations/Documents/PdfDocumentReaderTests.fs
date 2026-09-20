@@ -45,14 +45,12 @@ let private withTempFile extension (test: string -> unit) =
 
 [<Fact; Trait("Level", "Unit")>]
 let ``readContent returns Error without logging when the file does not exist`` () =
-    // Arrange - an expected failure, so it is returned as a value and never logged
+    // an expected failure, so it is returned as a value and never logged
     let handleError, logged = recordingHandleError ()
     let missingPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.pdf")
 
-    // Act
     let actual = PdfDocumentReader.readContent handleError (pathOrFail missingPath)
 
-    // Assert
     match actual with
     | Error caughtException ->
         Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, caughtException.ActionName)
@@ -64,14 +62,11 @@ let ``readContent returns Error without logging when the file does not exist`` (
 [<Fact; Trait("Level", "Integration")>]
 let ``readContent returns Error and logs when the file is not a readable PDF`` () =
     withTempFile ".pdf" (fun corruptPath ->
-        // Arrange
         let handleError, logged = recordingHandleError ()
         File.WriteAllText(corruptPath, "this is not a PDF at all")
 
-        // Act
         let actual = PdfDocumentReader.readContent handleError (pathOrFail corruptPath)
 
-        // Assert
         match actual with
         | Error caughtException ->
             Assert.Equal(ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent, caughtException.ActionName)
@@ -86,14 +81,12 @@ let ``readContent returns Error and logs when the file is not a readable PDF`` (
 [<Fact; Trait("Level", "Integration")>]
 let ``readContent returns every word of a readable PDF with its coordinates`` () =
     withTempFile ".pdf" (fun pdfPath ->
-        // Arrange - the success path, which the previous suite never covered
+        // the success path, which the previous suite never covered
         let handleError, logged = recordingHandleError ()
         writePdf pdfPath [ "Alpha"; "Beta"; "Gamma" ]
 
-        // Act
         let actual = PdfDocumentReader.readContent handleError (pathOrFail pdfPath)
 
-        // Assert
         match actual with
         | Ok content ->
             Assert.Equal<string list>(
@@ -102,10 +95,10 @@ let ``readContent returns every word of a readable PDF with its coordinates`` ()
             )
 
             // Coordinates must be real, and the words were written top-down
-            Assert.All(content.Words, fun word -> Assert.True(word.Left > 0.0))
-            Assert.All(content.Words, fun word -> Assert.True(word.Bottom > 0.0))
+            Assert.All(content.Words, fun word -> Assert.True(word.LeftEdgeDistanceFromThePageLeft > 0.0))
+            Assert.All(content.Words, fun word -> Assert.True(word.BottomEdgeHeightAboveThePageBottom > 0.0))
 
-            let bottoms = content.Words |> List.map (fun word -> word.Bottom)
+            let bottoms = content.Words |> List.map (fun word -> word.BottomEdgeHeightAboveThePageBottom)
             Assert.Equal<float list>(bottoms |> List.sortDescending, bottoms)
 
             Assert.Empty logged
@@ -115,14 +108,11 @@ let ``readContent returns every word of a readable PDF with its coordinates`` ()
 [<Fact; Trait("Level", "Integration")>]
 let ``readContent returns no words for a PDF with an empty page`` () =
     withTempFile ".pdf" (fun pdfPath ->
-        // Arrange
         let handleError, _ = recordingHandleError ()
         writePdf pdfPath []
 
-        // Act
         let actual = PdfDocumentReader.readContent handleError (pathOrFail pdfPath)
 
-        // Assert
         match actual with
         | Ok content -> Assert.Empty content.Words
         | Error caughtException -> Assert.Fail($"Expected Ok, but got Error: {caughtException.Message}")
@@ -140,13 +130,11 @@ let private source (fileName: string) (bytes: byte[]) : DocumentSource =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText returns the PDF's text as lines, each tagged with a block`` () =
-    // Arrange - a real PDF written top-down
+    // a real PDF written top-down
     let pdf = DocumentFixtures.pdfWithText [ "Invoice Number 7422"; "Amount Due 100.00"; "Due Date 1 March 2026" ]
 
-    // Act
     let actual = PdfDocumentReader.readText (source "invoice.pdf" pdf)
 
-    // Assert - every field of the success output
     match actual with
     | Ok lines ->
         Assert.Equal<string list>(
@@ -161,24 +149,21 @@ let ``readText returns the PDF's text as lines, each tagged with a block`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText reports DocumentHasNoTextLayer for a scanned-image PDF`` () =
-    // Arrange - a page with nothing on it stands in for a scanned image (1.6% of measured PDFs).
+    // a page with nothing on it stands in for a scanned image (1.6% of measured PDFs).
     let pdf = DocumentFixtures.pdfWithNoTextLayer ()
 
-    // Act
     let actual = PdfDocumentReader.readText (source "scan.pdf" pdf)
 
-    // Assert - no OCR is attempted; this exact cause is returned
+    // no OCR is attempted; this exact cause is returned
     Assert.Equal(Error DocumentHasNoTextLayer, actual)
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText reports DocumentUnreadable for a file that is not a PDF`` () =
-    // Arrange - 3.7% of measured PDFs would not open at all
+    // 3.7% of measured PDFs would not open at all
     let notPdf = DocumentFixtures.unopenablePdf ()
 
-    // Act
     let actual = PdfDocumentReader.readText (source "broken.pdf" notPdf)
 
-    // Assert
     match actual with
     | Error (DocumentUnreadable message) -> Assert.False(System.String.IsNullOrWhiteSpace message)
     | other -> Assert.Fail($"Expected Error (DocumentUnreadable _), got {other}")

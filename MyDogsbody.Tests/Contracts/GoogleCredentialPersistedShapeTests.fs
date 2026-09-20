@@ -51,13 +51,11 @@ let private aCredential secret username : ValidGoogleCredential =
 [<Fact; Trait("Level", "Contract")>]
 let ``a Google credential is persisted under the documented field names`` () =
     withStoreAndRawAccess (fun getCollection rawDatabase ->
-        // Arrange / Act
         aCredential "persisted-secret" "persisted@gmail.com"
         |> GoogleCredentialStore.insertOne handleError getCollection
         |> okOrFail "insertOne"
         |> ignore
 
-        // Assert
         let document = rawDatabase.GetCollection("Credentials").FindAll() |> Seq.exactlyOne
 
         Assert.True(document.ContainsKey "_id", "expected an _id field")
@@ -79,26 +77,24 @@ let ``a Google credential is persisted under the documented field names`` () =
 [<Fact; Trait("Level", "Contract")>]
 let ``the credentials collection is named Credentials and is the only collection in the database`` () =
     withStoreAndRawAccess (fun getCollection rawDatabase ->
-        // Arrange / Act
         aCredential "secret" "person@gmail.com"
         |> GoogleCredentialStore.insertOne handleError getCollection
         |> okOrFail "insertOne"
         |> ignore
 
-        // Assert
         Assert.Equal<string list>([ "Credentials" ], rawDatabase.GetCollectionNames() |> List.ofSeq)
     )
 
 [<Fact; Trait("Level", "Contract")>]
 let ``a secret is persisted with its surrounding whitespace intact`` () =
     withStoreAndRawAccess (fun getCollection rawDatabase ->
-        // Arrange / Act - the shared store trimmed this; the per-provider store must not
+        // the shared store trimmed this; the per-provider store must not
         aCredential "  1//0-abc_DEF  " "person@gmail.com"
         |> GoogleCredentialStore.insertOne handleError getCollection
         |> okOrFail "insertOne"
         |> ignore
 
-        // Assert - the raw document, as stored
+        // the raw document, as stored
         let document = rawDatabase.GetCollection("Credentials").FindAll() |> Seq.exactlyOne
         Assert.Equal("  1//0-abc_DEF  ", document.["Credentials"].AsString)
     )

@@ -5,8 +5,6 @@ open MyDogsbody.Exceptions.Types
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 
-/// Builds the Google accounts browser state.
-///
 /// `startWork` is how the module gets off the render thread. Production passes an Async.Start
 /// equivalent; a test passes `fun work -> work ()` and never has to wait.
 let getGoogleAccountsBrowserModule
@@ -49,16 +47,7 @@ let getGoogleAccountsBrowserModule
                 errorCval.Value <- None
             | Error(caughtException: MyDogsbodyException) -> errorCval.Value <- Some caughtException.Message)
 
-    /// Loads the calendars for one account, so its picker shows that account's own list
-    /// (requirements.md: "populate it from that account's own calendars"). A failure here does
-    /// not disturb the accounts table - it only leaves that one picker empty - but it is surfaced
-    /// via ErrorAval rather than swallowed, so "the picker is empty" comes with a reason (an
-    /// expired credential, a network failure, a rate limit) instead of no explanation at all.
-    ///
-    /// The alert names the account by its email, the way the table does. Nothing the user did
-    /// starts this fetch - the page runs one per account - so the reason on its own ("needs to be
-    /// re-authorised", "Google is rate-limiting this account") leaves someone with two accounts
-    /// unable to tell which one to act on.
+    /// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.UI.Portal.md - GoogleAccountsBrowserModuleCreators.fs: loadCalendarsFor
     let loadCalendarsFor (account: GoogleAccountUiType) =
         startWork (fun () ->
             match googleAccountApi.GetCalendarsFor account.Id with

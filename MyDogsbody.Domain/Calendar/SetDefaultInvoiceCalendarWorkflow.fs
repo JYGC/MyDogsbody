@@ -3,8 +3,6 @@ module MyDogsbody.Domain.Calendar.SetDefaultInvoiceCalendarWorkflow
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Calendar
 
-/// Chooses an account's default invoice calendar.
-///
 /// Confirms the calendar still exists at Google BEFORE storing it (design decision 6) - so
 /// change #7's sync never discovers a dead calendar id halfway through a batch. Neither failure
 /// reaches `saveGoogleAccount`.

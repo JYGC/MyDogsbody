@@ -1,22 +1,20 @@
-/// Turns change #2's parsed values (ExtractedInvoice - plain string, unconstrained decimal) into
-/// the constrained ValidInvoice the ledger stores. Pure: no I/O, no clock.
 module MyDogsbody.Domain.Invoices.ValidateInvoiceWorkflow
 
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Invoices
 
-/// An implausible issue or due date (year outside InvoiceIssueDate's guard) is dropped rather
-/// than failing the whole invoice: the date is optional (Q1.10), and the record of the invoice
-/// survives whether or not every field does. A genuine parse failure was already an InvoiceError
-/// back in ApplyTemplateWorkflow; by here the value is a DateTime.
-let private optionalIssueDate (value: System.DateTime option) : InvoiceIssueDate option =
+/// Implausible means a year outside InvoiceIssueDate's guard. It is dropped rather than failing
+/// the whole invoice: the date is optional (Q1.10), and the record of the invoice survives
+/// whether or not every field does. A genuine parse failure was already an InvoiceError back in
+/// ApplyTemplateWorkflow; by here the value is a DateTime.
+let private issueDateOrNoneWhenItsYearIsImplausible (value: System.DateTime option) : InvoiceIssueDate option =
     value
     |> Option.bind (fun dateTime ->
         match InvoiceIssueDate.create dateTime with
         | Ok date -> Some date
         | Error _ -> None)
 
-let private optionalDueDate (value: System.DateTime option) : InvoiceDueDate option =
+let private dueDateOrNoneWhenItsYearIsImplausible (value: System.DateTime option) : InvoiceDueDate option =
     value
     |> Option.bind (fun dateTime ->
         match InvoiceDueDate.create dateTime with
@@ -49,7 +47,7 @@ let validateInvoice
               SourceMessageId = extracted.SourceMessageId
               Reference = reference
               Amount = amount
-              IssueDate = optionalIssueDate extracted.IssueDate
-              DueDate = optionalDueDate extracted.DueDate
+              IssueDate = issueDateOrNoneWhenItsYearIsImplausible extracted.IssueDate
+              DueDate = dueDateOrNoneWhenItsYearIsImplausible extracted.DueDate
               MessageReceivedAt = messageReceivedAt }
     }

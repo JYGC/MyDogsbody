@@ -8,19 +8,7 @@ open System
 open System.IO
 open Microsoft.Data.Sqlite
 
-/// Fresh temp database per test. `Foreign Keys=True` on the connection string matches
-/// DatabaseContextSetup.fs - PRAGMAs are per-connection and off by default, so this is what makes
-/// every connection opened against this file self-apply FK enforcement, rather than every write
-/// helper having to remember to prepend the PRAGMA by hand. `Pooling=False` also matches
-/// DatabaseContextSetup.fs: without it a pooled connection keeps the file locked on Windows after
-/// dispose, which is what drove the harnesses to the process-global pool clear (the ClearAllPools hammer)
-/// - see docs/changes/sqlite-pool-flake. With pooling off, `use connection` releases the handle
-/// and the delete just works.
-///
-/// Hands back the file path as well as the connection string - DatabaseContextSetup.createDatabaseContext
-/// takes a path, not a connection string, so the one caller that exercises it needs both.
-/// `withTempDatabase` below is the same setup/teardown for the (more common) callers that only
-/// need the connection string.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - MigrationTestHelpers.fs: withTempDatabaseAndPath
 let withTempDatabaseAndPath (test: string -> string -> unit) =
     let databaseFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let connectionString = $"Data Source={databaseFilePath};Foreign Keys=True;Pooling=False"
