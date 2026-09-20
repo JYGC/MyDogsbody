@@ -5,9 +5,6 @@ open MyDogsbody.Exceptions.Types
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 
-/// The alert for a load that performs several reads: the message of the FIRST one that failed,
-/// in the order given, or None when every one of them succeeded.
-///
 /// Each read used to be matched on its own and all but one discarded its error with `| Error _ ->
 /// ()`, so a read that failed while the operation the user actually asked for succeeded set no
 /// alert at all. The ledger read is the one that costs: the initial page load scans, so a ledger
@@ -17,16 +14,15 @@ open MyDogsbody.UI.Types.Module
 ///
 /// Order is priority, and the operation the user pressed comes first: a failed mailbox scan is
 /// the news, and the stored ledger read alongside it is still on screen.
-let private firstFailure (results: Result<unit, MyDogsbodyException> list) : string option =
+let private messageOfTheFirstFailedReadInTheOrderGivenOrNoneWhenEveryOneSucceeded
+    (results: Result<unit, MyDogsbodyException> list)
+    : string option =
     results
     |> List.tryPick (function
         | Error(caughtException: MyDogsbodyException) -> Some caughtException.Message
         | Ok() -> None)
 
-/// The empty picture: no account ready to check yet, nothing outstanding, nothing orphaned. What
-/// SyncViewAval holds before the first LoadSyncPlan completes - NOT the same as "up to date", which
-/// is this same shape but reached only after a real read.
-let private emptySyncView: SyncViewUiType =
+let private syncViewHeldBeforeTheFirstLoadSyncPlanCompletesNotTheSameAsUpToDate: SyncViewUiType =
     { StatusByInvoiceId = Map.empty
       Plan = []
       OrphanedEvents = []
@@ -48,18 +44,16 @@ let private rowsMatchingSelection (selectedInvoiceIds: Set<string>) (syncView: S
             | Some invoiceId -> Set.contains invoiceId selectedInvoiceIds
             | None -> false)
 
-/// Overlays change #7's per-row calendar status onto a ledger row (task 8.3). An invoice that
-/// cannot become a calendar event carries no sync status regardless of what the map says - it won't
-/// have an entry anyway (`UploadableInvoice.ofStored` already excludes it), but staying explicit
-/// here means that stays true even if the map's population ever changes.
+/// Task 8.3: an invoice that cannot become a calendar event carries no sync status regardless of
+/// what the map says - it won't have an entry anyway (`UploadableInvoice.ofStored` already
+/// excludes it), but staying explicit here means that stays true even if the map's population ever
+/// changes.
 let private overlaySyncStatus (syncView: SyncViewUiType) (invoice: InvoiceUiType) : InvoiceUiType =
     if invoice.CanBecomeCalendarEvent then
         { invoice with SyncStatus = Map.tryFind invoice.Id syncView.StatusByInvoiceId }
     else
         { invoice with SyncStatus = None }
 
-/// Builds the invoices page state.
-///
 /// startWork is how the module gets off the render thread; a test passes `fun work -> work ()`.
 /// This file never starts a background thread of its own - that is startWork's job.
 let getInvoicesModule
@@ -81,7 +75,7 @@ let getInvoicesModule
     let errorCval = cval<string option> None
 
     // --- change #7: calendar sync ---
-    let syncViewCval = cval<SyncViewUiType> emptySyncView
+    let syncViewCval = cval<SyncViewUiType> syncViewHeldBeforeTheFirstLoadSyncPlanCompletesNotTheSameAsUpToDate
     let isSyncingCval = cval false
     // View state only (task 8.2) - never read from or written to any API, so a rescan can just
     // reset it without undoing anything persisted.
@@ -134,7 +128,7 @@ let getInvoicesModule
                 | Error _ -> ()
 
                 errorCval.Value <-
-                    firstFailure
+                    messageOfTheFirstFailedReadInTheOrderGivenOrNoneWhenEveryOneSucceeded
                         [ ledger |> Result.map ignore
                           problems |> Result.map ignore
                           windows |> Result.map ignore
@@ -143,17 +137,7 @@ let getInvoicesModule
                 selectedDaysCval.Value <- days
                 isScanningCval.Value <- false))
 
-    /// Read the mailbox for `days` (via `scanOperation` - `Scan` or the watermark-clearing
-    /// `RescanEverything`), then show the stored ledger for it. The scan may fail (no mail
-    /// account, an unreachable store) - the stored ledger stays on screen with the alert.
-    ///
-    /// The page's view comes from `GetInvoices` / `GetProblems`, never from `ScanResult`: that
-    /// carries only what THIS scan did (design decision 6), and watermarks mean a scan of an
-    /// unchanged mailbox reads no messages and so returns two empty lists. Taking the table from
-    /// it blanked a ledger that was still stored - on the initial load too, since `start` scans,
-    /// so a returning user opened on an empty table. Q1.19 says the same of problems: they are
-    /// persisted precisely "so incremental scanning does not empty the diagnostic list before it
-    /// is looked at". Read AFTER the scan, so whatever it just stored is included.
+    /// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.UI.Portal.md - InvoicesModuleCreators.fs: scanUsing
     let scanUsing (scanOperation: int -> Result<ScanResultUiType, MyDogsbodyException>) (days: int) =
         transact (fun _ ->
             isScanningCval.Value <- true
@@ -188,7 +172,7 @@ let getInvoicesModule
                 // stored ledger read alongside it is still on screen. When it SUCCEEDED, a failed
                 // ledger, problems or sync-plan read is the only thing that can report itself.
                 errorCval.Value <-
-                    firstFailure
+                    messageOfTheFirstFailedReadInTheOrderGivenOrNoneWhenEveryOneSucceeded
                         [ scanResult |> Result.map ignore
                           ledger |> Result.map ignore
                           problems |> Result.map ignore
@@ -282,9 +266,9 @@ let getInvoicesModule
 
     /// A standalone reload of the sync plan, in the same shape as `loadProblems` / `loadTombstones`:
     /// its own alert, set or cleared on its own result. `loadLedger` and `scanUsing` also fold a
-    /// sync-plan read into their own composite picture (lowest priority in their `firstFailure`
-    /// list), so this exists for a caller that wants the plan refreshed on its own - after
-    /// `executeSync`, in particular.
+    /// sync-plan read into their own composite picture (lowest priority in the list of reads they
+    /// report the first failure of), so this exists for a caller that wants the plan refreshed on
+    /// its own - after `executeSync`, in particular.
     let loadSyncPlan () =
         transact (fun _ -> isSyncingCval.Value <- true)
 
@@ -404,7 +388,8 @@ let getScanWindowsBrowserModule
                 // A failed selected-window read used to be discarded, which left the page marking
                 // nothing as "(current)" and saying nothing about why.
                 errorCval.Value <-
-                    firstFailure [ windows |> Result.map ignore; selected |> Result.map ignore ]
+                    messageOfTheFirstFailedReadInTheOrderGivenOrNoneWhenEveryOneSucceeded
+                        [ windows |> Result.map ignore; selected |> Result.map ignore ]
 
                 isLoadingCval.Value <- false))
 

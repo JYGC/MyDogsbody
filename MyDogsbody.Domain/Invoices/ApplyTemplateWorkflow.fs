@@ -8,20 +8,8 @@ open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.Suppliers
 open MyDogsbody.Domain.InvoiceTemplates
 
-/// The text ONE CANDIDATE DOCUMENT offers a template, plus the subject - always available, since
-/// SubjectCapture reads it regardless of DocumentPart. Already normalized: it arrives that way
-/// on the NormalizedMessage.
-///
-/// Lines are kept GROUPED BY PART rather than flattened into one list. LinesAfterLabel is why:
-/// its offset must not step out of the part the label was found in. content.Lines used to be a
-/// List.collect over every selected part, so a label on the last line of cover-note.pdf with an
-/// offset of 1 returned the first line of the NEXT attachment - a different document whose
-/// BlockIndex numbering is unrelated.
-///
-/// GroupedByPart carries the same text with its provenance - which laid-out lines each joined line
-/// was built from - because LinesAfterLabel counts laid-out lines while every other rule reads
-/// joined ones. See TextNormalization.NormalizedLine for why the two differ.
-type private SelectedContent =
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ApplyTemplateWorkflow.fs: CandidateDocumentContentPlusTheSubject
+type private CandidateDocumentContentPlusTheSubject =
     { LinesByPart: TextLine list list
       GroupedByPart: TextNormalization.NormalizedLine list list
       AttachmentNames: string list
@@ -41,10 +29,12 @@ let private isAttachment (part: NormalizedPart) : bool =
     | BodyPart
     | SubjectPart -> false
 
-/// Grouping only - no normalization. That happened once for the whole message before any template
-/// was tried, which is what stops a supplier with N templates paying for NFKC over every line of
-/// every attachment N times.
-let private contentOf (subject: string) (parts: NormalizedPart list) : SelectedContent =
+/// Normalization happened once for the whole message before any template was tried, which is what
+/// stops a supplier with N templates paying for NFKC over every line of every attachment N times.
+let private contentOfThePartsByGroupingOnlyWithoutNormalizing
+    (subject: string)
+    (parts: NormalizedPart list)
+    : CandidateDocumentContentPlusTheSubject =
     {
         LinesByPart = parts |> List.map (fun selected -> selected.Lines |> List.map (fun grouped -> grouped.Line))
         GroupedByPart = parts |> List.map (fun selected -> selected.Lines)
@@ -57,32 +47,15 @@ let private contentOf (subject: string) (parts: NormalizedPart list) : SelectedC
         Subject = subject
     }
 
-/// Every candidate document the template will be applied to, in message order - and never fewer
-/// than one.
-///
-/// requirements.md: "WHEN a message carries several attachments THE SYSTEM SHALL apply an
-/// attachment-part template to EACH IN TURN and take the first that yields every required field."
-/// One SelectedContent per matching attachment is what makes that true. This used to pool every
-/// selected part into a single bag and let each rule search the whole of it independently:
-/// tryFindLabelledLine took the first PART carrying the label, runRegexAcross took the first
-/// FILENAME the pattern matched, and nothing required the two to be the same document. Measured on
-/// a two-attachment message, that returned an Ok invoice whose reference came off 445566.pdf and
-/// whose amount came off cover-letter.pdf - a ledger row that exists in neither of them. A
-/// remittance advice or a covering note attached beside the invoice is all it takes.
-///
-/// WHAT IS ITERATED IS WHAT IS PLURAL. A message has one subject and one body; it can carry any
-/// number of attachments. So the subject and the body stay in scope for every candidate - the
-/// subject always did, which is why SubjectCapture works under any DocumentPart - and the
-/// attachments are taken one at a time. A template reading its reference off a filename and its
-/// amount out of the covering email still works; what it can no longer do is take one field from
-/// one attachment and another field from a different one. That is deliberate rather than a
-/// casualty: an invoice assembled out of two documents is a row that exists in neither.
-///
-/// Returned as a head and a tail rather than a list, so "there is always at least one candidate"
-/// is a fact of the type instead of an invariant the caller has to trust. A selector matching no
-/// attachment at all still yields the single no-attachment candidate, which is what keeps a
-/// template of FixedValue and SubjectCapture rules working on a message with nothing attached.
-let private selectCandidates (part: DocumentPart) (message: NormalizedMessage) : SelectedContent * SelectedContent list =
+type private CandidateDocumentsOfWhichThereIsAlwaysAtLeastOne =
+    { FirstCandidate: CandidateDocumentContentPlusTheSubject
+      LaterCandidates: CandidateDocumentContentPlusTheSubject list }
+
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ApplyTemplateWorkflow.fs: selectEveryCandidateDocumentInMessageOrderNeverFewerThanOne
+let private selectEveryCandidateDocumentInMessageOrderNeverFewerThanOne
+    (part: DocumentPart)
+    (message: NormalizedMessage)
+    : CandidateDocumentsOfWhichThereIsAlwaysAtLeastOne =
     let subject = NormalizedMessage.subject message
 
     let selected =
@@ -92,41 +65,30 @@ let private selectCandidates (part: DocumentPart) (message: NormalizedMessage) :
 
     // Filtering the indexed list rather than appending the chosen attachment to the singular
     // parts, so every candidate keeps the parts in the order the MESSAGE had them - the order
-    // tryFindLabelledLine's "the first part carrying the label" depends on.
+    // tryFindFirstLineCarryingLabelPartByPartWithItsPart's "the first part carrying the label"
+    // depends on.
     let candidateFor (attachmentIndex: int option) =
         selected
         |> List.filter (fun (index, candidate) -> not (isAttachment candidate) || Some index = attachmentIndex)
         |> List.map snd
-        |> contentOf subject
+        |> contentOfThePartsByGroupingOnlyWithoutNormalizing subject
 
     match selected |> List.filter (snd >> isAttachment) |> List.map fst with
-    | [] -> candidateFor None, []
+    | [] ->
+        { FirstCandidate = candidateFor None
+          LaterCandidates = [] }
     | firstAttachment :: laterAttachments ->
-        candidateFor (Some firstAttachment), laterAttachments |> List.map (Some >> candidateFor)
+        { FirstCandidate = candidateFor (Some firstAttachment)
+          LaterCandidates = laterAttachments |> List.map (Some >> candidateFor) }
 
-/// A rule either finds a string, finds nothing, or times out - the three ways a rule can fail to
-/// hand back a value, none of them by raising. RegexMatchTimeoutException is caught right here so
-/// nothing above this line ever needs to know a Regex is involved.
+/// None of them by raising. RegexMatchTimeoutException is caught right here so nothing above
+/// this line ever needs to know a Regex is involved.
 type private RuleOutcome =
     | Found of string
     | NotFound
     | TimedOut
 
-/// requirements.md: "WHEN a rule finds nothing THE SYSTEM SHALL report which field and which rule
-/// found nothing, never a default or an empty value silently substituted."
-///
-/// An extraction that came back empty IS a rule finding nothing, so every outcome is built
-/// through here rather than through Found directly. Three paths used to report Found "": an
-/// AfterLabel on a label-only line (the bare "Reference" line the LinesAfterLabel rules exist
-/// for), a successful match whose capture group did not participate, and a FixedValue of "".
-/// For Reference and Currency that empty value went straight into ExtractedInvoice - and an empty
-/// reference collides in change #4's natural key, turning every such invoice into one ledger row.
-///
-/// The TRIM lives here for the same reason the emptiness check does: it belongs to every outcome,
-/// not to whichever call site remembers it. AfterLabel used to trim its own substring, so
-/// FixedValue and a capture group were the two paths that did not - and Currency is the one field
-/// with no later parse step to trim it, so " AUD " reached ExtractedInvoice verbatim and would
-/// split change #4's natural key against a sibling template's "AUD".
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ApplyTemplateWorkflow.fs: foundUnlessEmpty
 let private foundUnlessEmpty (text: string) : RuleOutcome =
     if String.IsNullOrWhiteSpace text then NotFound else Found (text.Trim())
 
@@ -146,17 +108,19 @@ let private runRegexOnce (regex: Regex) (input: string) : RuleOutcome =
         with :? RegexMatchTimeoutException ->
             TimedOut
 
-/// Tries a compiled pattern against each candidate in turn, stopping at the first Found - or the
-/// first TimedOut, which is treated as a stop rather than retried against later candidates:
-/// timing out once on a pathological pattern is already the signal that pattern is dangerous, not
-/// a reason to spend the timeout budget again on the next line or filename.
+/// A TimedOut is treated as a stop rather than retried against later candidates: timing out once
+/// on a pathological pattern is already the signal that pattern is dangerous, not a reason to
+/// spend the timeout budget again on the next line or filename.
 ///
 /// tryPick, not map-then-tryFind: List.map is eager, so the short-circuit this comment describes
 /// did not happen. With the 250ms match timeout a pathological pattern cost 250ms x lines - a
 /// 200-line PDF blocked for ~50 seconds, and selectTemplate then repeated that per candidate
 /// template. requirements.md: "WHEN a rule times out THE SYSTEM SHALL NOT block the user
 /// interface."
-let private runRegexAcross (regex: Regex) (candidates: string list) : RuleOutcome =
+let private runRegexOnEachCandidateUntilOneIsFoundOrTimesOut
+    (regex: Regex)
+    (candidates: string list)
+    : RuleOutcome =
     candidates
     |> List.tryPick (fun candidate ->
         match runRegexOnce regex candidate with
@@ -175,21 +139,26 @@ let private runRegexAcross (regex: Regex) (candidates: string list) : RuleOutcom
 let private lineCarriesLabel (label: string) (line: TextLine) : bool =
     not (isNull label) && line.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase) >= 0
 
-/// The first line carrying the label, searched part by part in order - the same line a flattened
-/// search would have found, returned together with the part it belongs to so an offset can be
+/// The same line a flattened search would have found. Returned with its part so an offset can be
 /// applied inside that part rather than across the whole message.
-let private tryFindLabelledLine (label: string) (linesByPart: TextLine list list) : (TextLine list * int) option =
+let private tryFindFirstLineCarryingLabelPartByPartWithItsPart
+    (label: string)
+    (linesByPart: TextLine list list)
+    : (TextLine list * int) option =
     linesByPart
     |> List.tryPick (fun partLines ->
         partLines
         |> List.tryFindIndex (lineCarriesLabel label)
         |> Option.map (fun index -> partLines, index))
 
-/// Which of a joined line's laid-out segments a given character position falls in. Segments are
-/// joined with exactly one space, so segment k occupies [start, start + length - 1] and the next
-/// one starts a single character later. A position landing on a joining space belongs to the
-/// segment that follows it, which is the answer a label ending in a space wants.
-let rec private segmentIndexOf (position: int) (index: int) (segments: TextLine list) : int =
+/// Segments are joined with exactly one space, so segment k occupies [start, start + length - 1]
+/// and the next one starts a single character later. A position landing on a joining space
+/// belongs to the segment that follows it, which is the answer a label ending in a space wants.
+let rec private indexOfTheLaidOutSegmentContainingPosition
+    (position: int)
+    (index: int)
+    (segments: TextLine list)
+    : int =
     match segments with
     | []
     | [ _ ] -> index
@@ -197,40 +166,20 @@ let rec private segmentIndexOf (position: int) (index: int) (segments: TextLine 
         if position < current.Text.Length then
             index
         else
-            segmentIndexOf (position - current.Text.Length - 1) (index + 1) rest
+            indexOfTheLaidOutSegmentContainingPosition (position - current.Text.Length - 1) (index + 1) rest
 
-/// One laid-out line, together with the text a rule that lands on it should return.
-///
-/// The two differ exactly where the document hard-wrapped something. A laid-out line that STARTS
-/// a joined group stands for the whole group, so a value the document wrapped comes back whole
-/// rather than as its first physical line; a laid-out line that is a CONTINUATION inside a group
-/// stands only for itself.
-///
-/// Both halves are load-bearing, and they are the two cases the last two review rounds each
-/// found one of. Counting over joined lines made LinesAfterLabel("Reference", 1) answer
-/// differently for "Reference" / "WU-88213" and "Reference" / "wu-88213" - whether a template
-/// worked depended on the case of the first character of a value its author does not control -
-/// which is why the counting moved to laid-out lines. But returning a single laid-out line then
-/// truncated "Description" / "Annual subscription" / "renewal for 2026" to "Annual subscription",
-/// silently, with foundUnlessEmpty unable to tell a truncated value from a complete one. Counting
-/// laid out and returning by group answers both: the continuation "wu-88213" is returned alone
-/// because it starts no group, and the wrapped value is returned whole because it starts one.
-///
-/// Every segment of a group shares one BlockIndex - normalizeGrouped only joins within a block -
-/// so returning a group's joined text can never smuggle in text from the next block past the
-/// boundary check below.
-type private TargetableLine = { Line: TextLine; Text: string }
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ApplyTemplateWorkflow.fs: LaidOutLineAndTheTextARuleLandingOnItReturns
+type private LaidOutLineAndTheTextARuleLandingOnItReturns = { Line: TextLine; Text: string }
 
-let private targetableLines (groups: TextNormalization.NormalizedLine list) : TargetableLine list =
+let private laidOutLinesAndTheTextARuleLandingOnEachReturns
+    (groups: TextNormalization.NormalizedLine list)
+    : LaidOutLineAndTheTextARuleLandingOnItReturns list =
     groups
     |> List.collect (fun grouped ->
         grouped.Segments
         |> List.mapi (fun index segment ->
             { Line = segment; Text = (if index = 0 then grouped.Line.Text else segment.Text) }))
 
-/// Where a label sits in a part's LAID-OUT lines: those lines, and the index of the one the
-/// label's match ends on.
-///
 /// Both halves are deliberate. The SEARCH runs over the joined text, so requirements.md's "WHEN a
 /// label hard-wrapped across two lines is matched THE SYSTEM SHALL find the value" still holds -
 /// "Amount" / "due:" is one joined line and the label "Amount due" is on it. The OFFSET is then
@@ -238,10 +187,10 @@ let private targetableLines (groups: TextNormalization.NormalizedLine list) : Ta
 /// its own line looks exactly like a wrapped continuation. The label's END, not its start, is what
 /// the offset counts from - on a hard-wrapped label the value follows the line the label finishes
 /// on.
-let private tryFindLabelInLaidOutLines
+let private tryLocateLabelInLaidOutLinesAsLinesAndTheIndexOfTheOneItEndsOn
     (label: string)
     (groupsByPart: TextNormalization.NormalizedLine list list)
-    : (TargetableLine list * int) option =
+    : (LaidOutLineAndTheTextARuleLandingOnItReturns list * int) option =
     groupsByPart
     |> List.tryPick (fun groups ->
         groups
@@ -251,17 +200,20 @@ let private tryFindLabelInLaidOutLines
             let labelStart = grouped.Line.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase)
             let precedingLines = groups |> List.truncate groupIndex |> List.sumBy (fun group -> List.length group.Segments)
 
-            targetableLines groups, precedingLines + segmentIndexOf (labelStart + label.Length - 1) 0 grouped.Segments))
+            let indexOfTheSegmentTheLabelEndsIn =
+                indexOfTheLaidOutSegmentContainingPosition (labelStart + label.Length - 1) 0 grouped.Segments
+
+            laidOutLinesAndTheTextARuleLandingOnEachReturns groups, precedingLines + indexOfTheSegmentTheLabelEndsIn))
 
 let private runRule
     (compiledPatterns: Map<TargetField, Regex>)
     (field: TargetField)
     (rule: FieldRule)
-    (content: SelectedContent)
+    (content: CandidateDocumentContentPlusTheSubject)
     : RuleOutcome =
     match rule with
     | AfterLabel label ->
-        match tryFindLabelledLine label content.LinesByPart with
+        match tryFindFirstLineCarryingLabelPartByPartWithItsPart label content.LinesByPart with
         | Some (partLines, index) ->
             let matchedLine = List.item index partLines
             let labelIndex = matchedLine.Text.IndexOf(label, StringComparison.OrdinalIgnoreCase)
@@ -270,7 +222,7 @@ let private runRule
             foundUnlessEmpty (matchedLine.Text.Substring(labelIndex + label.Length))
         | None -> NotFound
     | LinesAfterLabel(label, offset) ->
-        match tryFindLabelInLaidOutLines label content.GroupedByPart with
+        match tryLocateLabelInLaidOutLinesAsLinesAndTheIndexOfTheOneItEndsOn label content.GroupedByPart with
         | Some (laidOutLines, labelIndex) ->
             let targetIndex = labelIndex + offset
 
@@ -290,33 +242,31 @@ let private runRule
         | None -> NotFound
     | RegexCapture _ ->
         let allLines = content.LinesByPart |> List.collect (List.map (fun candidate -> candidate.Text))
-        runRegexAcross (Map.find field compiledPatterns) allLines
+        runRegexOnEachCandidateUntilOneIsFoundOrTimesOut (Map.find field compiledPatterns) allLines
     | FixedValue value -> foundUnlessEmpty value
     | SubjectCapture _ -> runRegexOnce (Map.find field compiledPatterns) content.Subject
-    | AttachmentName _ -> runRegexAcross (Map.find field compiledPatterns) content.AttachmentNames
+    | AttachmentName _ ->
+        runRegexOnEachCandidateUntilOneIsFoundOrTimesOut (Map.find field compiledPatterns) content.AttachmentNames
     | DateFromField _ -> NotFound // handled separately in applyTemplate - this rule never reads text
 
-/// The other of '.' and ',': whichever character the template did NOT call its decimal separator
-/// is the one its documents use to group thousands.
 let private thousandsSeparatorFor (decimalSeparator: char) : char =
     if decimalSeparator = ',' then '.' else ','
 
-/// A maximal run of number-shaped characters, and where in the text it sits.
-///
 /// The position is the only thing that tells a credit note's "-245.00" apart from the "-1042"
 /// inside "INV-1042", and an accounting document's "(245.00)" apart from a number that merely
 /// happens to sit near a bracket. Both questions are about what surrounds the digits rather than
 /// what the digits are, so the run carries where to look rather than a copy of one neighbour.
-type private NumericRun = { Text: string; Start: int; End: int }
+type private MaximalRunOfNumberShapedCharacters = { Text: string; Start: int; End: int }
 
-/// Every maximal run of number-shaped characters in the text, in order.
-///
 /// Splitting into runs is what makes "Total for INV-1042: $245.00" two candidates rather than one
 /// number. The previous implementation kept every digit, every '-' and the separator with a
 /// global String.filter and parsed the concatenation, so - measured - that line booked
 /// -1042245.00, "245.00 due 14/07/2026" booked 245.0014072026, and "Ref 2 items $10.50" booked
 /// 210.50. All three silently, with no AmountUnparseable and nothing to notice them by.
-let private numericRuns (decimalSeparator: char) (raw: string) : NumericRun list =
+let private everyMaximalRunOfNumberShapedCharactersInTheTextInOrder
+    (decimalSeparator: char)
+    (raw: string)
+    : MaximalRunOfNumberShapedCharacters list =
     let thousandsSeparator = thousandsSeparatorFor decimalSeparator
     let isNumberShaped character = Char.IsDigit character || character = decimalSeparator || character = thousandsSeparator || character = '-'
 
@@ -329,9 +279,10 @@ let private numericRuns (decimalSeparator: char) (raw: string) : NumericRun list
         (([], [], 0, 0), raw)
         ||> Seq.fold (fun (completed, current, start, position) character ->
             if isNumberShaped character then
-                // Where the run STARTED, remembered on the way past its first character.
-                let start = if List.isEmpty current then position else start
-                completed, character :: current, start, position + 1
+                let startOfTheRunRememberedOnTheWayPastItsFirstCharacter =
+                    if List.isEmpty current then position else start
+
+                completed, character :: current, startOfTheRunRememberedOnTheWayPastItsFirstCharacter, position + 1
             elif List.isEmpty current then
                 completed, [], start, position + 1
             else
@@ -339,65 +290,54 @@ let private numericRuns (decimalSeparator: char) (raw: string) : NumericRun list
 
     (if List.isEmpty trailing then completed else asRun start trailing :: completed) |> List.rev
 
-/// Whether a run's leading '-' is a SIGN rather than a joiner inside something that is not a
-/// number. A sign appears at the start of the text, after whitespace, after a currency symbol or
-/// after punctuation - never immediately after a letter or a digit.
-///
 /// Without this, a hyphenated token that is the only number-shaped run in the text passed the
 /// "exactly one candidate" guard and was booked as a negative amount: measured, "INV-1042" gave
 /// -1042, "Net-30" gave -30 and "PO-77" gave -77. An Amount rule whose label also appears on a
 /// reference line - AfterLabel "Total" against "Total items INV-1042" - is all it takes, and the
 /// wrong amount arrives with nothing to notice it by. The shape alone cannot tell that from a
 /// genuine credit note; the character in front of it can.
-let private hasSignInSignPosition (raw: string) (run: NumericRun) : bool =
+let private runsLeadingHyphenIfAnyIsASignBecauseNoLetterOrDigitPrecedesIt
+    (raw: string)
+    (run: MaximalRunOfNumberShapedCharacters)
+    : bool =
     not (run.Text.StartsWith '-') || run.Start = 0 || not (Char.IsLetterOrDigit raw.[run.Start - 1])
 
-/// The first character either side of a run that is not decoration. Whitespace and currency
-/// symbols are stepped over - Char.IsSymbol covers '$', '£', '€' and '¥' - so "($245.00)" reads
-/// the same as "(245.00)". A letter, a digit or any other punctuation stops the walk, which is
-/// what keeps "Total (net) 245.00" from looking wrapped.
-let rec private firstMeaningfulCharacter (step: int) (position: int) (raw: string) : char option =
+/// Whitespace and currency symbols are stepped over - Char.IsSymbol covers '$', '£', '€' and
+/// '¥' - so "($245.00)" reads the same as "(245.00)". A letter, a digit or any other punctuation
+/// stops the walk, which is what keeps "Total (net) 245.00" from looking wrapped.
+let rec private firstCharacterThatIsNotDecorationWalkingInTheGivenDirection
+    (step: int)
+    (position: int)
+    (raw: string)
+    : char option =
     if position < 0 || position >= raw.Length then
         None
     elif Char.IsWhiteSpace raw.[position] || Char.IsSymbol raw.[position] then
-        firstMeaningfulCharacter step (position + step) raw
+        firstCharacterThatIsNotDecorationWalkingInTheGivenDirection step (position + step) raw
     else
         Some raw.[position]
 
-/// Whether the run is wrapped in accounting parentheses. "(245.00)" is the other common way a
-/// document writes a credit, alongside the trailing CR/DR that requirements.md already has the
-/// engine ignore - and measured before this, it booked +245.00. That is the same silent wrong-sign
-/// failure the previous round of this function was about, arriving from the other direction: a
-/// credit note filed as a charge, with nothing to notice it by.
+/// "(245.00)" is the other common way a document writes a credit, alongside the trailing CR/DR
+/// that requirements.md already has the engine ignore - and measured before this, it booked
+/// +245.00. That is the same silent wrong-sign failure the previous round of this function was
+/// about, arriving from the other direction: a credit note filed as a charge, with nothing to
+/// notice it by.
 ///
-/// BOTH brackets are required. An unbalanced one is decoration whose meaning cannot be read off
-/// the line, and guessing at it is what this function's whole history says not to do.
-let private isParenthesised (raw: string) (run: NumericRun) : bool =
-    firstMeaningfulCharacter -1 (run.Start - 1) raw = Some '('
-    && firstMeaningfulCharacter 1 (run.End + 1) raw = Some ')'
+/// An unbalanced bracket is decoration whose meaning cannot be read off the line, and guessing at
+/// it is what this function's whole history says not to do.
+let private isWrappedInAccountingParenthesesWithBothBracketsPresent
+    (raw: string)
+    (run: MaximalRunOfNumberShapedCharacters)
+    : bool =
+    firstCharacterThatIsNotDecorationWalkingInTheGivenDirection -1 (run.Start - 1) raw = Some '('
+    && firstCharacterThatIsNotDecorationWalkingInTheGivenDirection 1 (run.End + 1) raw = Some ')'
 
-/// One number out of the text, or nothing. Currency symbols, thousands separators, a trailing
-/// CR/DR suffix and a full stop ending the sentence all fall away; a SECOND number anywhere in
-/// the text does not. Two candidates is an ambiguity this reports rather than resolves - guessing
-/// puts a wrong amount in the ledger with nothing to notice it by, which is the failure
-/// requirements.md's "never a default ... silently substituted" is written against.
-///
-/// A run whose '-' is not in a sign position is not an amount at all, and does not become one by
-/// being the only number-shaped thing on the line - so it falls through to the same refusal two
-/// candidates get rather than to a second, quieter answer.
-///
-/// A pair of brackets around the run is the one piece of decoration that changes the ANSWER
-/// rather than falling away: "(245.00)" is a credit, the same as "245.00 CR" is not.
-///
-/// Known limitation, stated rather than hidden: a document that groups thousands with a SPACE
-/// ("1 234,56") reads as two candidates and is refused. That is a reported AmountUnparseable the
-/// user can answer with a RegexCapture rule, not a wrong number - which is what the old filter
-/// produced for the same input.
-let private parseAmount (decimalSeparator: char) (raw: string) : decimal option =
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ApplyTemplateWorkflow.fs: parseTheOneNumberOutOfTheTextOrNone
+let private parseTheOneNumberOutOfTheTextOrNone (decimalSeparator: char) (raw: string) : decimal option =
     let thousandsSeparator = thousandsSeparatorFor decimalSeparator
 
     let candidates =
-        numericRuns decimalSeparator raw
+        everyMaximalRunOfNumberShapedCharactersInTheTextInOrder decimalSeparator raw
         // A run can END on a separator that was really punctuation - "$245.00." - but never
         // STARTS on one that was, since ".50" is a legitimate way to write half a unit. End moves
         // with the trim, so the closing-bracket check below still looks at the character after
@@ -408,7 +348,7 @@ let private parseAmount (decimalSeparator: char) (raw: string) : decimal option 
         |> List.filter (fun run -> run.Text |> Seq.exists Char.IsDigit)
 
     match candidates with
-    | [ single ] when hasSignInSignPosition raw single ->
+    | [ single ] when runsLeadingHyphenIfAnyIsASignBecauseNoLetterOrDigitPrecedesIt raw single ->
         let withoutGrouping = single.Text.Replace(string thousandsSeparator, "")
 
         let normalized =
@@ -423,19 +363,25 @@ let private parseAmount (decimalSeparator: char) (raw: string) : decimal option 
         with
         // Parentheses say credit, so the digits say the magnitude and the brackets say the sign -
         // which makes "(-245.00)" -245.00 rather than a double negative talking itself positive.
-        | true, value -> Some (if isParenthesised raw single then -(abs value) else value)
+        | true, value ->
+            if isWrappedInAccountingParenthesesWithBothBracketsPresent raw single then
+                Some (-(abs value))
+            else
+                Some value
         | false, _ -> None
     | _ -> None
 
-/// Explicit format, InvariantCulture, TryParseExact - never ambient-culture DateTime.Parse. This
-/// is what makes 02/08/2016 read with d/M/yyyy 2 August and the same text read with M/d/yyyy 8
-/// February, deterministically, regardless of the machine's locale.
-let private parseDate (format: string) (raw: string) : DateTime option =
+/// This is what makes 02/08/2016 read with d/M/yyyy 2 August and the same text read with M/d/yyyy
+/// 8 February, deterministically, regardless of the machine's locale.
+let private parseDateWithTheExplicitFormatInInvariantCultureNeverAmbientCulture
+    (format: string)
+    (raw: string)
+    : DateTime option =
     match DateTime.TryParseExact(raw.Trim(), format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
     | true, value -> Some value
     | false, _ -> None
 
-/// Reads the decimal separator out of the hint. The non-AsMoney branch is unreachable:
+/// The non-AsMoney branch is unreachable:
 /// ValidateTemplateWorkflow refuses to produce a ValidTemplate whose Amount rule is not
 /// AsMoney-hinted, which is the save-time refusal that replaced this defaulting to '.' and
 /// parsing money out of a rule the user had hinted as text.
@@ -446,7 +392,7 @@ let private extractMoney (field: TargetField) (hint: ParseHint) (raw: string) : 
         | AsText
         | AsDate _ -> '.'
 
-    match parseAmount decimalSeparator raw with
+    match parseTheOneNumberOutOfTheTextOrNone decimalSeparator raw with
     | Some value -> Ok value
     | None -> Error (AmountUnparseable(field, raw))
 
@@ -461,25 +407,21 @@ let private extractDate (field: TargetField) (hint: ParseHint) (raw: string) : R
         | AsText
         | AsMoney _ -> ""
 
-    match parseDate format raw with
+    match parseDateWithTheExplicitFormatInInvariantCultureNeverAmbientCulture format raw with
     | Some value -> Ok value
     | None -> Error (DateUnparseable(field, raw, format))
 
-/// One template against ONE candidate document: runs each field rule over that candidate's text,
-/// parses each result with the rule's hint, and derives DueDate from IssueDate when it names
-/// DateFromField.
-///
 /// Fields are evaluated in a fixed order - Reference, Amount, Currency, IssueDate, DueDate - so
 /// that DueDate's DateFromField can read an already-computed IssueDate. This is not a general
 /// dependency solver, and it no longer pretends to be one by returning None for the pairings it
 /// cannot handle: ValidateTemplateWorkflow refuses at save time every derivation except DueDate
 /// from IssueDate, so a forward reference or a longer chain cannot reach this function.
-let private applyToCandidate
+let private applyTemplateToOneCandidateDocument
     (paymentTerm: PaymentTermDays)
     (templateId: TemplateId)
     (template: ValidTemplate)
     (sourceMessageId: SourceMessageId)
-    (content: SelectedContent)
+    (content: CandidateDocumentContentPlusTheSubject)
     : Result<ExtractedInvoice, InvoiceError> =
     let rules = ValidTemplate.rules template
     let compiledPatterns = ValidTemplate.compiledPatterns template
@@ -581,50 +523,36 @@ let private applyToCandidate
             }
     }
 
-/// Tries each candidate document in turn, stopping at the first that yields every required field.
-/// When none does, the reported error is the LAST candidate's - the same choice
-/// SelectTemplateWorkflow.tryInOrder makes one level up, and for the same reason: a real
-/// diagnostic beats "nothing worked".
-let rec private tryCandidatesInOrder
-    (applyTo: SelectedContent -> Result<ExtractedInvoice, InvoiceError>)
-    (candidate: SelectedContent)
-    (remaining: SelectedContent list)
+/// The same choice as
+/// SelectTemplateWorkflow.tryEachTemplateInOrderUntilOneSucceedsReportingTheLastErrorWhenAllFail
+/// one level up, and for the same reason: a real diagnostic beats "nothing worked".
+let rec private tryEachCandidateDocumentUntilOneSucceedsReportingTheLastErrorWhenAllFail
+    (applyTo: CandidateDocumentContentPlusTheSubject -> Result<ExtractedInvoice, InvoiceError>)
+    (candidate: CandidateDocumentContentPlusTheSubject)
+    (remaining: CandidateDocumentContentPlusTheSubject list)
     : Result<ExtractedInvoice, InvoiceError> =
     match applyTo candidate with
     | Ok invoice -> Ok invoice
     | Error lastError ->
         match remaining with
         | [] -> Error lastError
-        | next :: rest -> tryCandidatesInOrder applyTo next rest
+        | next :: rest -> tryEachCandidateDocumentUntilOneSucceedsReportingTheLastErrorWhenAllFail applyTo next rest
 
-/// Applies one template to one message, and hands back the first invoice it can make out of a
-/// SINGLE document. Pure - no I/O, no clock, no randomness, and no dependency parameters;
-/// PaymentTermDays, TemplateId and NormalizedMessage are plain input data, not dependency function
-/// types.
-///
-/// TemplateId is not part of design.md's listed signature for this function, but ExtractedInvoice
-/// and InvoiceError's template-carrying cases both need one and ValidTemplate itself carries
-/// none - a gap in the documented signature, closed here rather than deferred to a caller that
-/// would otherwise have to reconstruct these values after the fact.
-///
-/// The input is a NormalizedMessage rather than a ScannedMessage so that normalization happens
-/// once per message, above selectTemplate's loop, instead of once per candidate template inside
-/// it. Callers reach it through MessageNormalization.normalizeMessage.
-///
-/// This is "first complete match wins" one level below SelectTemplateWorkflow's: that one tries a
-/// supplier's templates in turn, this one tries the message's attachments in turn. The rules do
-/// re-run per attachment, so a message with N attachments costs N rule passes - but normalization,
-/// which is the expensive step, still happens exactly once for the whole message, above both
-/// loops. See selectCandidates for why each attachment is a candidate of its own.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ApplyTemplateWorkflow.fs: applyTemplate
 let applyTemplate
     (paymentTerm: PaymentTermDays)
     (templateId: TemplateId)
     (template: ValidTemplate)
     (message: NormalizedMessage)
     : Result<ExtractedInvoice, InvoiceError> =
-    let firstCandidate, laterCandidates = selectCandidates (ValidTemplate.part template) message
+    let candidateDocuments =
+        selectEveryCandidateDocumentInMessageOrderNeverFewerThanOne (ValidTemplate.part template) message
 
-    tryCandidatesInOrder
-        (applyToCandidate paymentTerm templateId template (NormalizedMessage.sourceMessageId message))
-        firstCandidate
-        laterCandidates
+    tryEachCandidateDocumentUntilOneSucceedsReportingTheLastErrorWhenAllFail
+        (applyTemplateToOneCandidateDocument
+            paymentTerm
+            templateId
+            template
+            (NormalizedMessage.sourceMessageId message))
+        candidateDocuments.FirstCandidate
+        candidateDocuments.LaterCandidates

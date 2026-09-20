@@ -59,7 +59,6 @@ let createSupplierApi
                 id
             |> Result.mapError SupplierApiMappers.toSupplierError
 
-    // Outbound: the workflow's domain error becomes the exception the UI renders.
     let toException = SupplierApiMappers.toMyDogsbodyException
 
     {

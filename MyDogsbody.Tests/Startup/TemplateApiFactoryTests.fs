@@ -224,16 +224,7 @@ let ``a validation failure is never written to the log`` () =
         context.Dispose()
         try File.Delete databaseFilePath with _ -> ()
 
-/// The one rule shape that used to break the rule above. `FixedValue null` - a cleared
-/// MudTextField, the same input TemplateApiMappers already guards for an AsMoney separator - is
-/// the only text-carrying rule kind validateTemplate lets through, so it reached
-/// TemplateFieldRules' CHECK (RuleText IS NOT NULL) and came back as an infrastructure failure.
-/// Measured against HEAD before the fix: Error "Failed to insert new template." with exactly one
-/// entry in `logged`, for what is a validation-shaped input.
-///
-/// The template is stored rather than refused, because that is exactly what an empty box already
-/// does: `FixedValue ""` saves today and ApplyTemplateWorkflow reports it as the rule finding
-/// nothing, with its own sentence in toMatchedNothingReason.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - TemplateApiFactoryTests.fs: a cleared FixedValue box is stored as an empty fixed value and never written to the log
 [<Fact; Trait("Level", "Integration")>]
 let ``a cleared FixedValue box is stored as an empty fixed value and never written to the log`` () =
     let logged = ResizeArray<MyDogsbodyException>()
@@ -689,8 +680,10 @@ let ``TestTemplate reports empty sample text rather than raising`` () =
     )
 
 /// ParseHint.AsDate carries the rule in its own declaration - "explicit. NEVER DateTime.Parse with
-/// ambient culture" - and validateDateFormat and TemplateApiMappers.toFieldFailureReason both pin
-/// InvariantCulture and say why. This was the one date rendering left ambient: DateTime.ToString
+/// ambient culture" - and
+/// validateAsDateFormatByParsingBackTheDateItWritesNotMerelyByFormatting and
+/// TemplateApiMappers.toFieldFailureReason both pin InvariantCulture and say why. This was the
+/// one date rendering left ambient: DateTime.ToString
 /// resolves "yyyy" against CurrentCulture's CALENDAR, so 4 March 2026 prints 2569-03-04 under
 /// th-TH and 1447-09-15 under ar-SA - the panel showing the author a date their template never
 /// extracted, in the one screen the change exists to let them check it against.
@@ -785,22 +778,7 @@ let ``TestTemplate reports an unknown supplier rather than testing against an in
         Assert.IsType<ApplicationException>(actual.InnerException) |> ignore
     )
 
-/// Every member's ActionName, in one place, driven through the real API.
-///
-/// The action is the only thing an exception-log row carries that says WHICH call failed, and
-/// ActionNames entries are `$"..."`-composed and compiler-unchecked, so nothing but a test stops
-/// one member reporting another's - CLAUDE-project.md -> Testing -> Contract states the rule
-/// ("assert each outer-ring function's error reports its declared action. A typo is otherwise
-/// invisible until someone reads the exception log").
-///
-/// Five of the six members happened to be pinned by an ad-hoc assertion in the tests above;
-/// EditTemplate was not, and repointing its mapError to ActionNames...addTemplate passed the whole
-/// suite, 778 of 778. The structural suite in Contracts/ActionNamesTests.fs cannot catch that: it
-/// checks that each string ends with the name of the binding that declares it and that no two
-/// bindings share one - both of which stay true when the wrong binding is USED.
-///
-/// Counted against the record's own field count by reflection, so a seventh member added later
-/// fails here until it names its action.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - TemplateApiFactoryTests.fs: every TemplateApi member reports its own declared ActionName
 [<Fact; Trait("Level", "Integration")>]
 let ``every TemplateApi member reports its own declared ActionName`` () =
     withApi (fun api supplierId ->

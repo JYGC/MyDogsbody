@@ -65,10 +65,9 @@ let private mapOrRaise (mapResult: Result<StoredSupplier, string>) =
     | Ok stored -> stored
     | Error reason -> raise (InvalidOperationException $"Stored supplier is unusable: {reason}")
 
-/// Runs `work` with the connection open and inside a transaction, committing on success. Any
-/// exception - including one raised deliberately by mapOrRaise - unwinds without a Commit, so the
-/// transaction's own Dispose rolls it back: a write in the middle of a multi-statement sequence
-/// (a supplier row plus its matcher rows) never survives a later statement's failure.
+/// An exception - including one raised deliberately by mapOrRaise - unwinds without a Commit, so
+/// the transaction's own Dispose rolls it back: a write in the middle of a multi-statement
+/// sequence (a supplier row plus its matcher rows) never survives a later statement's failure.
 let private inTransaction (connection: SqliteConnection) (work: SqliteTransaction -> 'T) : 'T =
     connection.Open()
 
@@ -102,9 +101,9 @@ let getAll
                 |> runSync
                 |> Seq.toList
 
-            // One query for every matcher, grouped in memory, rather than one query per supplier -
-            // getAll runs on every page load and after every write.
-            let matchersBySupplierId =
+            // Rather than one query per supplier - getAll runs on every page load and after every
+            // write.
+            let everyMatcherFromOneQueryGroupedBySupplierId =
                 select {
                     for matcherRow in getSupplierMatchers () do
                     selectAll
@@ -118,7 +117,11 @@ let getAll
             return
                 supplierRows
                 |> List.map (fun row ->
-                    let matchers = matchersBySupplierId |> Map.tryFind row.Id |> Option.defaultValue []
+                    let matchers =
+                        everyMatcherFromOneQueryGroupedBySupplierId
+                        |> Map.tryFind row.Id
+                        |> Option.defaultValue []
+
                     SupplierRecordMappers.toStoredSupplier row matchers |> mapOrRaise)
         with caughtException ->
             return! MyDogsbodyException(action, "Failed to retrieve all suppliers.", caughtException)
@@ -151,13 +154,13 @@ let insertOne
 
                     insertedId)
 
-            // Every field is already known from the input plus the id the insert assigned - no
-            // need to read back what was just written.
-            return
+            let storedSupplierBuiltFromTheInputAndTheAssignedIdNotReadBackFromTheDatabase =
                 SupplierRecordMappers.toStoredSupplier
                     { newRecord with Id = insertedId }
                     (supplier.Matchers |> List.map (SupplierRecordMappers.toNewMatcherRecord insertedId))
                 |> mapOrRaise
+
+            return storedSupplierBuiltFromTheInputAndTheAssignedIdNotReadBackFromTheDatabase
         with caughtException ->
             return! MyDogsbodyException(action, "Failed to insert new supplier.", caughtException)
     }
@@ -216,9 +219,7 @@ let updateOne
                         SupplierRecordMappers.toNewMatcherRecord rowId matcher
                         |> insertMatcherRow connection transaction))
 
-                // Every field is already known from the input plus the row id already confirmed
-                // to exist above - no need to read back what was just written.
-                let updatedRecord =
+                let updatedRecordBuiltFromTheEditAndTheRowIdConfirmedToExistNotReadBackFromTheDatabase =
                     {
                         Id = rowId
                         Name = SupplierName.value edit.Name
@@ -227,7 +228,7 @@ let updateOne
 
                 return
                     SupplierRecordMappers.toStoredSupplier
-                        updatedRecord
+                        updatedRecordBuiltFromTheEditAndTheRowIdConfirmedToExistNotReadBackFromTheDatabase
                         (edit.Matchers |> List.map (SupplierRecordMappers.toNewMatcherRecord rowId))
                     |> mapOrRaise
                     |> Some

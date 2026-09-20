@@ -76,10 +76,8 @@ let ``GoogleCredentialStore.updateOne reports its declared action`` () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``PdfDocumentReader.readContent reports its declared action`` () =
-    // Arrange
     let missing = DocumentPath.create (Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.pdf")) |> valueOrFail
 
-    // Assert
     Assert.Equal(
         ActionNames.MyDogsbody.Integrations.Documents.PdfDocumentReader.readContent,
         PdfDocumentReader.readContent handleError missing |> actionOf
@@ -87,7 +85,6 @@ let ``PdfDocumentReader.readContent reports its declared action`` () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``ExceptionRepository.insertOne reports its declared action`` () =
-    // Arrange
     let entry: ExceptionLogEntry =
         {
             Message = "m"
@@ -96,7 +93,6 @@ let ``ExceptionRepository.insertOne reports its declared action`` () =
             CreatedDate = DateTime(2026, 8, 5)
         }
 
-    // Assert
     Assert.Equal(
         ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne,
         ExceptionRepository.insertOne handleError failingExceptionCollection entry |> actionOf
@@ -128,10 +124,9 @@ let private allDeclaredActions () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``every declared action is non-empty and rooted at MyDogsbody`` () =
-    // Arrange
     let actions = allDeclaredActions ()
 
-    // Assert - the walk found something, so a silent zero-match is not mistaken for success
+    // the walk found something, so a silent zero-match is not mistaken for success
     Assert.NotEmpty actions
 
     for name, value in actions do
@@ -142,12 +137,11 @@ let ``every declared action is non-empty and rooted at MyDogsbody`` () =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``every declared action ends with the name of the binding that declares it`` () =
-    // Arrange - this is the assertion that would have caught the truncated entry: it was bound
+    // this is the assertion that would have caught the truncated entry: it was bound
     // to mapAddCredentialUseCaseTypeDtoToAddCredentialDomainTypeDto but composed the string
     // "...mapAddCredentialUseCaseTypeDtoToAddCredentialDomain".
     let actions = allDeclaredActions ()
 
-    // Assert
     for name, value in actions do
         let bindingName = name.Substring(name.LastIndexOf '.' + 1)
         let lastSegment = value.Substring(value.LastIndexOf '.' + 1)
@@ -165,18 +159,16 @@ let ``every declared action ends with the name of the binding that declares it``
 
 [<Fact; Trait("Level", "Contract")>]
 let ``no two bindings declare the same action`` () =
-    // Arrange - a copy-paste that leaves two functions reporting the same action makes the log
+    // a copy-paste that leaves two functions reporting the same action makes the log
     // ambiguous about where a failure came from. This is what would have caught the entry that
     // named the opposite mapping.
     let actions = allDeclaredActions ()
 
-    // Act
     let duplicates =
         actions
         |> List.groupBy snd
         |> List.filter (fun (_, group) -> List.length group > 1)
 
-    // Assert
     let describe (value: string, group: (string * string) list) =
         let bindings = String.Join(", ", group |> List.map fst)
         sprintf "%s <- %s" value bindings

@@ -16,9 +16,9 @@ open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database.Types
 open MyDogsbody.Integrations.Google.Database.Models
 
-/// The client secret is a single row; a fixed id means "the client secret" always addresses the
-/// same document rather than a query that could somehow match more than one.
-let private clientSecretRowId = ObjectId("000000000000000000000001")
+/// So "the client secret" always addresses the same document rather than a query that could
+/// somehow match more than one.
+let private fixedIdOfTheOneClientSecretRow = ObjectId("000000000000000000000001")
 
 /// A row that cannot be mapped back is a data-integrity failure, not something a user did, so
 /// it is raised and caught like any other unexpected failure rather than returned as a value.
@@ -36,7 +36,7 @@ let loadClientSecret
 
     handleError {
         try
-            let existing = getClientSecretCollection().FindById clientSecretRowId
+            let existing = getClientSecretCollection().FindById fixedIdOfTheOneClientSecretRow
             return if isNull (box existing) then None else Some existing.Secret
         with caughtException ->
             return! MyDogsbodyException(action, "Failed to load the Google client secret.", caughtException)
@@ -51,7 +51,7 @@ let saveClientSecret
 
     handleError {
         try
-            let entity = GoogleClientSecretEntity(Id = clientSecretRowId, Secret = secret)
+            let entity = GoogleClientSecretEntity(Id = fixedIdOfTheOneClientSecretRow, Secret = secret)
             getClientSecretCollection().Upsert entity |> ignore
             return ()
         with caughtException ->

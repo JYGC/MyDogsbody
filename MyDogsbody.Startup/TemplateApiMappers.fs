@@ -68,23 +68,7 @@ let toTargetFieldUiString (field: TargetField) : string =
     | IssueDate -> "IssueDate"
     | DueDate -> "DueDate"
 
-/// The FixedValue branch is the second place a cleared MudTextField had to be named, for the same
-/// reason as the AsMoney separator below - and it is the only rule kind where a null gets past
-/// every later check. `AfterLabel`/`LinesAfterLabel` reach ValidateTemplateWorkflow's
-/// IsNullOrWhiteSpace label guard (LabelIsEmpty) and the three pattern kinds reach compilePattern's
-/// own isNull guard (PatternInvalid); a `FixedValue null` passes validateTemplate untouched, is
-/// written by TemplateRecordMappers.toFieldRuleColumns as `Some null`, and lands on
-/// TemplateFieldRules' CHECK (RuleText IS NOT NULL). Measured: AddTemplate answered "Failed to
-/// insert new template." and wrote one entry to the exception log, for a user who emptied a box -
-/// an infrastructure failure reported for a validation-shaped input, on the one path
-/// CLAUDE-project.md requires to stay unlogged.
-///
-/// Normalised to "" rather than refused, because an empty box already means something settled here:
-/// `FixedValue ""` saves, ApplyTemplateWorkflow.foundUnlessEmpty reports it as the rule finding
-/// nothing, and toMatchedNothingReason gives it its own sentence. A cleared box and an untouched
-/// one are the same user action, so they become the same rule. Only this branch is normalised -
-/// blanket-normalising ruleText would turn a null pattern's "Pattern must not be empty." into the
-/// vaguer "needs a capture group.", since Regex("") compiles.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Startup.md - TemplateApiMappers.fs: toFieldRule
 let private toFieldRule
     (ruleKind: string)
     (ruleText: string)
@@ -134,9 +118,18 @@ let private toParseHintUiColumns (hint: ParseHint) : string * string =
 
 let private toTemplateFieldRule (uiRule: TemplateFieldRuleUiType) : Result<TemplateFieldRule, TemplateError> =
     result {
-        let! field = toTargetField uiRule.Field |> Result.mapError TemplateRuleShapeInvalid
-        let! rule = toFieldRule uiRule.RuleKind uiRule.RuleText uiRule.RuleOffset uiRule.RuleSourceField |> Result.mapError TemplateRuleShapeInvalid
-        let! hint = toParseHint uiRule.HintKind uiRule.HintText |> Result.mapError TemplateRuleShapeInvalid
+        let! field =
+            toTargetField uiRule.Field
+            |> Result.mapError TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent
+
+        let! rule =
+            toFieldRule uiRule.RuleKind uiRule.RuleText uiRule.RuleOffset uiRule.RuleSourceField
+            |> Result.mapError TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent
+
+        let! hint =
+            toParseHint uiRule.HintKind uiRule.HintText
+            |> Result.mapError TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent
+
         return { Field = field; Rule = rule; Hint = hint }
     }
 
@@ -154,9 +147,9 @@ let private toTemplateFieldRuleUiType (rule: TemplateFieldRule) : TemplateFieldR
         HintText = hintText
     }
 
-/// Stops at the first unrecognised shape, the same way SupplierApiMappers.toUnvalidatedMatchers
-/// stops at the first invalid matcher.
-let private toUnvalidatedRules (rules: TemplateFieldRuleUiType list) : Result<TemplateFieldRule list, TemplateError> =
+let private toUnvalidatedRulesStoppingAtTheFirstUnrecognisedShape
+    (rules: TemplateFieldRuleUiType list)
+    : Result<TemplateFieldRule list, TemplateError> =
     let rec loop remaining accumulatedRules =
         match remaining with
         | [] -> Ok (List.rev accumulatedRules)
@@ -169,8 +162,10 @@ let private toUnvalidatedRules (rules: TemplateFieldRuleUiType list) : Result<Te
 
 let toUnvalidatedTemplate (uiType: TemplateUiTypeWithoutId) : Result<UnvalidatedTemplate, TemplateError> =
     result {
-        let! part = toDocumentPart uiType.DocumentPart uiType.AttachmentFormat |> Result.mapError TemplateRuleShapeInvalid
-        let! rules = toUnvalidatedRules uiType.Rules
+        let! part =
+            toDocumentPart uiType.DocumentPart uiType.AttachmentFormat
+            |> Result.mapError TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent
+        let! rules = toUnvalidatedRulesStoppingAtTheFirstUnrecognisedShape uiType.Rules
 
         return
             {
@@ -223,7 +218,7 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
     | TemplateNameInvalid reason -> expected reason
     | TemplateIdInvalid reason -> expected reason
     | TemplateSupplierIdInvalid reason -> expected reason
-    | TemplateRuleShapeInvalid reason -> expected reason
+    | TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent reason -> expected reason
     | PatternInvalid(field, reason) -> expected $"The pattern for {toTargetFieldUiString field} is invalid: {reason}"
     | PatternHasNoCaptureGroup field -> expected $"The pattern for {toTargetFieldUiString field} needs a capture group."
     | DateFormatInvalid(field, reason) -> expected $"The date format for {toTargetFieldUiString field} is invalid: {reason}"
@@ -255,36 +250,7 @@ let toMyDogsbodyException (action: string) (error: TemplateError) : MyDogsbodyEx
 /// failure. The adapter's handleError has already logged it, so nothing logs again here.
 let toTemplateError (caughtException: MyDogsbodyException) : TemplateError = TemplateStoreFailed caughtException.Message
 
-/// The other outbound translation: an InvoiceError becomes the sentence the test panel prints
-/// against a field. InvoiceError carries no ActionName and never reaches handleError in this
-/// change (design.md -> Errors), so it does not go through toMyDogsbodyException - but it is
-/// still a domain error the user reads, and the same rule applies: a sentence, not a union.
-///
-/// `string error` was what this replaced, and it printed
-/// `TemplateMatchedNothing (TemplateId "test", Amount)` - a union dump quoting the placeholder
-/// TemplateId the composition root invents for a run that never touches the store. requirements.md
-/// asks the panel to say, where a field failed, WHY; the id of a template that does not exist is
-/// not part of that answer, so every case below drops it and names the field instead.
-///
-/// A match rather than a catch-all: an InvoiceError case added later breaks the build here, the
-/// same way toMyDogsbodyException's exhaustiveness is what caught five missing TemplateError
-/// branches in the first review round.
-/// Which field an apply-time error is ABOUT.
-///
-/// ApplyTemplateWorkflow evaluates the fields in one fixed order and stops at the first that
-/// fails, so a whole test-panel run hands back a single InvoiceError - and a panel that gave that
-/// one error to every row told the author "Reference failed" about a rule that had just matched,
-/// with a reason naming Amount. requirements.md asks the panel to show, per field, "where it
-/// failed - why", and the panel's entire job is to send the author to the rule that is broken; the
-/// reason has to land on the field it names.
-///
-/// DueDateOutOfRange carries a TemplateId rather than a field, but it is raised in exactly one
-/// place - the DueDate DateFromField branch - so the field is DueDate by construction. The three
-/// supplier/template-selection cases name no field and cannot arise from a panel run at all, so
-/// they answer None and their sentence goes on every row, as before.
-///
-/// A match rather than a catch-all, for the same reason toFieldFailureReason below is one: an
-/// InvoiceError case added later breaks the build here rather than quietly answering None.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Startup.md - TemplateApiMappers.fs: toFailingField
 let toFailingField (error: InvoiceError) : TargetField option =
     match error with
     | SupplierNotRecognised _
@@ -310,24 +276,7 @@ let toFailingField (error: InvoiceError) : TargetField option =
     | NoAccountSelected
     | InvoiceStoreFailed _ -> None
 
-/// The sentence for "the rule yielded nothing", naming the input that rule actually reads.
-///
-/// Three of the seven kinds do not read the pasted sample text, and requirements.md is explicit
-/// about each: SubjectCapture runs its pattern "against the message subject, not the document
-/// body", AttachmentName "against the attachment's filename, not its content", and FixedValue
-/// returns its value "without consulting the text at all". One sentence naming the sample text for
-/// every kind therefore sent the author to a box that is not the problem - measured with an empty
-/// subject box and a sample text full of matching content, an unmatched SubjectCapture rule read
-/// "The rule for Reference found nothing in the sample text." That is the wrong box to send them
-/// to, on the one screen the change exists to let them diagnose a template, and it contradicts the
-/// rule kind's own documented behaviour.
-///
-/// A FixedValue rule has no input at all, so it gets a sentence of its own rather than a locative:
-/// the only way it yields nothing is an empty fixed value, which is the thing to go and fix.
-///
-/// None is a caller with no rule to hand - an error naming no field - and keeps the original
-/// wording. Exhaustive over FieldRule, so an eighth rule kind breaks the build here rather than
-/// quietly claiming to read the sample text.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Startup.md - TemplateApiMappers.fs: toMatchedNothingReason
 let private toMatchedNothingReason (rule: FieldRule option) (field: TargetField) : string =
     let name = toTargetFieldUiString field
 
@@ -338,6 +287,7 @@ let private toMatchedNothingReason (rule: FieldRule option) (field: TargetField)
     | Some (AfterLabel _ | LinesAfterLabel _ | RegexCapture _ | DateFromField _)
     | None -> $"The rule for {name} found nothing in the sample text."
 
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Startup.md - TemplateApiMappers.fs: toFieldFailureReason
 let toFieldFailureReason (rule: FieldRule option) (error: InvoiceError) : string =
     match error with
     // The three MatchSupplierWorkflow / SelectTemplateWorkflow cases cannot arise from a test-panel

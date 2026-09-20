@@ -32,8 +32,8 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
             match Option.ofObj document.MainDocumentPart |> Option.bind (fun mainDocumentPart -> Option.ofObj mainDocumentPart.Document) with
             | None -> Error(DocumentUnreadable "The document has no main part.")
             | Some root ->
-                // One paragraph is one block: a wrapped line inside a paragraph belongs with its
-                // predecessor, a paragraph break does not (Finding 4).
+                // A wrapped line inside a paragraph belongs with its predecessor, a paragraph break
+                // does not (Finding 4).
                 let lines =
                     root.Descendants<Paragraph>()
                     |> Seq.mapi (fun index paragraph -> index, paragraph.InnerText)

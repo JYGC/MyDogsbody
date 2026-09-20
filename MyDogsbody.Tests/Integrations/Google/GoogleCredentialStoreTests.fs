@@ -53,13 +53,12 @@ let private okOrFail label result =
 [<Fact; Trait("Level", "Integration")>]
 let ``insertOne stores a credential and returns it with the identifier the store assigned`` () =
     withStore (fun getCollection ->
-        // Act
         let stored =
             credential """{ "refresh_token": "1//abcDEF" }""" "person@gmail.com"
             |> GoogleCredentialStore.insertOne handleError getCollection
             |> okOrFail "insertOne"
 
-        // Assert - every field, including the identifier the caller did not supply
+        // every field, including the identifier the caller did not supply
         Assert.False(String.IsNullOrWhiteSpace(GoogleCredentialId.value stored.Id))
         Assert.Equal("""{ "refresh_token": "1//abcDEF" }""", GoogleCredentialSecret.value stored.Secret)
         Assert.Equal("person@gmail.com", GoogleExternalUsername.value stored.Username)
@@ -75,16 +74,13 @@ let ``getAll returns an empty list for a fresh database`` () =
 [<Fact; Trait("Level", "Integration")>]
 let ``insert then getAll returns the row with every field mapped back`` () =
     withStore (fun getCollection ->
-        // Arrange
         let inserted =
             credential "ya29.a0Af" "person@gmail.com"
             |> GoogleCredentialStore.insertOne handleError getCollection
             |> okOrFail "insertOne"
 
-        // Act
         let stored = GoogleCredentialStore.getAll handleError getCollection () |> okOrFail "getAll"
 
-        // Assert
         let readBack = Assert.Single stored
         Assert.Equal(GoogleCredentialId.value inserted.Id, GoogleCredentialId.value readBack.Id)
         Assert.Equal("ya29.a0Af", GoogleCredentialSecret.value readBack.Secret)
@@ -94,19 +90,16 @@ let ``insert then getAll returns the row with every field mapped back`` () =
 [<Fact; Trait("Level", "Integration")>]
 let ``updateOne changes the addressed row and a re-read reflects it`` () =
     withStore (fun getCollection ->
-        // Arrange
         let inserted =
             credential "original" "original@gmail.com"
             |> GoogleCredentialStore.insertOne handleError getCollection
             |> okOrFail "insertOne"
 
-        // Act
         let updated =
             edit (GoogleCredentialId.value inserted.Id) "rotated" "rotated@gmail.com"
             |> GoogleCredentialStore.updateOne handleError getCollection
             |> okOrFail "updateOne"
 
-        // Assert
         match updated with
         | Some c ->
             Assert.Equal("rotated", GoogleCredentialSecret.value c.Secret)
@@ -122,19 +115,18 @@ let ``updateOne changes the addressed row and a re-read reflects it`` () =
 [<Fact; Trait("Level", "Integration")>]
 let ``updateOne reports None for an identifier no row carries`` () =
     withStore (fun getCollection ->
-        // Arrange - a well-formed ObjectId that was never stored
+        // a well-formed ObjectId that was never stored
         credential "original" "original@gmail.com"
         |> GoogleCredentialStore.insertOne handleError getCollection
         |> okOrFail "insertOne"
         |> ignore
 
-        // Act
         let updated =
             edit "507f1f77bcf86cd799439011" "ignored" "ignored@gmail.com"
             |> GoogleCredentialStore.updateOne handleError getCollection
             |> okOrFail "updateOne"
 
-        // Assert - None, not a silent Ok
+        // None, not a silent Ok
         Assert.True(Option.isNone updated, "expected None for an unknown identifier")
 
         let untouched = Assert.Single(GoogleCredentialStore.getAll handleError getCollection () |> okOrFail "getAll")
@@ -144,7 +136,6 @@ let ``updateOne reports None for an identifier no row carries`` () =
 [<Fact; Trait("Level", "Integration")>]
 let ``updateOne changes only the addressed row when two credentials look alike`` () =
     withStore (fun getCollection ->
-        // Arrange
         let first =
             credential "first-secret" "first@gmail.com"
             |> GoogleCredentialStore.insertOne handleError getCollection
@@ -155,13 +146,12 @@ let ``updateOne changes only the addressed row when two credentials look alike``
             |> GoogleCredentialStore.insertOne handleError getCollection
             |> okOrFail "insertOne second"
 
-        // Act - address the second one
+        // address the second one
         edit (GoogleCredentialId.value second.Id) "second-rotated" "second@gmail.com"
         |> GoogleCredentialStore.updateOne handleError getCollection
         |> okOrFail "updateOne"
         |> ignore
 
-        // Assert
         let stored = GoogleCredentialStore.getAll handleError getCollection () |> okOrFail "getAll"
         Assert.Equal(2, List.length stored)
 
@@ -174,7 +164,7 @@ let ``updateOne changes only the addressed row when two credentials look alike``
 [<Fact; Trait("Level", "Integration")>]
 let ``a secret with newlines, non-ASCII and surrounding whitespace survives the round trip byte-for-byte`` () =
     withStore (fun getCollection ->
-        // Arrange - the whole point of the local BsonMapper: this is where an OAuth refresh token
+        // the whole point of the local BsonMapper: this is where an OAuth refresh token
         // would be silently corrupted by the shared store's trimming
         let awkward = "  line one\nline two\ttabbed éàü \"quoted\" {json:true}  "
 
@@ -183,21 +173,18 @@ let ``a secret with newlines, non-ASCII and surrounding whitespace survives the 
         |> okOrFail "insertOne"
         |> ignore
 
-        // Act / Assert
         let readBack = Assert.Single(GoogleCredentialStore.getAll handleError getCollection () |> okOrFail "getAll")
         Assert.Equal(awkward, GoogleCredentialSecret.value readBack.Secret)
     )
 
 [<Fact; Trait("Level", "Integration")>]
 let ``getAll reports a MyDogsbodyException carrying its action when the collection cannot be reached`` () =
-    // Arrange
     let logged = ResizeArray<MyDogsbodyException>()
     let recordingHandleError = HandleErrorBuilder logged.Add
 
     let failingGetter: unit -> Database.Types.GoogleCredentialsCollection =
         fun () -> raise (InvalidOperationException "database is gone")
 
-    // Act
     match GoogleCredentialStore.getAll recordingHandleError failingGetter () with
     | Error caughtException ->
         Assert.Equal(

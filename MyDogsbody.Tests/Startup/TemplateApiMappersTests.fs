@@ -83,7 +83,7 @@ let ``toUnvalidatedTemplateEdit carries every field of the UI record including t
     Assert.Equal<TargetField list>([ Reference; Amount; Currency ], actual.Rules |> List.map (fun rule -> rule.Field))
 
 [<Fact; Trait("Level", "Unit")>]
-let ``toUnvalidatedTemplate rejects an unrecognised rule kind as TemplateRuleShapeInvalid`` () =
+let ``toUnvalidatedTemplate rejects an unrecognised rule kind as TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent`` () =
     let entered: TemplateUiTypeWithoutId =
         { SupplierId = "1"
           Name = "T"
@@ -93,17 +93,17 @@ let ``toUnvalidatedTemplate rejects an unrecognised rule kind as TemplateRuleSha
           Rules = [ uiRule "Reference" "Bogus" "x" 0 "" "AsText" "" ] }
 
     match TemplateApiMappers.toUnvalidatedTemplate entered with
-    | Error (TemplateRuleShapeInvalid reason) -> Assert.Contains("Bogus", reason)
-    | other -> Assert.Fail($"Expected Error(TemplateRuleShapeInvalid _), but got {other}")
+    | Error (TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent reason) -> Assert.Contains("Bogus", reason)
+    | other -> Assert.Fail($"Expected Error(TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent _), but got {other}")
 
 [<Fact; Trait("Level", "Unit")>]
-let ``toUnvalidatedTemplate rejects an unrecognised document part as TemplateRuleShapeInvalid`` () =
+let ``toUnvalidatedTemplate rejects an unrecognised document part as TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent`` () =
     let entered: TemplateUiTypeWithoutId =
         { SupplierId = "1"; Name = "T"; DocumentPart = "Bogus"; AttachmentFormat = ""; Position = 0; Rules = validRulesUi }
 
     match TemplateApiMappers.toUnvalidatedTemplate entered with
-    | Error (TemplateRuleShapeInvalid reason) -> Assert.Contains("Bogus", reason)
-    | other -> Assert.Fail($"Expected Error(TemplateRuleShapeInvalid _), but got {other}")
+    | Error (TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent reason) -> Assert.Contains("Bogus", reason)
+    | other -> Assert.Fail($"Expected Error(TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent _), but got {other}")
 
 /// The file's own header rule: "Every string->union conversion below returns Result rather than
 /// raising ... these mappers are called from Async.Start, where an uncaught exception reaches
@@ -125,23 +125,11 @@ let ``toUnvalidatedTemplate reports a missing AsMoney separator rather than rais
               Rules = [ uiRule "Amount" "AfterLabel" "Total:" 0 "" "AsMoney" separator ] }
 
         match TemplateApiMappers.toUnvalidatedTemplate entered with
-        | Error (TemplateRuleShapeInvalid reason) ->
+        | Error (TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent reason) ->
             Assert.Equal("AsMoney hint is missing its decimal separator.", reason)
-        | other -> Assert.Fail($"Expected Error(TemplateRuleShapeInvalid _) for {separator |> box}, but got {other}")
+        | other -> Assert.Fail($"Expected Error(TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent _) for {separator |> box}, but got {other}")
 
-/// The same cleared-MudTextField class as the AsMoney guard above, arriving on the OTHER string a
-/// rule carries. FixedValue is the one text-carrying rule kind nothing downstream refuses a null
-/// for: AfterLabel and LinesAfterLabel are caught by validateRule's LabelIsEmpty check, and
-/// RegexCapture / SubjectCapture / AttachmentName by compilePattern's own isNull guard - but
-/// `FixedValue null` passes validateTemplate, reaches TemplateRecordMappers.toFieldRuleColumns as
-/// `Some null`, and is written as RuleText = NULL, which TemplateFieldRules' CHECK constraint
-/// refuses. Measured against HEAD before this test: AddTemplate came back "Failed to insert new
-/// template." AND wrote one entry to the exception log, for a user who merely emptied a text box.
-///
-/// A cleared box and an untouched empty box are the same user action, so they become the same
-/// rule. `FixedValue ""` is deliberately savable - ApplyTemplateWorkflow.foundUnlessEmpty reports
-/// it as the rule finding nothing and toMatchedNothingReason gives it its own sentence - so this
-/// normalises to that established behaviour rather than inventing a second one for null.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - TemplateApiMappersTests.fs: toUnvalidatedTemplate reads a cleared FixedValue box as an empty fixed value rather than a null one
 [<Fact; Trait("Level", "Unit")>]
 let ``toUnvalidatedTemplate reads a cleared FixedValue box as an empty fixed value rather than a null one`` () =
     let entered: TemplateUiTypeWithoutId =
@@ -217,18 +205,7 @@ let private requiredRulesBeside (rule: TemplateFieldRule) : TemplateFieldRule li
       { Field = Currency; Rule = FixedValue "AUD"; Hint = AsText } ]
     |> List.filter (fun beside -> beside.Field <> rule.Field)
 
-/// toFieldRuleUiColumns decides which kind string a stored rule is SHOWN and re-saved as, and the
-/// editor edits what it is shown: EditTemplate maps the shown string straight back to a FieldRule,
-/// so a kind swapped between two cases does not merely mislabel a row - the next save silently
-/// rewrites what the rule reads. SubjectCapture reads the subject and AttachmentName the filename,
-/// so that particular swap changes the answer on every message, forever, with nothing to notice it
-/// by.
-///
-/// Measured before this test existed: swapping SubjectCapture's and AttachmentName's kind strings
-/// passed the whole suite, 773 of 773. Only five of the seven kinds were round-tripped anywhere.
-///
-/// One row per FieldRule case, counted against the union by reflection, so an eighth kind fails
-/// here rather than being round-tripped by nothing.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - TemplateApiMappersTests.fs: every FieldRule kind survives the round trip carrying its own UI columns
 [<Fact; Trait("Level", "Contract")>]
 let ``every FieldRule kind survives the round trip carrying its own UI columns`` () =
     // the rule under test, the rules it needs beside it, and the exact columns it must become
@@ -344,8 +321,8 @@ let ``an unrecognised string for every union the UI supplies is refused rather t
 
     for union, entered, expectedReason in cases do
         match TemplateApiMappers.toUnvalidatedTemplate entered with
-        | Error (TemplateRuleShapeInvalid reason) -> Assert.Equal(expectedReason, reason)
-        | other -> Assert.Fail($"{union}: expected Error(TemplateRuleShapeInvalid _), but got {other}")
+        | Error (TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent reason) -> Assert.Equal(expectedReason, reason)
+        | other -> Assert.Fail($"{union}: expected Error(TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent _), but got {other}")
 
 // ---------- error translation ----------
 
@@ -386,7 +363,7 @@ let ``every TemplateError case produces its own message and the expected/unexpec
             TemplateNameInvalid "a", "a"
             TemplateIdInvalid "b", "b"
             TemplateSupplierIdInvalid "c", "c"
-            TemplateRuleShapeInvalid "d", "d"
+            TemplateRuleShapeStringFromTheUiHasNoDomainEquivalent "d", "d"
             PatternInvalid(Reference, "e"), "The pattern for Reference is invalid: e"
             PatternHasNoCaptureGroup Reference, "The pattern for Reference needs a capture group."
             DateFormatInvalid(IssueDate, "f"), "The date format for IssueDate is invalid: f"

@@ -157,7 +157,6 @@ let createInvoiceApi
 
     let toException = InvoiceApiMappers.toMyDogsbodyException
 
-    /// A supplierId -> name map for the top mapper.
     let supplierNames () : Result<Map<string, string>, MyDogsbodyException> =
         loadSuppliers ()
         |> Result.map (fun suppliers ->

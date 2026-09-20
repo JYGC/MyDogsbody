@@ -1,8 +1,5 @@
 namespace MyDogsbody.Integrations.Google
 
-// The Google integration's credential types: constrained primitives, the validated input types
-// its store accepts, and the stored type it returns.
-//
 // These live in the integration, NOT in MyDogsbody.Domain. Q3.7: a credential is a token an
 // adapter presents - there is no rule to express and no decision a workflow makes about one. The
 // only check, "the secret is non-empty", is the adapter's own precondition. If a future workflow
@@ -51,14 +48,12 @@ module GoogleCredentialId =
 
     let value (GoogleCredentialId id) = id
 
-/// A credential that has been through validation, ready for the store to insert.
 type ValidGoogleCredential =
     {
         Secret: GoogleCredentialSecret
         Username: GoogleExternalUsername
     }
 
-/// A validated intent to change an existing row, carrying the identifier of the row it changes.
 type ValidGoogleCredentialEdit =
     {
         Id: GoogleCredentialId
@@ -66,7 +61,6 @@ type ValidGoogleCredentialEdit =
         Username: GoogleExternalUsername
     }
 
-/// A credential as read back from the store.
 type StoredGoogleCredential =
     {
         Id: GoogleCredentialId

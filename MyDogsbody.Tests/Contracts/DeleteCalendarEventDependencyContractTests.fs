@@ -15,17 +15,7 @@ open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database
 open MyDogsbody.Startup
 
-/// `DeleteCalendarEvent` - see `ListCalendarEventsDependencyContractTests.fs`'s own header for the
-/// shape this suite follows: "real" means `GoogleAccountApiFactory.bindDeleteCalendarEvent` - the
-/// stored client secret, the account's stored token, `GoogleCalendarClient.deleteEventVia` and
-/// `GoogleAccountApiMappers.toDeleteCalendarEventError` - over a temp Google.db, with only the
-/// calendar client's HTTP stubbed.
-///
-/// This is the one dependency function type this whole change treats with the most caution
-/// (tasks.md's own words): a defect here can delete a calendar entry the application neither owns
-/// nor can restore. Live verification against Google, including a real delete, is recorded as
-/// manual coverage in outcome.md - this suite only proves the composition root's own translation
-/// of what Google answers.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - DeleteCalendarEventDependencyContractTests.fs: RespondingHandler
 
 type private RespondingHandler(respond: HttpRequestMessage -> HttpResponseMessage) =
     inherit HttpMessageHandler()

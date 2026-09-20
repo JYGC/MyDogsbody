@@ -13,16 +13,14 @@ open System.Text.RegularExpressions
 open HtmlAgilityPack
 open MyDogsbody.Domain.Documents
 
-/// Tags that end the current line and begin a new block. A table row is a block; each cell in it
-/// is a line, so "Invoice Number" and its value land adjacent in one block and
-/// LinesAfterLabel(label, 1) resolves.
-let private blockTags =
+/// A table row is a block; each cell in it is a line, so "Invoice Number" and its value land
+/// adjacent in one block and LinesAfterLabel(label, 1) resolves.
+let private tagsThatEndTheCurrentLineAndBeginANewBlock =
     set
         [ "p"; "div"; "tr"; "li"; "h1"; "h2"; "h3"; "h4"; "h5"; "h6"
           "blockquote"; "table"; "ul"; "ol"; "section"; "article"; "header"; "footer"; "pre" ]
 
-/// Tags whose text is a line of its own inside the current block (table cells).
-let private cellTags = set [ "td"; "th" ]
+let private tableCellTagsWhoseTextIsALineOfItsOwnInsideTheCurrentBlock = set [ "td"; "th" ]
 
 let private whitespace = Regex(@"\s+", RegexOptions.Compiled)
 
@@ -56,10 +54,10 @@ let rec private visit (walk: Walk) (node: HtmlNode) : Walk =
             flush walk
         elif tag = "script" || tag = "style" || tag = "head" then
             walk
-        elif Set.contains tag cellTags then
+        elif Set.contains tag tableCellTagsWhoseTextIsALineOfItsOwnInsideTheCurrentBlock then
             let walk = node.ChildNodes |> Seq.fold visit walk
             flush walk
-        elif Set.contains tag blockTags then
+        elif Set.contains tag tagsThatEndTheCurrentLineAndBeginANewBlock then
             let walk = flush walk
             let walk = { walk with Block = walk.Block + 1 }
             let walk = node.ChildNodes |> Seq.fold visit walk
@@ -68,8 +66,9 @@ let rec private visit (walk: Walk) (node: HtmlNode) : Walk =
         else
             node.ChildNodes |> Seq.fold visit walk
 
-/// Renumbers the blocks that actually carry lines to 0, 1, 2 … in document order.
-let private renumber (lines: (int * string) list) : TextLine list =
+let private renumberTheBlocksThatCarryLinesConsecutivelyFromZeroInDocumentOrder
+    (lines: (int * string) list)
+    : TextLine list =
     let ordered = List.rev lines
 
     let mapping =
@@ -101,6 +100,6 @@ let readText (source: DocumentSource) : Result<TextLine list, DocumentError> =
                 |> Seq.fold visit { Lines = []; Block = 0; Buffer = StringBuilder() }
                 |> flush
 
-            Ok(renumber walk.Lines)
+            Ok(renumberTheBlocksThatCarryLinesConsecutivelyFromZeroInDocumentOrder walk.Lines)
         with caughtException ->
             Error(DocumentUnreadable caughtException.Message)

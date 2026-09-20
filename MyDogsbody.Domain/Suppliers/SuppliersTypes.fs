@@ -1,8 +1,5 @@
 namespace MyDogsbody.Domain.Suppliers
 
-// The suppliers workflow area: constrained primitives, one type per pipeline stage, the area's
-// error DU, and the dependency function types its workflows declare.
-//
 // Nothing here names MyDogsbodyException, HandleErrorBuilder, QuerySource, SqliteConnection or
 // Dapper. The domain cannot reach any of them, and does not need to.
 
@@ -62,22 +59,21 @@ module PaymentTermDays =
 
     let value (PaymentTermDays days) = days
 
-/// Which shape a match rule takes. Exists so the UI record and the persisted row can carry a
-/// kind without either of them naming the SupplierMatcher union - the same reason
-/// Infrastructure exists in the credentials area today.
+/// Exists so the UI record and the persisted row can carry a kind without either of them naming
+/// the SupplierMatcher union - the same reason Infrastructure exists in the credentials area
+/// today.
 type MatcherKind =
     | Sender
     | Domain
     | Subject
 
-/// How a message is recognised as this supplier's. Several per supplier, matching on any
-/// (Q7.6.5). Kept on the supplier rather than the template: "is this mail from Acme?" is a fact
-/// about Acme, while a template answers the different question "given it is Acme, where are the
-/// fields?".
+/// Several per supplier, matching on any (Q7.6.5). Kept on the supplier rather than the
+/// template: "is this mail from Acme?" is a fact about Acme, while a template answers the
+/// different question "given it is Acme, where are the fields?".
 type SupplierMatcher =
-    | SenderAddress of string // exact, case-insensitive
-    | SenderDomain of string // the part after @, case-insensitive
-    | SubjectPattern of string // case-insensitive substring - see design.md -> Decisions taken
+    | SenderAddressEqualToIgnoringCase of string
+    | SenderDomainEqualToIgnoringCase of string
+    | SubjectContainsSubstringIgnoringCase of string // see design.md -> Decisions taken
 
 module SupplierMatcher =
 
@@ -105,8 +101,6 @@ module SupplierMatcher =
             else
                 Ok ()
 
-    /// Kind and raw value in, a validated matcher out. The kind is what decides which rule
-    /// applies.
     let create (kind: MatcherKind) (rawValue: string) : Result<SupplierMatcher, string> =
         let value = if isNull rawValue then "" else rawValue
 
@@ -117,25 +111,22 @@ module SupplierMatcher =
                 Error $"Match values must be {MaximumValueLength} characters or fewer."
             else
                 match kind with
-                | Sender -> Ok (SenderAddress value)
-                | Domain -> Ok (SenderDomain value)
-                | Subject -> Ok (SubjectPattern value)
+                | Sender -> Ok (SenderAddressEqualToIgnoringCase value)
+                | Domain -> Ok (SenderDomainEqualToIgnoringCase value)
+                | Subject -> Ok (SubjectContainsSubstringIgnoringCase value)
 
     let kind (matcher: SupplierMatcher) : MatcherKind =
         match matcher with
-        | SenderAddress _ -> Sender
-        | SenderDomain _ -> Domain
-        | SubjectPattern _ -> Subject
+        | SenderAddressEqualToIgnoringCase _ -> Sender
+        | SenderDomainEqualToIgnoringCase _ -> Domain
+        | SubjectContainsSubstringIgnoringCase _ -> Subject
 
     let value (matcher: SupplierMatcher) : string =
         match matcher with
-        | SenderAddress matchedValue -> matchedValue
-        | SenderDomain matchedValue -> matchedValue
-        | SubjectPattern matchedValue -> matchedValue
+        | SenderAddressEqualToIgnoringCase matchedValue -> matchedValue
+        | SenderDomainEqualToIgnoringCase matchedValue -> matchedValue
+        | SubjectContainsSubstringIgnoringCase matchedValue -> matchedValue
 
-// One type per pipeline stage.
-
-/// What the dialog produced. Untrusted - nothing has checked any of this yet.
 type UnvalidatedSupplier =
     {
         Name: string
@@ -143,7 +134,6 @@ type UnvalidatedSupplier =
         Matchers: (MatcherKind * string) list
     }
 
-/// An edit as submitted. Carries the identifier of the row it means to change.
 type UnvalidatedSupplierEdit =
     {
         Id: string
@@ -152,7 +142,6 @@ type UnvalidatedSupplierEdit =
         Matchers: (MatcherKind * string) list
     }
 
-/// Been through validation. Holding this type is the proof - nothing downstream re-checks.
 type ValidSupplier =
     {
         Name: SupplierName
@@ -160,7 +149,6 @@ type ValidSupplier =
         Matchers: SupplierMatcher list
     }
 
-/// A validated intent to change an existing row.
 type ValidSupplierEdit =
     {
         Id: SupplierId
@@ -169,7 +157,6 @@ type ValidSupplierEdit =
         Matchers: SupplierMatcher list
     }
 
-/// Been through the store.
 type StoredSupplier =
     {
         Id: SupplierId
@@ -178,9 +165,6 @@ type StoredSupplier =
         Matchers: SupplierMatcher list
     }
 
-/// What can go wrong in this area, in terms a person could say out loud. Each case carries the
-/// values its message is written from.
-///
 /// PaymentTermInvalid is not in design.md's original listing - the design lists AddSupplierWorkflow
 /// as validating a payment term but the error DU it specifies has no case for that failure. Adding
 /// one here is the smallest fix: without it, a payment-term rejection would have to borrow

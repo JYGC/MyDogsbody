@@ -1,6 +1,3 @@
-/// Flattens a mail message and its attachments to text, ready for a supplier match and a
-/// template. Pure over the reader: it receives ReadDocumentText as a function value.
-///
 /// Returns a ScannedMessage AND a list of problem causes rather than a Result (design decision
 /// 3): one corrupt attachment out of two must not lose the invoice in the other. A part that
 /// could not be read simply is not in Parts, and its reason is in the causes list.
@@ -11,16 +8,16 @@ open MyDogsbody.Domain.Documents
 open MyDogsbody.Domain.MailAccounts
 open MyDogsbody.Domain.Invoices
 
-/// One flattened part, or a reason it could not be flattened.
 type private PartOutcome =
     | Part of MessagePart * TextLine list
     | Problem of ScanProblemCause
     | Nothing
 
-let private bodySource (message: MailMessage) : DocumentSource option =
-    // Finding 5: prefer the alternative that preserves block structure - in practice the HTML.
-    // The trivial "which alternative exists" choice is here; EmailBodyReader does the structural
-    // work, PlainTextDocumentReader handles a plain-only body.
+let private bodySourcePreferringTheAlternativeThatPreservesBlockStructure
+    (message: MailMessage)
+    : DocumentSource option =
+    // Finding 5. The trivial "which alternative exists" choice is here; EmailBodyReader does the
+    // structural work, PlainTextDocumentReader handles a plain-only body.
     match message.BodyHtml, message.BodyText with
     | Some html, _ when not (System.String.IsNullOrWhiteSpace html) ->
         Some { Format = EmailBody; Name = "body.html"; Content = Encoding.UTF8.GetBytes html }
@@ -51,26 +48,24 @@ let private attachmentOutcome (readDocumentText: ReadDocumentText) (attachment: 
             { Format = format; Name = attachment.FileName; Content = attachment.Content }
     | Error extension -> Problem(FormatUnsupported(attachment.FileName, extension))
 
-/// Flattens the message. The subject is always a part (its text unnormalized - MessageNormalization
-/// downstream folds it); the body is a part when one alternative is present; each attachment is a
-/// part when its format has a reader and that reader succeeded.
 let scanMessage
     (readDocumentText: ReadDocumentText)
     (message: MailMessage)
     : ScannedMessage * ScanProblemCause list =
 
     let subjectText = if isNull message.Subject then "" else message.Subject
-    let subjectPart = Part(SubjectPart, [ { Text = subjectText; BlockIndex = 0 } ])
+    let subjectPartWithItsTextLeftForMessageNormalizationToFold =
+        Part(SubjectPart, [ { Text = subjectText; BlockIndex = 0 } ])
 
     let bodyOutcome =
-        match bodySource message with
+        match bodySourcePreferringTheAlternativeThatPreservesBlockStructure message with
         | Some source -> readPart readDocumentText BodyPart source
         | None -> Nothing
 
     let attachmentOutcomes =
         message.Attachments |> List.map (attachmentOutcome readDocumentText)
 
-    let outcomes = subjectPart :: bodyOutcome :: attachmentOutcomes
+    let outcomes = subjectPartWithItsTextLeftForMessageNormalizationToFold :: bodyOutcome :: attachmentOutcomes
 
     let parts =
         outcomes

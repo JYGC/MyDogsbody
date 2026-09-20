@@ -1,11 +1,10 @@
-/// Executes a plan `DiffInvoicesAgainstCalendarWorkflow.diff` (or `buildPlan`) produced. See
-/// design.md's "Executing - partial failure and already-gone" sequence for the full derivation.
+/// See design.md's "Executing - partial failure and already-gone" sequence for the full derivation.
 module MyDogsbody.Domain.Calendar.SyncInvoicesToCalendarWorkflow
 
 open MyDogsbody.Domain.Calendar
 open MyDogsbody.Domain.Calendar.DiffInvoicesAgainstCalendarWorkflow
 
-/// One action, executed. `markSynced`/`clearSyncRecord` failures are discarded as values,
+/// `markSynced`/`clearSyncRecord` failures are discarded as values,
 /// deliberately, rather than turning a successful calendar write into a reported failure -
 /// InvoiceCalendarEvents is history, not truth (design.md), so a failure to update it here is a
 /// diagnostic-table nuisance, not a reason to tell the user their sync failed. The same posture
@@ -63,12 +62,11 @@ let private stopsTheBatch =
     | NotAuthorised _ -> true
     | _ -> false
 
-/// Executes a plan action by action. `LeaveAlone` makes no call at all. An ordinary per-action
-/// failure is recorded as `Failed` and the batch continues (Q2.8) - the earlier successes stay
-/// recorded, because each action's `markSynced`/`clearSyncRecord` call already ran by the time
-/// the next one is attempted. `CalendarNoLongerExists` and `NotAuthorised` stop the batch instead:
-/// every action after that point is left un-attempted, and the sync records are consistent with
-/// exactly what ran.
+/// An ordinary per-action failure is recorded as `Failed` and the batch continues (Q2.8) - the
+/// earlier successes stay recorded, because each action's `markSynced`/`clearSyncRecord` call
+/// already ran by the time the next one is attempted. `CalendarNoLongerExists` and
+/// `NotAuthorised` stop the batch instead: every action after that point is left un-attempted,
+/// and the sync records are consistent with exactly what ran.
 let executePlan
     (createCalendarEvent: CreateCalendarEvent)
     (updateCalendarEvent: UpdateCalendarEvent)

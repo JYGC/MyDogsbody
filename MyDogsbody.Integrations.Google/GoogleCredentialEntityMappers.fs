@@ -13,8 +13,6 @@ open LiteDB
 open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database.Models
 
-/// Persistence -> the integration's type, whole row.
-///
 /// Returns Result because LiteDB is schemaless: a document written by an older build, or edited
 /// by hand, can carry a null where a constrained type is required. The store turns a failure
 /// here into a logged MyDogsbodyException.
@@ -38,16 +36,13 @@ let toStoredCredential (entity: GoogleCredential) : Result<StoredGoogleCredentia
             Username = username
         }
 
-/// The integration's type -> persistence, for a row the store has not seen before. No Id: LiteDB
-/// assigns it.
+/// No Id: LiteDB assigns it.
 let toNewEntity (credential: ValidGoogleCredential) : GoogleCredential =
     GoogleCredential(
         Credentials = GoogleCredentialSecret.value credential.Secret,
         ExternalUsername = GoogleExternalUsername.value credential.Username
     )
 
-/// Copies a validated edit onto the entity the store already holds.
-///
 /// Mutates, because LiteDB entities are C# classes with settable properties - one of the
 /// codebase's declared unavoidable cases. The mutation is confined to the row just fetched.
 let applyEdit (edit: ValidGoogleCredentialEdit) (entity: GoogleCredential) : GoogleCredential =
@@ -55,5 +50,4 @@ let applyEdit (edit: ValidGoogleCredentialEdit) (entity: GoogleCredential) : Goo
     entity.ExternalUsername <- GoogleExternalUsername.value edit.Username
     entity
 
-/// The identifier the integration carries, as the store's own key type.
 let toObjectId (id: GoogleCredentialId) : ObjectId = ObjectId(GoogleCredentialId.value id)

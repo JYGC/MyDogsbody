@@ -27,7 +27,6 @@ open MyDogsbody.UI.Types
 // a DiscardAuthorisation that never discarded, each passed the whole suite (PR review series 2
 // round 8). ----------
 
-/// The stored client secret, if one has been supplied.
 let bindLoadClientSecret (handleError: HandleErrorBuilder) (googleContext: GoogleDatabaseContext) : LoadClientSecret =
     fun () ->
         GoogleAccountStore.loadClientSecret handleError googleContext.GetClientSecretCollection ()
@@ -124,7 +123,6 @@ let bindListCalendars
 // three siblings) run this exact binding over a stubbed HttpMessageHandler rather than a copy of
 // it. Public for the same reason bindListCalendars is public - see its own comment. ----------
 
-/// `ListCalendarEvents` as the composition root binds it.
 let bindListCalendarEvents
     (handleError: HandleErrorBuilder)
     (googleContext: GoogleDatabaseContext)
@@ -154,7 +152,6 @@ let bindListCalendarEvents
                 |> Result.mapError (GoogleAccountApiMappers.toListCalendarEventsError accountId calendarId)
         }
 
-/// `CreateCalendarEvent` as the composition root binds it.
 let bindCreateCalendarEvent
     (handleError: HandleErrorBuilder)
     (googleContext: GoogleDatabaseContext)
@@ -190,7 +187,6 @@ let bindCreateCalendarEvent
                 |> Result.mapError (GoogleAccountApiMappers.toCreateCalendarEventError accountId)
         }
 
-/// `UpdateCalendarEvent` as the composition root binds it.
 let bindUpdateCalendarEvent
     (handleError: HandleErrorBuilder)
     (googleContext: GoogleDatabaseContext)
@@ -226,7 +222,6 @@ let bindUpdateCalendarEvent
                 |> Result.mapError (GoogleAccountApiMappers.toUpdateCalendarEventError accountId eventId)
         }
 
-/// `DeleteCalendarEvent` as the composition root binds it.
 let bindDeleteCalendarEvent
     (handleError: HandleErrorBuilder)
     (googleContext: GoogleDatabaseContext)
@@ -268,7 +263,6 @@ let bindDeleteCalendarEvent
 // that every refused registration left its refresh token stored - passed the whole suite (PR review
 // series 2 rounds 8 and 9). ----------
 
-/// `RegisterAccount`, over whichever consent flow it is handed.
 let registerAccountWith
     (handleError: HandleErrorBuilder)
     (googleContext: GoogleDatabaseContext)
@@ -293,7 +287,6 @@ let registerAccountWith
                 ActionNames.MyDogsbody.Startup.GoogleAccountApi.registerAccount
         )
 
-/// `ReauthoriseAccount`, over whichever consent flow it is handed.
 let reauthoriseAccountWith
     (handleError: HandleErrorBuilder)
     (googleContext: GoogleDatabaseContext)
@@ -314,8 +307,8 @@ let reauthoriseAccountWith
                 ActionNames.MyDogsbody.Startup.GoogleAccountApi.reauthoriseAccount
         )
 
-/// `GetCalendarsFor`, over whichever calendar list it is handed. It needs no storage of its own:
-/// the production `ListCalendars` binding reads the stored secret and token itself.
+/// Needs no storage of its own: the production `ListCalendars` binding reads the stored secret and
+/// token itself.
 let getCalendarsForWith (listCalendars: ListCalendars) : string -> Result<CalendarUiType list, MyDogsbodyException> =
     fun id ->
         result {

@@ -31,17 +31,15 @@ open MyDogsbody.Integrations.Google.GoogleCredentialDataStore
 let scopes: string list =
     [ CalendarService.Scope.Calendar; "https://www.googleapis.com/auth/userinfo.email" ]
 
-/// How long a user has to complete (or abandon) the browser consent flow before it is treated
-/// as timed out (requirements.md's "the user closes the browser without completing consent"
-/// edge case).
-let private consentTimeout = TimeSpan.FromMinutes 5.0
+/// requirements.md's "the user closes the browser without completing consent" edge case.
+let private howLongAUserHasToCompleteOrAbandonTheBrowserConsentFlowBeforeItIsTreatedAsTimedOut =
+    TimeSpan.FromMinutes 5.0
 
-/// Whether a token grants the calendar scope. Google reports what was actually granted in the
-/// token response's space-delimited `scope`, and only the exact scope counts - not one that merely
-/// shares its prefix (`.../calendar.readonly`). A token reporting nothing is let through: Google's
-/// code exchange always sends `scope`, so silence is not a refusal, and refusing on it would refuse
-/// every registration were it ever missing. The calendar fetch still reports an insufficient scope
-/// as needing re-authorisation.
+/// Google reports what was actually granted in the token response's space-delimited `scope`, and
+/// only the exact scope counts - not one that merely shares its prefix (`.../calendar.readonly`).
+/// A token reporting nothing is let through: Google's code exchange always sends `scope`, so
+/// silence is not a refusal, and refusing on it would refuse every registration were it ever
+/// missing. The calendar fetch still reports an insufficient scope as needing re-authorisation.
 let private grantsCalendarAccess (token: TokenResponse) : bool =
     String.IsNullOrWhiteSpace token.Scope
     || token.Scope.Split([| ' '; '\t'; '\r'; '\n' |], StringSplitOptions.RemoveEmptyEntries)
@@ -64,7 +62,7 @@ let runRealConsentFlow (clientSecretJson: string) (accountId: string) (dataStore
             with caughtException ->
                 raise (FormatException("The client secret is not a Google OAuth client secret.", caughtException))
 
-        use cts = new CancellationTokenSource(consentTimeout)
+        use cts = new CancellationTokenSource(howLongAUserHasToCompleteOrAbandonTheBrowserConsentFlowBeforeItIsTreatedAsTimedOut)
         return! GoogleWebAuthorizationBroker.AuthorizeAsync(secrets, scopes, accountId, cts.Token, dataStore)
     }
 
@@ -88,18 +86,7 @@ let fetchRealAccountEmail (credential: UserCredential) : Task<string> =
         return if isNull email then "" else email.ToString()
     }
 
-/// The seam `authorise`/`reauthorise` close over with the real Google.Apis calls above. A test
-/// calls this directly with fakes for both, so no test opens a browser, starts a loopback
-/// listener, or reaches the network - see `GoogleAuthorizationTests`.
-///
-/// Takes `accountId` as a parameter rather than minting one itself, so re-authorising an
-/// existing account can reuse its id as the same OAuth datastore key - the credential row for
-/// that id is simply overwritten, and the Accounts row (its `DefaultInvoiceCalendar` included)
-/// never has to move to a new identity.
-///
-/// Returns raw strings (email, accountId): this is the outer ring, so the domain's
-/// `GoogleEmail`/`GoogleAccountId` wrapping happens at the composition root, the same as every
-/// other adapter in this codebase.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Integrations.Google.md - GoogleAuthorization.fs: authoriseWith
 let authoriseWith
     (handleError: HandleErrorBuilder)
     (getCredentialCollection: unit -> GoogleCredentialsCollection)
@@ -115,16 +102,7 @@ let authoriseWith
         try
             let dataStore = GoogleCredentialDataStore(handleError, getCredentialCollection) :> IDataStore
 
-            // These two steps convert their own known failure shapes into a plain Result value
-            // rather than letting them raise - so cancelling consent, a malformed secret, or a
-            // missing email pass through the outer handleError block unlogged, the same idiom
-            // PdfDocumentReader.readContent uses for a missing file.
-            //
-            // Both are awaited with `.GetAwaiter().GetResult()`, never `Async.AwaitTask |>
-            // Async.RunSynchronously`. The consent flow is an async method, so its failures arrive
-            // as a faulted Task, and AwaitTask surfaces that as an AggregateException - which no
-            // catch here or below matches, so every named failure used to reach the user as
-            // "One or more errors occurred. (...)", logged. GetResult rethrows the original.
+            // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Integrations.Google.md - GoogleAuthorization.fs: let! credential =
             let! credential =
                 try
                     (runConsentFlow clientSecretJson accountId dataStore).GetAwaiter().GetResult() |> Ok

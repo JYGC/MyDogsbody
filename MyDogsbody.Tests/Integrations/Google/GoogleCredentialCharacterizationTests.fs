@@ -183,11 +183,10 @@ let ``an unmappable stored row is a raised failure, logged, not a silent drop`` 
         let logged = ResizeArray<MyDogsbodyException>()
         let recordingHandleError = HandleErrorBuilder logged.Add
 
-        // Arrange - insert a raw entity with a null secret, bypassing the constrained type
+        // insert a raw entity with a null secret, bypassing the constrained type
         getCollection().Insert(Database.Models.GoogleCredential(ExternalUsername = "person@gmail.com"))
         |> ignore
 
-        // Act
         match GoogleCredentialStore.getAll recordingHandleError getCollection () with
         | Error caughtException ->
             Assert.Equal(

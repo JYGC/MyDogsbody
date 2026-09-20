@@ -14,7 +14,6 @@ open MyDogsbody.Database.Models
 
 let private invariant = CultureInfo.InvariantCulture
 
-/// ISO 8601 round-trip ("o") for timestamps, yyyy-MM-dd for the date-only issue/due dates.
 let private timestamp (value: DateTime) = value.ToString("o", invariant)
 let private dateOnly (value: DateTime) = value.ToString("yyyy-MM-dd", invariant)
 
@@ -37,6 +36,8 @@ let templateRowId (id: TemplateId) : int = int (TemplateId.value id)
 // ---------------- Invoice ----------------
 
 let toNewInvoiceRecord (invoice: ValidInvoice) : InvoiceRecord =
+    let scannedAtPlaceholderBecauseTheStoreSetsItAtWriteTime = ""
+
     { Id = 0
       SupplierId = supplierRowId invoice.SupplierId
       TemplateId = templateRowId invoice.TemplateId
@@ -47,7 +48,7 @@ let toNewInvoiceRecord (invoice: ValidInvoice) : InvoiceRecord =
       DueDate = invoice.DueDate |> Option.map (InvoiceDueDate.value >> dateOnly)
       SourceMessageId = SourceMessageId.value invoice.SourceMessageId
       MessageReceivedAt = timestamp invoice.MessageReceivedAt
-      ScannedAt = "" } // set by the store at write time
+      ScannedAt = scannedAtPlaceholderBecauseTheStoreSetsItAtWriteTime }
 
 let toStoredInvoice (row: InvoiceRecord) : Result<StoredInvoice, string> =
     result {
@@ -92,35 +93,40 @@ let toStoredInvoice (row: InvoiceRecord) : Result<StoredInvoice, string> =
 
 // ---------------- ScanProblem: cause <-> (Cause, Detail, SupplierId) ----------------
 
-/// The field separator inside Detail. ASCII Unit Separator - it does not occur in a filename, a
-/// reference, a reason string or a stringified field name, so a split on it is unambiguous.
+/// ASCII Unit Separator. It does not occur in a filename, a reference, a reason string or a
+/// stringified field name, so a split on it is unambiguous.
 [<Literal>]
-let private unitSeparator = '\u001f'
+let private unitSeparatorBetweenDetailFields = '\u001f'
 
-/// Domain -> persistence. EXHAunitSeparatorTIVE over ScanProblemCause: a ninth case breaks this build.
+/// Exhaustive over ScanProblemCause: a ninth case breaks this build.
 let encodeCause (cause: ScanProblemCause) : string * string option * int option =
     match cause with
     | NoSupplierMatched -> "NoSupplierMatched", None, None
     | SeveralSuppliersMatched ids ->
         "SeveralSuppliersMatched",
-        Some(ids |> List.map SupplierId.value |> String.concat (string unitSeparator)),
+        Some(ids |> List.map SupplierId.value |> String.concat (string unitSeparatorBetweenDetailFields)),
         None
     | NoTemplateMatched supplierId -> "NoTemplateMatched", None, Some(supplierRowId supplierId)
     | RuleFoundNothing(supplierId, templateId, field) ->
-        "RuleFoundNothing", Some $"{TemplateId.value templateId}{unitSeparator}{field}", Some(supplierRowId supplierId)
-    | AttachmentUnreadable(fileName, reason) -> "AttachmentUnreadable", Some $"{fileName}{unitSeparator}{reason}", None
-    | FormatUnsupported(fileName, format) -> "FormatUnsupported", Some $"{fileName}{unitSeparator}{format}", None
-    | ValueUnparseable(field, raw) -> "ValueUnparseable", Some $"{field}{unitSeparator}{raw}", None
+        "RuleFoundNothing",
+        Some $"{TemplateId.value templateId}{unitSeparatorBetweenDetailFields}{field}",
+        Some(supplierRowId supplierId)
+    | AttachmentUnreadable(fileName, reason) ->
+        "AttachmentUnreadable", Some $"{fileName}{unitSeparatorBetweenDetailFields}{reason}", None
+    | FormatUnsupported(fileName, format) -> "FormatUnsupported", Some $"{fileName}{unitSeparatorBetweenDetailFields}{format}", None
+    | ValueUnparseable(field, raw) -> "ValueUnparseable", Some $"{field}{unitSeparatorBetweenDetailFields}{raw}", None
     | RuleTimedOutCause(supplierId, templateId, field) ->
-        "RuleTimedOutCause", Some $"{TemplateId.value templateId}{unitSeparator}{field}", Some(supplierRowId supplierId)
+        "RuleTimedOutCause",
+        Some $"{TemplateId.value templateId}{unitSeparatorBetweenDetailFields}{field}",
+        Some(supplierRowId supplierId)
 
 let private parts (detail: string option) : string list =
     match detail with
     | None -> []
-    | Some value -> value.Split(unitSeparator) |> Array.toList
+    | Some value -> value.Split(unitSeparatorBetweenDetailFields) |> Array.toList
 
-/// Persistence -> domain. Returns Result: a row from an older build, or edited by hand, can carry
-/// a Cause string or a Detail shape no current build declares.
+/// Returns Result: a row from an older build, or edited by hand, can carry a Cause string or a
+/// Detail shape no current build declares.
 let decodeCause (causeName: string) (detail: string option) (supplierRowId: int option) : Result<ScanProblemCause, string> =
     let supplierId () =
         match supplierRowId with

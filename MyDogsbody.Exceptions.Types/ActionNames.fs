@@ -13,8 +13,6 @@ module MyDogsbody.Exceptions.Types.ActionNames
 module MyDogsbody =
     let private myDogsbody = "MyDogsbody"
 
-    /// The composition root's own actions.
-    ///
     /// A domain error still has to reach the UI as a MyDogsbodyException, and that carries an
     /// action, so it names the API operation that failed rather than the workflow inside.
     module Startup =
@@ -80,9 +78,8 @@ module MyDogsbody =
             let getSyncPlan = $"{invoiceSyncApi}.getSyncPlan"
             let executeSyncPlan = $"{invoiceSyncApi}.executeSyncPlan"
 
-    /// The main SQLite database's own actions. A sibling of Integrations rather than a member of
-    /// it - MyDogsbody.Database is the application's main store, not an integration, so its
-    /// entries do not go under Integrations.
+    /// A sibling of Integrations rather than a member of it - MyDogsbody.Database is the
+    /// application's main store, not an integration, so its entries do not go under Integrations.
     module Database =
         let private database = $"{myDogsbody}.Database"
 

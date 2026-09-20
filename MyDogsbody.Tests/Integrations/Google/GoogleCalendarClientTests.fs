@@ -407,7 +407,7 @@ let private eventEntryWithoutSyncKey id summary description startDate endDate =
     $"""{{ "kind": "calendar#event", "id": "{id}", "summary": "{summary}", "description": "{description}", "start": {{ "date": "{startDate}" }}, "end": {{ "date": "{endDate}" }} }}"""
 
 let private eventEntryWithSyncKey id summary description startDate endDate (escapedSyncKeyValue: string) =
-    $"""{{ "kind": "calendar#event", "id": "{id}", "summary": "{summary}", "description": "{description}", "start": {{ "date": "{startDate}" }}, "end": {{ "date": "{endDate}" }}, "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PropertyName}": "{escapedSyncKeyValue}" }} }} }}"""
+    $"""{{ "kind": "calendar#event", "id": "{id}", "summary": "{summary}", "description": "{description}", "start": {{ "date": "{startDate}" }}, "end": {{ "date": "{endDate}" }}, "extendedProperties": {{ "private": {{ "{InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent}": "{escapedSyncKeyValue}" }} }} }}"""
 
 let private listEventsAs
     (credential: Google.Apis.Http.IConfigurableHttpClientInitializer)
@@ -582,7 +582,10 @@ let ``createEvent sends an all-day start date, not a timed dateTime, and stamps 
     Assert.False(remindersElement.GetProperty("useDefault").GetBoolean())
 
     let privateExtendedPropertiesElement = requestRoot.GetProperty("extendedProperties").GetProperty("private")
-    Assert.Equal(InvoiceSyncKey.value testSyncKey, privateExtendedPropertiesElement.GetProperty(InvoiceSyncKey.PropertyName).GetString())
+    let syncKeyPropertyOnTheRequest =
+        privateExtendedPropertiesElement.GetProperty(InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent).GetString()
+
+    Assert.Equal(InvoiceSyncKey.value testSyncKey, syncKeyPropertyOnTheRequest)
 
 [<Fact; Trait("Level", "Integration")>]
 let ``createEvent maps a 400 rejection to the event-rejected message`` () =
@@ -643,18 +646,7 @@ let ``updateEvent maps a 403 to the not-authorised message`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``updateEvent sends the request as a PATCH rather than a PUT, so fields it does not set are left alone rather than cleared`` () =
-    // Google Calendar's events.update is a full-resource PUT: any field the request body does not
-    // set is CLEARED server-side, not left untouched - contrast events.patch, which
-    // Google.Apis.Calendar.v3's own XML doc calls out as supporting "patch semantics", wording it
-    // uses for no other Events method. buildAllDayGoogleEvent only ever sets Summary, Description,
-    // Start and End (Q2.14's "title and date"), so issuing this as a PUT would silently wipe
-    // extendedProperties - the InvoiceSyncKey createEvent stamped on the event - and its reminders
-    // override, on the event's very first update. The next sync would then read the event back as
-    // keyless (an unresolvable orphan, per InvoiceSyncApiMappers.toOrphanedEvents) and read the
-    // invoice as unsynced (a fresh, duplicate CreateEvent) - exactly the duplicate requirements.md
-    // says the extended property exists to prevent ("the extended property was chosen so a rename
-    // would not cause a duplicate"). PATCH sends the same fields but merges rather than replaces,
-    // so extendedProperties and reminders survive untouched.
+    // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - GoogleCalendarClientTests.fs: capturedRequestMethod
     let mutable capturedRequestMethod = System.Net.Http.HttpMethod.Get
 
     let allDayEvent =

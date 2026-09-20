@@ -132,7 +132,7 @@ let private exec (sql: string) =
     cmd.CommandText <- sql
     cmd.ExecuteNonQuery() |> ignore
 
-/// The domain out of a raw From header, exactly as MatchSupplierWorkflow.senderDomain does it:
+/// The domain out of a raw From header, exactly as MatchSupplierWorkflow.senderDomainAfterTheLastAtSignNotTheFirst does it:
 /// strip a "Display Name <addr>" wrapper, take the part after the LAST @.
 let private senderDomain (raw: string) : string =
     let trimmed = (if isNull raw then "" else raw).Trim()

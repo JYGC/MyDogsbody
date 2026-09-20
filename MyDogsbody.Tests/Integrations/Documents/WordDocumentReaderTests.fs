@@ -11,15 +11,13 @@ let private source (fileName: string) (bytes: byte[]) : DocumentSource =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText returns each .docx paragraph as a line in its own block`` () =
-    // Arrange - a real .docx with three paragraphs
+    // a real .docx with three paragraphs
     let docx =
         DocumentFixtures.docxWithParagraphs
             [ "Invoice Number XERO-1001"; "Amount AUD 320.00"; "Due Date 14 February 2026" ]
 
-    // Act
     let actual = WordDocumentReader.readText (source "invoice.docx" docx)
 
-    // Assert - every field of the success output
     match actual with
     | Ok lines ->
         Assert.Equal<string list>(
@@ -31,14 +29,13 @@ let ``readText returns each .docx paragraph as a line in its own block`` () =
 
 [<Fact; Trait("Level", "Integration")>]
 let ``readText reports DocumentFormatUnsupported naming "doc" for a legacy binary Word file`` () =
-    // Arrange - Q1.12: .docx only. A .doc must be a listed problem naming the format, never a
+    // Q1.12: .docx only. A .doc must be a listed problem naming the format, never a
     // silent skip - silence looks identical to "this supplier sends nothing" (friction #8).
     let doc = File.ReadAllBytes DocumentFixtures.legacyDoc
 
-    // Act
     let actual = WordDocumentReader.readText (source "invoice.doc" doc)
 
-    // Assert - the exact cause, with the format named
+    // the exact cause, with the format named
     Assert.Equal(Error(DocumentFormatUnsupported "doc"), actual)
 
 [<Fact; Trait("Level", "Unit")>]

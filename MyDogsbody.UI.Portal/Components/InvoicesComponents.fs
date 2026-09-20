@@ -119,7 +119,6 @@ let private errorAlert (invoicesModule: InvoicesModule) =
         | None -> ()
     }
 
-/// The invoices table with the window picker and the count line above it.
 let invoicesTable (invoicesModule: InvoicesModule) (confirmAndDelete: InvoiceUiType -> unit) =
     fragment {
         errorAlert invoicesModule

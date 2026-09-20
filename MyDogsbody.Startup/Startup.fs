@@ -1,5 +1,3 @@
-/// The composition root.
-///
 /// This is the one file in the application that owns process-lifetime resources: the module
 /// level bindings below open Logging.db, MyDogsbody.db and Thunderbird.db - and run the main
 /// database's migrations - the moment anything in this module is touched. Nothing else belongs

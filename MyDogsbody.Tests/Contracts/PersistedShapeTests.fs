@@ -43,7 +43,6 @@ let private withLogStoreAndRawAccess
 [<Fact; Trait("Level", "Contract")>]
 let ``an exception log entry is persisted under the documented field names`` () =
     withLogStoreAndRawAccess (fun getCollection rawDatabase ->
-        // Arrange / Act
         {
             Message = "Failed to insert new credential."
             ActionName = ActionNames.MyDogsbody.Integrations.Google.GoogleCredentialStore.insertOne
@@ -53,7 +52,6 @@ let ``an exception log entry is persisted under the documented field names`` () 
         |> ExceptionUseCases.addException handleError getCollection
         |> okOrFail "addException"
 
-        // Assert
         let document = rawDatabase.GetCollection("Exceptions").FindAll() |> Seq.exactlyOne
 
         Assert.True(document.ContainsKey "_id", "expected an _id field")
@@ -68,7 +66,6 @@ let ``an exception log entry is persisted under the documented field names`` () 
 [<Fact; Trait("Level", "Contract")>]
 let ``a log entry carries no severity field, because the collection is the severity`` () =
     withLogStoreAndRawAccess (fun getCollection rawDatabase ->
-        // Arrange / Act
         {
             Message = "a failure"
             ActionName = "an.action"
@@ -78,7 +75,7 @@ let ``a log entry carries no severity field, because the collection is the sever
         |> ExceptionUseCases.addException handleError getCollection
         |> okOrFail "addException"
 
-        // Assert - a discriminator as well as a collection would be two sources of truth
+        // a discriminator as well as a collection would be two sources of truth
         let document = rawDatabase.GetCollection("Exceptions").FindAll() |> Seq.exactlyOne
         Assert.False(document.ContainsKey "Severity", "Severity must not be persisted")
         Assert.False(document.ContainsKey "Level", "Level must not be persisted")
@@ -88,7 +85,6 @@ let ``a log entry carries no severity field, because the collection is the sever
 [<Fact; Trait("Level", "Contract")>]
 let ``errors are written to the Exceptions collection and no other`` () =
     withLogStoreAndRawAccess (fun getCollection rawDatabase ->
-        // Arrange / Act
         {
             Message = "a failure"
             ActionName = "an.action"
@@ -98,7 +94,7 @@ let ``errors are written to the Exceptions collection and no other`` () =
         |> ExceptionUseCases.addException handleError getCollection
         |> okOrFail "addException"
 
-        // Assert - one collection per log type; errors live in Exceptions, which is the
+        // one collection per log type; errors live in Exceptions, which is the
         // established name and does not get renamed
         Assert.Equal<string list>([ "Exceptions" ], rawDatabase.GetCollectionNames() |> List.ofSeq)
     )

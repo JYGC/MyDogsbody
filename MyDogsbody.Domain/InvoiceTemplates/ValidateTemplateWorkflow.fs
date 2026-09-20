@@ -6,22 +6,7 @@ open System.Text.RegularExpressions
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 
-/// Compiles a user-typed pattern with a match timeout, preferring the NonBacktracking engine and
-/// falling back to the classic backtracking engine - still with the timeout - for constructs
-/// NonBacktracking does not support (lookaround, backreferences). The timeout is the actual
-/// availability guarantee; NonBacktracking is only the cheap way to make it unnecessary for most
-/// patterns.
-///
-/// NonBacktracking rejecting a construct throws NotSupportedException, not ArgumentException -
-/// verified empirically, since a plausible-looking version of this function that caught
-/// ArgumentException instead would let that exception escape uncaught. A malformed pattern throws
-/// RegexParseException (itself an ArgumentException) on either engine. A NULL pattern throws
-/// ArgumentNullException, which neither of those clauses names - and UnvalidatedTemplate is the
-/// untrusted type, so it is guarded ahead of them rather than left to escape as an exception
-/// thrown out of a domain workflow.
-///
-/// Whether the result used the fallback is readable off its own Options - HasFlag
-/// RegexOptions.NonBacktracking - so no separate flag needs to be threaded through this result.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ValidateTemplateWorkflow.fs: compilePattern
 let compilePattern (pattern: string) : Result<Regex, string> =
     if isNull pattern then
         Error "Pattern must not be empty."
@@ -57,35 +42,20 @@ let private MaximumOffset = 20
 
 let private requiredFields = [ Reference; Amount; Currency ]
 
-/// The fixed date every AsDate format is probed with - a constant, not DateTime.Now, because the
-/// domain centre reads no clock and because a validation result that depended on today's date
-/// would be untestable. Chosen so day (4), month (3), hour (13) and minute (45) are all distinct
-/// from each other and from the 1/1/0001 defaults a parser substitutes for a component the format
-/// never supplies.
-let private dateFormatProbe = DateTime(2026, 3, 4, 13, 45, 56)
+/// A constant, not DateTime.Now, because the domain centre reads no clock and because a
+/// validation result that depended on today's date would be untestable. Chosen so day (4), month
+/// (3), hour (13) and minute (45) are all distinct from each other and from the 1/1/0001 defaults
+/// a parser substitutes for a component the format never supplies.
+let private fixedDateEveryAsDateFormatIsProbedWith = DateTime(2026, 3, 4, 13, 45, 56)
 
-/// An AsDate format is validated with the operation it will actually be used for - parsing - not
-/// merely with formatting.
-///
-/// DateTime.ToString rejects only two things: a lone unknown standard specifier, and an
-/// unterminated quote. Every other unrecognised character is emitted as a literal, so a
-/// format-only check accepts "yyyy-MM-DD" (DD is literal text), "YYYY-MM-DD", "qq" and
-/// "dd/mm/yyyy" (mm is MINUTES) - each of which then silently matches nothing at scan time rather
-/// than reporting anything, the failure mode tasks.md calls the most dangerous one.
-///
-/// Round-tripping the probe and requiring the whole calendar date back rejects all of those: a
-/// format that cannot read back the day, month and year it just wrote cannot read a date off an
-/// invoice either. Requiring the full date (rather than merely that parsing succeeds) is what
-/// catches the literal-text cases - "yyyy-MM-DD" parses its own output happily, but comes back
-/// with the day defaulted.
-///
-/// InvariantCulture at both ends, deliberately - ParseHint's own comment states the rule. Under
-/// ambient culture the probe renders as 2569-03-04 in th-TH and 1447-09-15 in ar-SA, so whether a
-/// template could be saved would otherwise depend on the machine that saved it.
-let private validateDateFormat (field: TargetField) (format: string) : Result<unit, TemplateError> =
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ValidateTemplateWorkflow.fs: validateAsDateFormatByParsingBackTheDateItWritesNotMerelyByFormatting
+let private validateAsDateFormatByParsingBackTheDateItWritesNotMerelyByFormatting
+    (field: TargetField)
+    (format: string)
+    : Result<unit, TemplateError> =
     let rendered =
         try
-            Some (dateFormatProbe.ToString(format, CultureInfo.InvariantCulture))
+            Some (fixedDateEveryAsDateFormatIsProbedWith.ToString(format, CultureInfo.InvariantCulture))
         with :? FormatException ->
             None
 
@@ -93,7 +63,7 @@ let private validateDateFormat (field: TargetField) (format: string) : Result<un
     | None -> Error (DateFormatInvalid(field, $"'{format}' is not a usable date format."))
     | Some text ->
         match DateTime.TryParseExact(text, format, CultureInfo.InvariantCulture, DateTimeStyles.None) with
-        | true, parsed when parsed.Date = dateFormatProbe.Date -> Ok ()
+        | true, parsed when parsed.Date = fixedDateEveryAsDateFormatIsProbedWith.Date -> Ok ()
         | _ -> Error (DateFormatInvalid(field, $"'{format}' cannot read back the date it writes ('{text}')."))
 
 let private ensureRequiredFieldsHaveRules (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
@@ -114,18 +84,19 @@ let private ensureNoDuplicateField (rules: TemplateFieldRule list) : Result<unit
     | Some (field, _) -> Error (DuplicateRuleForField field)
     | None -> Ok ()
 
-/// Whether a field's own rule reads as a date - what a DateFromField source must be, or the
-/// derivation could never produce a date to add the payment term to.
-let private isDateHinted (rule: TemplateFieldRule) : bool =
+/// What a DateFromField source must be, or the derivation could never produce a date to add the
+/// payment term to.
+let private fieldsOwnRuleReadsAsADate (rule: TemplateFieldRule) : bool =
     match rule.Hint with
     | AsDate _ -> true
     | AsText | AsMoney _ -> false
 
-/// Cross-rule DateFromField checks - these need the whole rule set as context, unlike the
-/// per-rule checks in validateRule. Checked in the order design.md's sequence diagram states:
-/// source exists, is a date, and (generalised beyond design.md's DueDate-only wording) is not
-/// the rule's own field.
-let private ensureDateFromFieldSourcesValid (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
+/// Cross-rule checks - these need the whole rule set as context, unlike the per-rule checks in
+/// validateOneRuleOnItsOwnAndAddItsCompiledPatternToTheMap. Checked in the order design.md's
+/// sequence diagram states, generalised beyond design.md's DueDate-only wording.
+let private ensureEveryDateFromFieldSourceExistsIsADateAndIsNotTheRulesOwnField
+    (rules: TemplateFieldRule list)
+    : Result<unit, TemplateError> =
     let ruleByField = rules |> List.map (fun rule -> rule.Field, rule) |> Map.ofList
 
     let problem =
@@ -136,7 +107,8 @@ let private ensureDateFromFieldSourcesValid (rules: TemplateFieldRule list) : Re
             | DateFromField source ->
                 match Map.tryFind source ruleByField with
                 | None -> Some (DerivationSourceMissing source)
-                | Some sourceRule when not (isDateHinted sourceRule) -> Some (DerivationSourceNotADate source)
+                | Some sourceRule when not (fieldsOwnRuleReadsAsADate sourceRule) ->
+                    Some (DerivationSourceNotADate source)
                 | Some _ -> None
             | AfterLabel _ | LinesAfterLabel _ | RegexCapture _ | FixedValue _ | SubjectCapture _ | AttachmentName _ ->
                 None)
@@ -145,21 +117,10 @@ let private ensureDateFromFieldSourcesValid (rules: TemplateFieldRule list) : Re
     | Some error -> Error error
     | None -> Ok ()
 
-/// The only derivation the engine performs: a due date is an issue date plus the supplier's
-/// payment term. ApplyTemplateWorkflow evaluates fields in a fixed order and is deliberately not
-/// a general dependency solver, so every other pairing could only ever have yielded None on every
-/// message - a template the user authored, saved without complaint, and which then dropped the
-/// field forever with no error and no field named.
-///
-/// Two that used to save cleanly and extract nothing: DueDate from an AsDate-hinted Reference
-/// (the source is a date, so the checks above pass, but the engine only reads IssueDate), and
-/// IssueDate from DueDate (evaluated first, so the source does not exist yet). requirements.md
-/// asks for a template to be validated "at that moment, not when a scan next runs" - so the
-/// refusal belongs here, where the user is standing in front of the editor.
-///
-/// Runs AFTER ensureDateFromFieldSourcesValid so that a self-referencing or missing source keeps
-/// reporting the case that names it precisely, rather than being swallowed by this broader one.
-let private ensureDerivationsSupported (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ValidateTemplateWorkflow.fs: ensureEveryDerivationIsDueDateFromIssueDateTheOnlyOneTheEnginePerforms
+let private ensureEveryDerivationIsDueDateFromIssueDateTheOnlyOneTheEnginePerforms
+    (rules: TemplateFieldRule list)
+    : Result<unit, TemplateError> =
     let unsupported =
         rules
         |> List.tryPick (fun rule ->
@@ -173,18 +134,7 @@ let private ensureDerivationsSupported (rules: TemplateFieldRule list) : Result<
     | Some error -> Error error
     | None -> Ok ()
 
-/// A hint the engine cannot use for that field is a template that looks correct and can never
-/// work - the failure the whole validation boundary exists to prevent.
-///
-/// An IssueDate or DueDate rule that READS TEXT must be AsDate: extractDate otherwise defaulted
-/// its format to "" and every message failed the WHOLE extraction with
-/// DateUnparseable(field, raw, ""), an error quoting an empty format string. An Amount rule must
-/// be AsMoney: extractMoney otherwise defaulted its separator to '.' and parsed money anyway out
-/// of a rule the user had hinted as text. Both defaults are unreachable once this is in place,
-/// and both say so in their own doc comments.
-///
-/// A DateFromField rule is exempt. It never parses text, so its hint is not the engine's
-/// business, and requiring one would reject every measured template that derives a due date.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ValidateTemplateWorkflow.fs: ensureHintsMatchFields
 let private ensureHintsMatchFields (rules: TemplateFieldRule list) : Result<unit, TemplateError> =
     let readsText (rule: TemplateFieldRule) =
         match rule.Rule with
@@ -232,12 +182,6 @@ let private ensureRulesCanReachTheirPart (part: DocumentPart) (rules: TemplateFi
     | Some error -> Error error
     | None -> Ok ()
 
-/// Per-rule checks that need no context beyond the rule itself: the date format (any rule may
-/// carry an AsDate hint), the label (the two label-carrying kinds), the offset range
-/// (LinesAfterLabel only), and - for the three pattern-carrying kinds - that the pattern compiles
-/// and has a capture group. Builds the compiled-pattern map as it goes, so a template with no
-/// regex-based rules produces an empty one rather than a separate pass.
-///
 /// The label check is IsNullOrWhiteSpace rather than an emptiness test, and it is the most
 /// damaging of the save-time gaps this file closes. "".IndexOf returns 0 against any string, so
 /// AfterLabel "" matched the first line of every document and returned the whole of it, and
@@ -246,14 +190,14 @@ let private ensureRulesCanReachTheirPart (part: DocumentPart) (rules: TemplateFi
 /// same on the first line carrying a space. Null counts too: a label arrives from a stored row,
 /// and a NULL column is how one reaches the domain - where String.IndexOf(null, StringComparison)
 /// would raise out of a pure workflow.
-let private validateRule
+let private validateOneRuleOnItsOwnAndAddItsCompiledPatternToTheMap
     (compiledSoFar: Map<TargetField, Regex>)
     (rule: TemplateFieldRule)
     : Result<Map<TargetField, Regex>, TemplateError> =
     result {
         do!
             match rule.Hint with
-            | AsDate format -> validateDateFormat rule.Field format
+            | AsDate format -> validateAsDateFormatByParsingBackTheDateItWritesNotMerelyByFormatting rule.Field format
             | AsText | AsMoney _ -> Ok ()
 
         match rule.Rule with
@@ -296,15 +240,18 @@ let validateTemplate (input: UnvalidatedTemplate) : Result<ValidTemplate, Templa
         let! name = TemplateName.create input.Name |> Result.mapError TemplateNameInvalid
         do! ensureRequiredFieldsHaveRules input.Rules
         do! ensureNoDuplicateField input.Rules
-        do! ensureDateFromFieldSourcesValid input.Rules
-        do! ensureDerivationsSupported input.Rules
+        do! ensureEveryDateFromFieldSourceExistsIsADateAndIsNotTheRulesOwnField input.Rules
+        do! ensureEveryDerivationIsDueDateFromIssueDateTheOnlyOneTheEnginePerforms input.Rules
         do! ensureHintsMatchFields input.Rules
         do! ensureRulesCanReachTheirPart input.Part input.Rules
 
         let! compiledPatterns =
             input.Rules
             |> List.fold
-                (fun accumulated rule -> accumulated |> Result.bind (fun compiled -> validateRule compiled rule))
+                (fun accumulated rule ->
+                    accumulated
+                    |> Result.bind (fun compiled ->
+                        validateOneRuleOnItsOwnAndAddItsCompiledPatternToTheMap compiled rule))
                 (Ok Map.empty)
 
         return
@@ -318,21 +265,7 @@ let validateTemplate (input: UnvalidatedTemplate) : Result<ValidTemplate, Templa
             }
     }
 
-/// Reconstructs a ValidTemplate from components a stored row already carries. NOT a second door
-/// for untrusted input - the only caller is TemplateRecordMappers.toStoredTemplate, reading back
-/// a row this same function already approved once, when it was originally saved.
-///
-/// design.md does not address how the store builds a ValidTemplate at all: ValidTemplate's
-/// constructor is private to this project, and MyDogsbody.Database is a separate assembly - it
-/// cannot construct one directly even though it references MyDogsbody.Domain. Regex objects also
-/// cannot be persisted to a database column, so every pattern-carrying rule's pattern is
-/// recompiled here from its stored text, deterministically, rather than read back compiled.
-///
-/// This does not re-run the other checks validateTemplate performs (capture group, offset range,
-/// date format, DateFromField soundness) - those already passed once at save time, and re-running
-/// them on every read would mean a row saved under today's rules could become unreadable if a
-/// future change tightened them, turning "read this row" into "read this row if it still
-/// happens to validate".
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Domain.md - ValidateTemplateWorkflow.fs: reconstructValidTemplate
 let reconstructValidTemplate
     (supplierId: SupplierId)
     (name: TemplateName)

@@ -4,8 +4,6 @@ open LiteDB
 open MyDogsbody.Integrations.Google.Database.Types
 open MyDogsbody.Integrations.Google.Database.Models
 
-/// Opens the Google integration's LiteDB database and returns its context record.
-///
 /// This store uses a *local* BsonMapper rather than BsonMapper.Global, for two reasons:
 ///
 ///   1. `TrimWhitespace` and `EmptyStringToNull` are switched off, so a secret round-trips

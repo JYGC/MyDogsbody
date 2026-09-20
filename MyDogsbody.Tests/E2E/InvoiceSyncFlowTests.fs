@@ -118,20 +118,7 @@ let ``an unchanged state produces an empty plan and makes no calls`` () =
         rendered.WaitForAssertion(fun () -> Assert.Contains("Up to date - nothing to sync", rendered.Markup))
         Assert.Equal(1, calendar.Count))
 
-/// Q2.13/task 8.5: a delete never runs the instant "Sync now" is pressed - the page interposes a
-/// confirmation, naming what would be deleted, and only calls ExecuteSync if the user accepts it
-/// (InvocesPage.confirmAndExecuteSync). Driving MudMessageBox's own rendered Yes/Cancel buttons
-/// through bUnit needs the click to happen WHILE the dialog's awaited Task is still pending - on a
-/// second, unblocked interaction, not a synchronous `.Wait()` on the test thread, which deadlocks
-/// against the same thread that would have to render and click it. No confirmation dialog in this
-/// codebase is exercised that way today (not even the pre-existing per-row `confirmAndDelete`), so
-/// this test follows the same precedent: it proves the plan lists the delete BEFORE anything runs
-/// (Q2.13's actual requirement), that "Sync now" invokes the page's gate rather than executing
-/// directly (`onSyncRequested` here only records that it was called, and deliberately does NOT
-/// call `executeSync` itself), and that the underlying mechanism - once actually told to run -
-/// really does delete the event. `InvoicesPage.confirmAndExecuteSync`'s own gating logic (skip the
-/// dialog only when there is no delete in the run; otherwise show it and call `ExecuteSync` only
-/// on confirmation) was verified by direct code review rather than by a bUnit dialog click.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - InvoiceSyncFlowTests.fs: a delete is listed in the plan before anything runs, and the button defers to the page's own gate rather than 
 [<Fact; Trait("Level", "E2E")>]
 let ``a delete is listed in the plan before anything runs, and the button defers to the page's own gate rather than executing directly`` () =
     let calendar = FakeGoogleCalendar()

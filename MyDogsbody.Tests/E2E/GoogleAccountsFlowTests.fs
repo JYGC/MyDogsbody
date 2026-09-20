@@ -79,18 +79,7 @@ let private confirmFirst
 let private renderBrowser (harness: GoogleAccountsHarness) =
     renderBrowserWith (fun work -> work ()) removeWithoutConfirming harness
 
-/// Work handed off where it is started, the way production's `startWork` (`Async.Start`) hands it
-/// to the thread pool - then run by the test itself, on its own thread, when it calls
-/// `runHandedOffWork`. `pendingWork` says how much is waiting.
-///
-/// The two confirmation flows need this rather than `fun work -> work ()`. MudBlazor completes a
-/// message box's result on the renderer's dispatcher and the code awaiting it resumes right there,
-/// so work run where it is started would run the removal - the store, the reload, every re-render -
-/// on the dispatcher. bUnit runs each `WaitForAssertion` check on that same dispatcher, with a
-/// one-second timeout. Whenever the dispatcher was busy as "Remove" was clicked, the click was
-/// queued instead of running on the test's thread, `Click()` returned at once, and the check waited
-/// behind the whole removal: under the full suite's load it failed with "Check count: 0", the check
-/// never having run at all.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - GoogleAccountsFlowTests.fs: handOffWork
 let private handOffWork () =
     let handedOff = new System.Collections.Concurrent.BlockingCollection<unit -> unit>()
 

@@ -3,7 +3,7 @@ module MyDogsbody.Domain.Suppliers.EditSupplierWorkflow
 open MyDogsbody.Domain
 open MyDogsbody.Domain.Suppliers
 
-let private validateMatchers
+let private validateEveryMatchRuleStoppingAtTheFirstFailure
     (matchers: (MatcherKind * string) list)
     : Result<SupplierMatcher list, SupplierError> =
     let rec loop remaining accumulatedMatchers =
@@ -21,7 +21,7 @@ let private validate (input: UnvalidatedSupplierEdit) : Result<ValidSupplierEdit
         let! id = SupplierId.create input.Id |> Result.mapError SupplierIdInvalid
         let! name = SupplierName.create input.Name |> Result.mapError SupplierNameInvalid
         let! term = PaymentTermDays.create input.PaymentTermDays |> Result.mapError PaymentTermInvalid
-        let! matchers = validateMatchers input.Matchers
+        let! matchers = validateEveryMatchRuleStoppingAtTheFirstFailure input.Matchers
 
         return
             {
@@ -32,8 +32,7 @@ let private validate (input: UnvalidatedSupplierEdit) : Result<ValidSupplierEdit
             }
     }
 
-/// The row must already exist. Identified by its id and nothing else.
-let private ensureExists
+let private ensureAStoredSupplierAlreadyHasTheEditedId
     (stored: StoredSupplier list)
     (edit: ValidSupplierEdit)
     : Result<ValidSupplierEdit, SupplierError> =
@@ -42,9 +41,7 @@ let private ensureExists
     else
         Error (SupplierNotFound edit.Id)
 
-/// A clash against another supplier's name - the row's own current name is excluded, so leaving
-/// the name unchanged never reports itself as taken.
-let private ensureNameFree
+let private ensureNoOtherStoredSupplierHasTheSameNameIgnoringCase
     (stored: StoredSupplier list)
     (edit: ValidSupplierEdit)
     : Result<ValidSupplierEdit, SupplierError> =
@@ -62,7 +59,7 @@ let private ensureNameFree
     | Some existing -> Error (SupplierNameTaken (SupplierName.value existing.Name))
     | None -> Ok edit
 
-/// Edits an existing supplier, replacing its match rules rather than merging with them.
+/// Replaces the supplier's match rules rather than merging with them.
 ///
 /// Loads before it writes so that both "no such supplier" and "name already taken" are decisions
 /// made here, in a function a test can drive with two lambdas, rather than buried in a query.
@@ -74,8 +71,8 @@ let editSupplier
     result {
         let! validEdit = validate input
         let! storedSuppliers = loadSuppliers ()
-        let! confirmedExists = ensureExists storedSuppliers validEdit
-        let! confirmedFree = ensureNameFree storedSuppliers confirmedExists
+        let! confirmedExists = ensureAStoredSupplierAlreadyHasTheEditedId storedSuppliers validEdit
+        let! confirmedFree = ensureNoOtherStoredSupplierHasTheSameNameIgnoringCase storedSuppliers confirmedExists
         let! updated = updateSupplier confirmedFree
 
         return!

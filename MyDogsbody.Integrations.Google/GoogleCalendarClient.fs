@@ -99,15 +99,16 @@ let private toAvailableCalendar (entry: Data.CalendarListEntry) : AvailableCalen
     | Ok id, Ok name -> Some { Id = id; Name = name; IsPrimary = entry.Primary.GetValueOrDefault() }
     | _ -> None
 
-/// Follows `nextPageToken` until Google reports there is no more - task 4.1's paged-list test is
-/// what proves this rather than returning only the first page.
+/// Task 4.1's paged-list test is what proves every page is read rather than only the first.
 ///
 /// Asks for calendars the account can add events to (writer or owner access), on every page's
 /// request. Left unasked, Google's list also carries the ones it can only read - "Holidays in
 /// Australia", "Birthdays", anything subscribed to - and one chosen as the default invoice calendar
 /// would show the account Ready with a calendar no invoice event can ever be written to: the
 /// mid-sync discovery design decision 6 checks at choosing time to prevent.
-let private listAllPages (service: CalendarService) : Data.CalendarListEntry list =
+let private listEveryPageFollowingNextPageTokenUntilGoogleReportsThereIsNoMore
+    (service: CalendarService)
+    : Data.CalendarListEntry list =
     let rec loop (pageToken: string) (accumulatedEntries: Data.CalendarListEntry list) =
         let request = service.CalendarList.List()
         request.MinAccessRole <- CalendarListResource.ListRequest.MinAccessRoleEnum.Writer
@@ -145,7 +146,7 @@ let listCalendarsVia
 
             use service = new CalendarService(initializer)
 
-            return listAllPages service |> List.choose toAvailableCalendar
+            return listEveryPageFollowingNextPageTokenUntilGoogleReportsThereIsNoMore service |> List.choose toAvailableCalendar
         with
         | :? Google.GoogleApiException as caughtApiNotEnabledException when
             hasReason "accessNotConfigured" caughtApiNotEnabledException
@@ -178,19 +179,7 @@ let listCalendarsVia
                     "The stored Google credential is no longer authorised.",
                     caughtUnauthorizedException
                 )
-        // Not an answer from the Calendar API at all: the credential tried to refresh its access
-        // token and Google's token endpoint refused the refresh token - "invalid_grant", "Token has
-        // been expired or revoked." That is requirements.md's "a stored token has expired or been
-        // revoked", and while a refresh token is stored it arrives this way rather than as a 401 from
-        // the call itself (the credential answers a 401 by refreshing). It is also the common case: a
-        // Testing-mode OAuth client's refresh tokens last seven days. Without this clause it fell
-        // to the catch-all below and read as "Could not reach Google Calendar." - a revoked grant
-        // reported as a network problem. Google.Apis.Auth has already deleted the stored token by
-        // the time this runs, so re-authorising is the only remedy left, and the one reported.
-        //
-        // Only invalid_grant: the token endpoint's other refusals (invalid_client,
-        // unauthorized_client) implicate the client secret rather than this account's grant, and
-        // keep the catch-all with Google's code appended.
+        // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Integrations.Google.md - GoogleCalendarClient.fs: | :? TokenResponseException as caughtInvalidGrantException w
         | :? TokenResponseException as caughtInvalidGrantException when
             not (isNull caughtInvalidGrantException.Error) && caughtInvalidGrantException.Error.Error = "invalid_grant"
             ->
@@ -206,7 +195,6 @@ let listCalendarsVia
             return! MyDogsbodyException(action, $"{unreachablePrefix} {caughtException.Message}", caughtException)
     }
 
-/// The composition root's entry point - the default `HttpClientFactory`.
 let listCalendars
     (handleError: HandleErrorBuilder)
     (credential: IConfigurableHttpClientInitializer)
@@ -221,17 +209,18 @@ let listCalendars
 // credential is the composition root's job, not this adapter's.
 // ---------------------------------------------------------------------------------------------
 
-/// Reads back an event's own `mydogsbody.invoice` private extended property. `None` covers both
-/// "absent" (an event added by hand) and "present but unparseable" - both are orphans the diff
-/// must never delete, and never a reason to fail the whole read.
-let private toInvoiceSyncKey (googleEvent: Data.Event) : InvoiceSyncKey option =
+/// `None` covers both "absent" (an event added by hand) and "present but unparseable" - both are
+/// orphans the diff must never delete, and never a reason to fail the whole read.
+let private readBackTheInvoiceSyncKeyFromAnEventsOwnPrivateExtendedProperty
+    (googleEvent: Data.Event)
+    : InvoiceSyncKey option =
     match googleEvent.ExtendedProperties with
     | null -> None
     | extendedProperties ->
         match extendedProperties.Private__ with
         | null -> None
         | privateProperties ->
-            match privateProperties.TryGetValue InvoiceSyncKey.PropertyName with
+            match privateProperties.TryGetValue InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent with
             | true, storedPropertyValue ->
                 match InvoiceSyncKey.parse storedPropertyValue with
                 | Ok syncKey -> Some syncKey
@@ -265,16 +254,15 @@ let private toCalendarEvent (googleEvent: Data.Event) : CalendarEvent option =
                         Title = (if isNull googleEvent.Summary then "" else googleEvent.Summary)
                         Description = (if isNull googleEvent.Description then "" else googleEvent.Description)
                     }
-                SyncKey = toInvoiceSyncKey googleEvent
+                SyncKey = readBackTheInvoiceSyncKeyFromAnEventsOwnPrivateExtendedProperty googleEvent
             }
     | _ -> None
 
-/// Follows `nextPageToken` the same way `listAllPages` does for calendars - task 5.1's
-/// paged-list test is what proves every page is actually read rather than only the first.
-/// `SingleEvents` is set on every page's request so a recurring event's series master never
+/// Task 5.1's paged-list test is what proves every page is actually read rather than only the
+/// first. `SingleEvents` is set on every page's request so a recurring event's series master never
 /// stands in for its instances; `TimeMin`/`TimeMax` bound the read to the caller's
 /// `CalendarDateRange`.
-let private listAllEventPages
+let private listEveryEventPageFollowingNextPageTokenUntilGoogleReportsThereIsNoMore
     (service: CalendarService)
     (calendarId: string)
     (rangeStartInclusive: DateTimeOffset)
@@ -342,7 +330,11 @@ let listEventsVia
             let rangeEndExclusive = DateTimeOffset((CalendarDateRange.endDate dateRange).AddDays(1.0), TimeSpan.Zero)
 
             return
-                listAllEventPages service (CalendarId.value calendarId) rangeStartInclusive rangeEndExclusive
+                listEveryEventPageFollowingNextPageTokenUntilGoogleReportsThereIsNoMore
+                    service
+                    (CalendarId.value calendarId)
+                    rangeStartInclusive
+                    rangeEndExclusive
                 |> List.choose toCalendarEvent
         with
         | :? Google.GoogleApiException as caughtApiNotEnabledException when
@@ -390,7 +382,6 @@ let listEventsVia
             return! MyDogsbodyException(action, $"{unreachablePrefix} {caughtException.Message}", caughtException)
     }
 
-/// The composition root's entry point - the default `HttpClientFactory`.
 let listEvents
     (handleError: HandleErrorBuilder)
     (credential: IConfigurableHttpClientInitializer)
@@ -399,7 +390,6 @@ let listEvents
     : Result<CalendarEvent list, MyDogsbodyException> =
     listEventsVia None handleError credential calendarId dateRange
 
-/// The seam `createEvent` closes over.
 let createEventVia
     (httpClientFactory: IHttpClientFactory option)
     (handleError: HandleErrorBuilder)
@@ -426,7 +416,8 @@ let createEventVia
             googleEvent.Reminders <- Data.Event.RemindersData(UseDefault = Nullable false, Overrides = ResizeArray())
 
             let privateExtendedProperties = System.Collections.Generic.Dictionary<string, string>()
-            privateExtendedProperties.[InvoiceSyncKey.PropertyName] <- InvoiceSyncKey.value syncKey
+            privateExtendedProperties.[InvoiceSyncKey.PrivateExtendedPropertyNameOnAGoogleCalendarEvent] <-
+                InvoiceSyncKey.value syncKey
             googleEvent.ExtendedProperties <- Data.Event.ExtendedPropertiesData(Private__ = privateExtendedProperties)
 
             let insertedEvent = service.Events.Insert(googleEvent, CalendarId.value calendarId).Execute()
@@ -488,7 +479,6 @@ let createEventVia
             return! MyDogsbodyException(action, $"{unreachablePrefix} {caughtException.Message}", caughtException)
     }
 
-/// The composition root's entry point - the default `HttpClientFactory`.
 let createEvent
     (handleError: HandleErrorBuilder)
     (credential: IConfigurableHttpClientInitializer)
@@ -498,7 +488,6 @@ let createEvent
     : Result<CalendarEventId, MyDogsbodyException> =
     createEventVia None handleError credential calendarId syncKey allDayEvent
 
-/// The seam `updateEvent` closes over.
 let updateEventVia
     (httpClientFactory: IHttpClientFactory option)
     (handleError: HandleErrorBuilder)
@@ -520,17 +509,7 @@ let updateEventVia
 
             let googleEvent = buildAllDayGoogleEvent allDayEvent
 
-            // PATCH, not Update (PUT): events.update replaces the whole event resource, so any
-            // field the request body does not set - extendedProperties (the InvoiceSyncKey
-            // createEvent stamped on this event) and reminders among them - is CLEARED
-            // server-side, not left alone. buildAllDayGoogleEvent only ever sets Summary,
-            // Description, Start and End (Q2.14's "title and date"), so an Update here would
-            // silently wipe the sync key on the event's very first update: the next sync would
-            // read the event back as keyless (an orphan) and the invoice as unsynced (a fresh,
-            // duplicate CreateEvent) - precisely the duplicate requirements.md says the extended
-            // property exists to prevent ("the extended property was chosen so a rename would not
-            // cause a duplicate"). Patch sends the same fields but merges rather than replaces, so
-            // extendedProperties and reminders survive untouched (PR #23 review round 3).
+            // Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Integrations.Google.md - GoogleCalendarClient.fs: service.Events.Patch(googleEvent, CalendarId.value calendarI
             service.Events.Patch(googleEvent, CalendarId.value calendarId, CalendarEventId.value eventId).Execute()
             |> ignore
 
@@ -591,7 +570,6 @@ let updateEventVia
             return! MyDogsbodyException(action, $"{unreachablePrefix} {caughtException.Message}", caughtException)
     }
 
-/// The composition root's entry point - the default `HttpClientFactory`.
 let updateEvent
     (handleError: HandleErrorBuilder)
     (credential: IConfigurableHttpClientInitializer)
@@ -601,7 +579,6 @@ let updateEvent
     : Result<unit, MyDogsbodyException> =
     updateEventVia None handleError credential calendarId eventId allDayEvent
 
-/// The seam `deleteEvent` closes over.
 let deleteEventVia
     (httpClientFactory: IHttpClientFactory option)
     (handleError: HandleErrorBuilder)
@@ -668,7 +645,6 @@ let deleteEventVia
             return! MyDogsbodyException(action, $"{unreachablePrefix} {caughtException.Message}", caughtException)
     }
 
-/// The composition root's entry point - the default `HttpClientFactory`.
 let deleteEvent
     (handleError: HandleErrorBuilder)
     (credential: IConfigurableHttpClientInitializer)

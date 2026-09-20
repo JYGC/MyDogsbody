@@ -19,9 +19,7 @@ type InvoiceApi =
       GetInvoices: int -> Result<InvoiceUiType list, MyDogsbodyException>
       /// Delete one invoice by id and write its tombstone.
       DeleteInvoice: string -> Result<unit, MyDogsbodyException>
-      /// The persisted problems, for the problems view.
       GetProblems: unit -> Result<ScanProblemUiType list, MyDogsbodyException>
-      /// The tombstones, for the tombstones view.
       GetTombstones: unit -> Result<TombstoneUiType list, MyDogsbodyException>
       /// Remove a tombstone (supplier name is not enough - this takes the same natural key the
       /// tombstone row carries), so the next scan restores that invoice.

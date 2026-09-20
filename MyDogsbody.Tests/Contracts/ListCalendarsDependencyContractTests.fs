@@ -15,19 +15,7 @@ open MyDogsbody.Integrations.Google
 open MyDogsbody.Integrations.Google.Database
 open MyDogsbody.Startup
 
-/// `ListCalendars` is the one dependency function type in this change whose real implementation
-/// is a network service (friction #2). Per design.md's arrangement, "real" here means
-/// `ListCalendars` exactly as the composition root binds it - `GoogleAccountApiFactory.bindListCalendars`:
-/// the stored client secret, the account's stored token, `GoogleCalendarClient.listCalendarsVia` and
-/// `toListCalendarsError` - over a temp Google.db, with only the calendar client's HTTP stubbed. That
-/// exercises the adapter's own request-building, paging and response-parsing, and the translation
-/// the page's alerts are written from. Live verification against Google itself is recorded as manual
-/// coverage in outcome.md, not silently skipped.
-///
-/// Until PR review series 2 round 7 the "real" side here bound `listCalendarsVia` to a copy of that
-/// translation written in this file, which never read the store and had no `CalendarApiNotEnabled`
-/// or `ClientSecretInvalid` case. With the factory's translation of Google's answers swapped for the
-/// store's, every test in the suite still passed.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - ListCalendarsDependencyContractTests.fs: RespondingHandler
 
 type private RespondingHandler(respond: HttpRequestMessage -> HttpResponseMessage) =
     inherit HttpMessageHandler()

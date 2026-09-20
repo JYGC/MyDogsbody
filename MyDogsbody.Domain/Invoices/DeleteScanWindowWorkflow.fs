@@ -1,6 +1,6 @@
-/// Deletes a scan window (Q1.17). A seeded window is as deletable as any other; the LAST
-/// remaining window is not - CannotDeleteLastScanWindow is a domain rule, not a UI guard, so the
-/// picker can never be empty and no component needs an "if the list is empty" branch.
+/// Q1.17: a seeded window is as deletable as any other; the LAST remaining window is not -
+/// CannotDeleteLastScanWindow is a domain rule, not a UI guard, so the picker can never be empty
+/// and no component needs an "if the list is empty" branch.
 module MyDogsbody.Domain.Invoices.DeleteScanWindowWorkflow
 
 open MyDogsbody.Domain

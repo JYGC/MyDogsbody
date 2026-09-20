@@ -9,10 +9,9 @@ open MyDogsbody.Integrations.Google
 
 [<Fact; Trait("Level", "Unit")>]
 let ``GoogleCredentialSecret.create accepts a non-empty secret and preserves it exactly`` () =
-    // Arrange - real credentials are JSON blobs, so nothing may be trimmed or re-encoded
+    // real credentials are JSON blobs, so nothing may be trimmed or re-encoded
     let entered = """  { "refresh_token": "1//abcDEF", "scope": "a b" }  """
 
-    // Act
     match GoogleCredentialSecret.create entered with
     | Ok secret -> Assert.Equal(entered, GoogleCredentialSecret.value secret)
     | Error reason -> Assert.Fail($"Expected Ok, but got Error: {reason}")

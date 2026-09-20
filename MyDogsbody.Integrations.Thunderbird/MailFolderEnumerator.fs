@@ -101,9 +101,8 @@ let private enumerateMaildir (storeDirectory: string) : MailFolder list =
     else
         enumerateMaildirLevel storeDirectory "" None
 
-/// Enumerates one account's folders, dispatching on its store format. `storeDirectory` not
-/// existing (a configured-but-missing account) is not this function's concern to report - it
-/// simply has no folders.
+/// `storeDirectory` not existing (a configured-but-missing account) is not this function's concern
+/// to report - it simply has no folders.
 let enumerate (storeDirectory: string) (format: StoreFormat) : MailFolder list =
     match format with
     | Mbox -> enumerateMbox storeDirectory

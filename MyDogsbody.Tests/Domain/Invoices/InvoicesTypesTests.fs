@@ -82,7 +82,7 @@ let ``Money.create rejects an empty currency with a reason`` (currency: string) 
 
 [<Fact; Trait("Level", "Unit")>]
 let ``Money.create rejects an implausibly large amount, naming the value`` () =
-    let tooBig = Money.MaxAbsAmount + 1m
+    let tooBig = Money.MaximumAbsoluteAmountAsATypoGuardNotAPolicy + 1m
 
     match Money.create tooBig "AUD" with
     | Error reason -> Assert.Equal($"Amount {tooBig} is implausibly large.", reason)

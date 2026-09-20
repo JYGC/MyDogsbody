@@ -9,11 +9,10 @@ type GoogleAccountsBrowserModule =
         /// `StartEditingClientSecret` is called (requirements.md: never open for editing by
         /// default).
         ClientSecretAval: aval<string option>
-        /// Whether the client secret field is currently open for editing.
         IsEditingClientSecretAval: aval<bool>
         AccountsAval: aval<GoogleAccountUiType list>
-        /// Calendars fetched per account, keyed by account id - only populated once loaded, so
-        /// a picker with nothing loaded yet renders empty rather than stale.
+        /// Only populated once loaded, so a picker with nothing loaded yet renders empty rather than
+        /// stale.
         CalendarsByAccountIdAval: aval<Map<string, CalendarUiType list>>
         IsLoadingAval: aval<bool>
         /// The consent flow is running - shown, but never blocks the interface
@@ -24,7 +23,6 @@ type GoogleAccountsBrowserModule =
         /// Reveals the client secret field for editing, pre-filled with the currently stored
         /// value (requirements.md: "a correction does not require retyping the whole secret").
         StartEditingClientSecret: unit -> unit
-        /// Closes the editable field without saving, leaving the stored value untouched.
         CancelEditingClientSecret: unit -> unit
         SetClientSecret: string -> unit
         RegisterAccount: unit -> unit

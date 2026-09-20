@@ -4,21 +4,7 @@ open System
 open Xunit
 open MyDogsbody.Domain.Invoices
 
-// friction #15 - the clock's contract suite, stated rather than skipped.
-//
-// GetCurrentTime is a dependency function type, and CLAUDE.md calls those published interfaces
-// owing a suite run against the real implementation AND every fake. The real implementation is
-// `fun () -> DateTime.Now` (bound in Startup.fs), whose whole nature is to return something
-// different each call - so "assert the real side and the fake side agree" has no meaning.
-//
-// What this suite asserts instead, for the real clock and every fake alike:
-//   1. two successive calls are non-decreasing;
-//   2. the Kind is what the composition root promises (Local, because it binds DateTime.Now).
-// For the real clock only, (3) the value is within a tolerance of DateTime.Now at test time.
-//
-// The part with ACTUAL LOGIC - the cutoff arithmetic (start-of-day, N days back, the same value
-// at 09:00 and 17:00) - is unit-tested against fixed instants in ScanForInvoicesWorkflowTests
-// (task 3.1), which is where the behaviour worth testing lives.
+// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - GetCurrentTimeContractTests.fs: assertClockProperties
 
 /// The shared properties every GetCurrentTime must hold.
 let private assertClockProperties (clock: GetCurrentTime) (expectedKind: DateTimeKind) =

@@ -42,7 +42,6 @@ let private okOrFail label result =
 [<Fact; Trait("Level", "Integration")>]
 let ``addException then getAllExceptions returns the entry with every field`` () =
     withLogStore (fun getCollection ->
-        // Act
         ExceptionUseCases.addException handleError getCollection anEntry
         |> okOrFail "addException"
 
@@ -50,7 +49,6 @@ let ``addException then getAllExceptions returns the entry with every field`` ()
             ExceptionUseCases.getAllExceptions handleError getCollection ()
             |> okOrFail "getAllExceptions"
 
-        // Assert
         let readBack = Assert.Single stored
         Assert.Equal(anEntry.Message, readBack.Message)
         Assert.Equal(anEntry.ActionName, readBack.ActionName)
@@ -61,45 +59,38 @@ let ``addException then getAllExceptions returns the entry with every field`` ()
 [<Fact; Trait("Level", "Integration")>]
 let ``getAllExceptions returns an empty list for a fresh log database`` () =
     withLogStore (fun getCollection ->
-        // Act
         let stored =
             ExceptionUseCases.getAllExceptions handleError getCollection ()
             |> okOrFail "getAllExceptions"
 
-        // Assert
         Assert.Empty stored
     )
 
 [<Fact; Trait("Level", "Integration")>]
 let ``every logged exception is kept, including repeats of the same action`` () =
     withLogStore (fun getCollection ->
-        // Arrange - the log is a record of what happened, so nothing is deduplicated
+        // the log is a record of what happened, so nothing is deduplicated
         for index in 1 .. 3 do
             ExceptionUseCases.addException handleError getCollection { anEntry with Message = $"failure {index}" }
             |> okOrFail "addException"
 
-        // Act
         let stored =
             ExceptionUseCases.getAllExceptions handleError getCollection ()
             |> okOrFail "getAllExceptions"
 
-        // Assert
         Assert.Equal(3, List.length stored)
     )
 
 [<Fact; Trait("Level", "Integration")>]
 let ``insertOne reports its declared action when the collection cannot be reached`` () =
-    // Arrange
     let logged = ResizeArray<MyDogsbodyException>()
     let recordingHandleError = HandleErrorBuilder logged.Add
 
     let failingGetter () : MyDogsbody.Logging.Database.Types.ExceptionCollection =
         raise (InvalidOperationException "log database is gone")
 
-    // Act
     let actual = ExceptionRepository.insertOne recordingHandleError failingGetter anEntry
 
-    // Assert
     match actual with
     | Error caughtException ->
         Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne, caughtException.ActionName)
@@ -109,17 +100,14 @@ let ``insertOne reports its declared action when the collection cannot be reache
 
 [<Fact; Trait("Level", "Integration")>]
 let ``getAll reports its declared action when the collection cannot be reached`` () =
-    // Arrange
     let logged = ResizeArray<MyDogsbodyException>()
     let recordingHandleError = HandleErrorBuilder logged.Add
 
     let failingGetter () : MyDogsbody.Logging.Database.Types.ExceptionCollection =
         raise (InvalidOperationException "log database is gone")
 
-    // Act
     let actual = ExceptionRepository.getAll recordingHandleError failingGetter ()
 
-    // Assert
     match actual with
     | Error caughtException ->
         Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.getAll, caughtException.ActionName)
@@ -129,30 +117,26 @@ let ``getAll reports its declared action when the collection cannot be reached``
 
 [<Fact; Trait("Level", "Integration")>]
 let ``addException reports its declared action when the store fails`` () =
-    // Arrange
     let recordingHandleError = HandleErrorBuilder ignore
 
     let failingGetter () : MyDogsbody.Logging.Database.Types.ExceptionCollection =
         raise (InvalidOperationException "log database is gone")
 
-    // Act
     let actual = ExceptionUseCases.addException recordingHandleError failingGetter anEntry
 
-    // Assert - the use case surfaces the repository's failure rather than swallowing it
+    // the use case surfaces the repository's failure rather than swallowing it
     match actual with
     | Error caughtException -> Assert.Equal(ActionNames.MyDogsbody.Logging.ExceptionRepository.insertOne, caughtException.ActionName)
     | Ok () -> Assert.Fail("Expected Error, but got Ok")
 
 [<Fact; Trait("Level", "Integration")>]
 let ``Dispose releases the log file so it can be deleted`` () =
-    // Arrange
     let databasePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.db")
     let context = LoggingDatabaseContextModule.getDatabaseContext databasePath "direct"
     ExceptionUseCases.addException handleError context.GetExceptionCollection anEntry |> ignore
 
-    // Act
     context.Dispose()
 
-    // Assert - no try/with: the delete must actually succeed
+    // no try/with: the delete must actually succeed
     File.Delete databasePath
     Assert.False(File.Exists databasePath)

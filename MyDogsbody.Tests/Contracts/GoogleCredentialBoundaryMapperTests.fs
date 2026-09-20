@@ -29,28 +29,24 @@ let private aValidCredential secret username : ValidGoogleCredential =
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toNewEntity carries every field of a valid credential onto the entity`` () =
-    // Act
     let actual =
         GoogleCredentialEntityMappers.toNewEntity (aValidCredential "google-secret" "person@gmail.com")
 
-    // Assert
     Assert.Equal("google-secret", actual.Credentials)
     Assert.Equal("person@gmail.com", actual.ExternalUsername)
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toNewEntity leaves the identifier unset, for the store to assign`` () =
-    // Act
     let actual =
         GoogleCredentialEntityMappers.toNewEntity (aValidCredential "secret" "person@gmail.com")
 
-    // Assert - LiteDB stamps the id on insert; the mapper must not guess one
+    // LiteDB stamps the id on insert; the mapper must not guess one
     Assert.Equal(ObjectId.Empty, actual.Id)
 
 // ---------- entity -> integration type ----------
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toStoredCredential carries every field of an entity back to the stored type`` () =
-    // Arrange
     let entity =
         GoogleCredential(
             Id = ObjectId "507f1f77bcf86cd799439011",
@@ -58,10 +54,8 @@ let ``toStoredCredential carries every field of an entity back to the stored typ
             ExternalUsername = "person@gmail.com"
         )
 
-    // Act
     match GoogleCredentialEntityMappers.toStoredCredential entity with
     | Ok stored ->
-        // Assert
         Assert.Equal("507f1f77bcf86cd799439011", GoogleCredentialId.value stored.Id)
         Assert.Equal("ya29.a0Af", GoogleCredentialSecret.value stored.Secret)
         Assert.Equal("person@gmail.com", GoogleExternalUsername.value stored.Username)
@@ -75,7 +69,7 @@ let ``toStoredCredential rejects a row that cannot satisfy the integration's rul
     (username: string)
     (expectedReason: string)
     =
-    // Arrange - LiteDB is schemaless, so a document written by an older build can carry a null
+    // LiteDB is schemaless, so a document written by an older build can carry a null
     // where a constrained type is required
     let entity =
         GoogleCredential(
@@ -84,7 +78,6 @@ let ``toStoredCredential rejects a row that cannot satisfy the integration's rul
             ExternalUsername = username
         )
 
-    // Act / Assert
     match GoogleCredentialEntityMappers.toStoredCredential entity with
     | Error reason -> Assert.Equal(expectedReason, reason)
     | Ok _ -> Assert.Fail("Expected Error, but got Ok")
@@ -93,7 +86,6 @@ let ``toStoredCredential rejects a row that cannot satisfy the integration's rul
 
 [<Fact; Trait("Level", "Contract")>]
 let ``applyEdit overwrites the secret and username but leaves the identifier untouched`` () =
-    // Arrange
     let entity =
         GoogleCredential(
             Id = ObjectId "507f1f77bcf86cd799439011",
@@ -108,10 +100,9 @@ let ``applyEdit overwrites the secret and username but leaves the identifier unt
             Username = GoogleExternalUsername.create "new@gmail.com" |> valueOrFail
         }
 
-    // Act
     let actual = GoogleCredentialEntityMappers.applyEdit edit entity
 
-    // Assert - the row is addressed by its id, so the id must survive the edit
+    // the row is addressed by its id, so the id must survive the edit
     Assert.Equal("new-secret", actual.Credentials)
     Assert.Equal("new@gmail.com", actual.ExternalUsername)
     Assert.Equal("507f1f77bcf86cd799439011", string actual.Id)
@@ -120,15 +111,14 @@ let ``applyEdit overwrites the secret and username but leaves the identifier unt
 
 [<Fact; Trait("Level", "Contract")>]
 let ``the bottom mapper round trips a credential unchanged, awkward bytes included`` () =
-    // Arrange - a secret is a JSON blob or an OAuth token; nothing may be trimmed or re-encoded
+    // a secret is a JSON blob or an OAuth token; nothing may be trimmed or re-encoded
     let awkward = "  line one\nline two\ttabbed éàü \"quoted\" {json:true}  "
     let entity = GoogleCredentialEntityMappers.toNewEntity (aValidCredential awkward "person@gmail.com")
     entity.Id <- ObjectId "507f1f77bcf86cd799439011"
 
-    // Act
     match GoogleCredentialEntityMappers.toStoredCredential entity with
     | Ok stored ->
-        // Assert - the constrained types survive the entity's plain string properties
+        // the constrained types survive the entity's plain string properties
         Assert.Equal(awkward, GoogleCredentialSecret.value stored.Secret)
         Assert.Equal("person@gmail.com", GoogleExternalUsername.value stored.Username)
         Assert.Equal("507f1f77bcf86cd799439011", GoogleCredentialId.value stored.Id)
@@ -153,10 +143,8 @@ let ``the secret and username are renamed at the bottom boundary and nowhere els
 
 [<Fact; Trait("Level", "Contract")>]
 let ``toObjectId turns a well-formed identifier into the store's key type unchanged`` () =
-    // Act
     let actual =
         GoogleCredentialEntityMappers.toObjectId (GoogleCredentialId.create "507f1f77bcf86cd799439011" |> valueOrFail)
 
-    // Assert
     Assert.Equal(ObjectId "507f1f77bcf86cd799439011", actual)
     Assert.Equal("507f1f77bcf86cd799439011", string actual)

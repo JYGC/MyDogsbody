@@ -67,7 +67,7 @@ let private realReadDocumentContent: ReadDocumentContent =
 let private fakeReadDocumentContent: ReadDocumentContent =
     fun path ->
         if File.Exists(DocumentPath.value path) then
-            Ok { Words = [ { Text = "Alpha"; Bottom = 700.0; Left = 50.0 } ] }
+            Ok { Words = [ { Text = "Alpha"; BottomEdgeHeightAboveThePageBottom = 700.0; LeftEdgeDistanceFromThePageLeft = 50.0 } ] }
         else
             Error(DocumentUnreadable "not found")
 
@@ -103,7 +103,13 @@ let ``ReadDocumentContent: a readable PDF yields words with real coordinates`` (
         match readDocumentContent implementation (pathOf file) with
         | Ok content ->
             Assert.NotEmpty content.Words
-            Assert.All(content.Words, fun word -> Assert.True(word.Left >= 0.0 && word.Bottom >= 0.0))
+            Assert.All(
+                content.Words,
+                fun word ->
+                    Assert.True(
+                        word.LeftEdgeDistanceFromThePageLeft >= 0.0 && word.BottomEdgeHeightAboveThePageBottom >= 0.0
+                    )
+            )
         | Error error -> Assert.Fail($"expected Ok, got {error}")
     finally
         try File.Delete file with _ -> ()

@@ -4,8 +4,6 @@ open FSharp.Data.Adaptive
 open MyDogsbody.UI.Types
 open MyDogsbody.UI.Types.Module
 
-/// Builds the suppliers browser state.
-///
 /// `startWork` is how the module gets off the render thread. Production passes an Async.Start
 /// equivalent; a test passes `fun work -> work ()` and never has to wait.
 let getSuppliersBrowserModule

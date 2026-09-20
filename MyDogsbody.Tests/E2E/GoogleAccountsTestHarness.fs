@@ -13,25 +13,7 @@ open MyDogsbody.Integrations.Google.Database
 open MyDogsbody.Startup
 open MyDogsbody.UI.Types
 
-/// A bUnit TestContext subclass wired for MudBlazor (AddMudServices, JSRuntimeMode.Loose), over
-/// the Google integration's own LiteDB database.
-///
-/// The API record is composed here rather than by `GoogleAccountApiFactory.createGoogleAccountApi`,
-/// because the real consent flow needs a system browser and the real calendar client needs a
-/// network connection - neither of which any test may require (tasks.md's own header rule). What
-/// goes into it is what production runs:
-///
-/// - `RegisterAccount`, `GetCalendarsFor` and `SetDefaultInvoiceCalendar` are the factory's own
-///   compositions (`GoogleAccountApiFactory.registerAccountWith`, `getCalendarsForWith` and
-///   `setDefaultInvoiceCalendarWith`), handed the two fakes in place of the real consent flow and
-///   calendar client. They used to be re-composed here, and a factory whose `RegisterAccount` never
-///   discarded a refused registration's token passed every flow.
-/// - The storage-only members are composed here over the factory's own bindings
-///   (`GoogleAccountApiFactory.bind*`, since PR review series 2 round 8), with the real domain
-///   workflows and error translation, over the real LiteDB context.
-///
-/// Only the two network-touching dependencies are test-controlled fakes, matching the same seam
-/// `GoogleAuthorizationTests`/`GoogleAccountApiFactoryTests` already exercise.
+/// Rationale: docs/changes/comments-to-names/rationale/MyDogsbody.Tests.md - GoogleAccountsTestHarness.fs: GoogleAccountsHarness
 type GoogleAccountsHarness
     (
         authoriseAccount: AuthoriseAccount,
